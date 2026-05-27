@@ -237,6 +237,28 @@ rejected as manipulation candidates. If the output clearly names only living
 beings and no safe target, the normalized error should prefer `E_UNSAFE`.
 Empty or truly unclear scenes may remain `E_NO_TARGET`.
 
+## TETO V1.2.0 2D grounding preparation
+
+`robot_task_json` can now carry rough 2D target grounding fields for future
+2D-to-3D work:
+
+- `target.bbox_xyxy`: approximate `[x_min, y_min, x_max, y_max]` target box in
+  input-image pixels, or `null`.
+- `geometry_2d.pixel_center`: approximate `[cx, cy]` candidate pixel, or `null`.
+  If a valid bbox is present and the center is missing, TETO may infer it from
+  the bbox.
+- `geometry_2d.image_width` and `geometry_2d.image_height`: image dimensions
+  filled by the program from the input image when possible.
+- `geometry_2d.confidence`: rough 2D localization confidence from `0.0` to
+  `1.0`, or `null`.
+
+These fields are visual grounding hints only. They are not 3D coordinates, not
+camera/world coordinates, not MoveIt goals, not UR5 commands, and not robot
+control instructions. A bbox or pixel center must not be used directly for real
+robot execution. Later versions may feed `pixel_center` into a separate
+2D-to-3D projector, but V1.2.0 does not read depth images, compute TF, generate
+trajectories, or command hardware.
+
 In the `python3 teto_V1.py` launcher, single image recognition and batch image
 recognition also show prompt helper keywords. You can type a built-in prompt
 type, a shortcut keyword, or a free-form prompt. Useful shortcuts include:

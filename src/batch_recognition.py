@@ -17,7 +17,7 @@ from src.vlm_infer import VLMInferencer
 SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 DEFAULT_OUTPUT_ROOT = BATCH_RECOGNITION_ROOT
 ROBOT_TASK_PROMPT_TYPE = "robot_task_json"
-CURRENT_TETO_VERSION = "TETO V1.1.4"
+CURRENT_TETO_VERSION = "TETO V1.2.0"
 
 
 def _normalize_path(path) -> Path:

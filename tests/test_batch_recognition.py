@@ -173,11 +173,13 @@ def test_batch_recognition_saves_robot_task_json_fields(tmp_path, monkeypatch):
 
     assert result_rows[0]["raw_response"] == result_rows[0]["response"]
     assert result_rows[0]["parse_status"] == "success"
-    assert result_rows[0]["validation_status"] == "passed"
+    assert result_rows[0]["validation_status"] == "warning"
     assert result_rows[0]["validation_errors"] == []
-    assert result_rows[0]["validation_warnings"] == []
+    assert result_rows[0]["validation_warnings"] == ["2D grounding is missing"]
     assert result_rows[0]["parsed_json"]["target"]["label"] == "red cup"
     assert result_rows[0]["normalized_json"]["target"]["label"] == "red cup"
+    assert result_rows[0]["normalized_json"]["geometry_2d"]["image_width"] == 8
+    assert result_rows[0]["normalized_json"]["geometry_2d"]["image_height"] == 8
     assert (output_root / result["run_name"] / "input_manifest.json").exists()
 
 

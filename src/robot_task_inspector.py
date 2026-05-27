@@ -108,6 +108,8 @@ def format_summary(inspection: Dict[str, Any]) -> str:
             f"  validation_failed:  {summary['validation_failed']}",
             f"  unsafe_count:       {summary['unsafe_count']}",
             f"  rejected_count:     {summary['rejected_count']}",
+            f"  grounding_count:    {summary['grounding_count']}",
+            f"  grounding_missing_count: {summary['grounding_missing_count']}",
         ]
     )
     return "\n".join(lines)
@@ -132,6 +134,10 @@ def format_items(items: Iterable[Dict[str, Any]], limit: int | None = None) -> s
                 f"candidate: {_format_value(item['candidate'])}",
                 f"difficulty: {item['difficulty']}",
                 f"error.code: {item['error_code']}",
+                f"bbox_xyxy: {_format_value(item['bbox_xyxy'])}",
+                f"pixel_center: {_format_value(item['pixel_center'])}",
+                f"image_size: {item['image_size']}",
+                f"geometry_2d.confidence: {_format_value(item['geometry_2d_confidence'])}",
             ]
         )
         warnings = item.get("validation_warnings", [])
@@ -181,6 +187,29 @@ def _inspect_item(index: int, item: Dict[str, Any]) -> Dict[str, Any]:
         ("parsed_json", "error", "code"),
         default=UNKNOWN,
     )
+    bbox_xyxy = _first_value(
+        item,
+        ("normalized_json", "target", "bbox_xyxy"),
+        ("parsed_json", "target", "bbox_xyxy"),
+        ("parsed_json", "target", "bbox"),
+        ("parsed_json", "geometry_2d", "bbox_xyxy"),
+        default=None,
+    )
+    pixel_center = _first_value(
+        item,
+        ("normalized_json", "geometry_2d", "pixel_center"),
+        ("parsed_json", "geometry_2d", "pixel_center"),
+        ("parsed_json", "target", "pixel_center"),
+        default=None,
+    )
+    image_width = _first_value(item, ("normalized_json", "geometry_2d", "image_width"), default=None)
+    image_height = _first_value(item, ("normalized_json", "geometry_2d", "image_height"), default=None)
+    geometry_confidence = _first_value(
+        item,
+        ("normalized_json", "geometry_2d", "confidence"),
+        ("parsed_json", "geometry_2d", "confidence"),
+        default=None,
+    )
     warnings = item.get("validation_warnings", [])
     if not isinstance(warnings, list):
         warnings = [str(warnings)]
@@ -197,11 +226,16 @@ def _inspect_item(index: int, item: Dict[str, Any]) -> Dict[str, Any]:
         "candidate": candidate,
         "difficulty": _format_value(difficulty),
         "error_code": _format_value(error_code),
+        "bbox_xyxy": bbox_xyxy,
+        "pixel_center": pixel_center,
+        "image_size": _format_image_size(image_width, image_height),
+        "geometry_2d_confidence": geometry_confidence,
         "validation_warnings": warnings,
         "validation_errors": errors,
         "line_error": item.get("line_error", ""),
         "unsafe": error_code == "E_UNSAFE" or difficulty == "unsafe",
         "rejected": candidate is False,
+        "grounded": bbox_xyxy is not None or pixel_center is not None,
     }
 
 
@@ -227,6 +261,10 @@ def _build_summary(items: List[Dict[str, Any]]) -> Dict[str, int]:
             summary["unsafe_count"] += 1
         if item.get("rejected"):
             summary["rejected_count"] += 1
+        if item.get("grounded"):
+            summary["grounding_count"] += 1
+        else:
+            summary["grounding_missing_count"] += 1
     return summary
 
 
@@ -240,6 +278,8 @@ def _empty_summary() -> Dict[str, int]:
         "validation_failed": 0,
         "unsafe_count": 0,
         "rejected_count": 0,
+        "grounding_count": 0,
+        "grounding_missing_count": 0,
     }
 
 
@@ -278,5 +318,11 @@ def _format_value(value: Any) -> str:
     if value is False:
         return "false"
     if value is None:
-        return UNKNOWN
+        return "null"
     return str(value)
+
+
+def _format_image_size(width: Any, height: Any) -> str:
+    if width is None or height is None:
+        return "unknown"
+    return f"{width}x{height}"

@@ -1,6 +1,9 @@
 import json
 from copy import deepcopy
+from pathlib import Path
 from typing import Any, Dict, List, Tuple
+
+from PIL import Image
 
 
 ROBOT_TASK_PROMPT_TYPE = "robot_task_json"
@@ -79,8 +82,16 @@ DEFAULT_ROBOT_TASK_JSON = {
     "user_instruction": "unknown",
     "target": {
         "label": "unknown",
+        "candidate": False,
+        "bbox_xyxy": None,
         "approx_position": "unknown",
         "visibility": "unknown",
+    },
+    "geometry_2d": {
+        "pixel_center": None,
+        "image_width": None,
+        "image_height": None,
+        "confidence": None,
     },
     "spatial_context": {
         "surface": "unknown",
@@ -238,7 +249,7 @@ def validate_robot_task_safety(data: Dict[str, Any]) -> Tuple[List[str], List[st
     return errors, warnings
 
 
-def normalize_robot_task_json(data: Dict[str, Any]) -> Dict[str, Any]:
+def normalize_robot_task_json(data: Dict[str, Any], image_size: Tuple[int, int] | None = None) -> Dict[str, Any]:
     if not isinstance(data, dict):
         return {
             "parsed_json": deepcopy(DEFAULT_ROBOT_TASK_JSON),
@@ -291,6 +302,7 @@ def normalize_robot_task_json(data: Dict[str, Any]) -> Dict[str, Any]:
     normalized["manipulation_assessment"]["reason"] = _string_value(
         assessment.get("reason"), "unknown"
     )
+    normalized["target"]["candidate"] = normalized["manipulation_assessment"]["candidate"]
 
     confidence = data.get("confidence", {}) if isinstance(data.get("confidence"), dict) else {}
     normalized["confidence"]["semantic"] = _controlled_value(
@@ -307,7 +319,9 @@ def normalize_robot_task_json(data: Dict[str, Any]) -> Dict[str, Any]:
     normalized["error"]["code"] = _controlled_value(error.get("code"), ERROR_CODES, "OK")
     normalized["error"]["message"] = _string_value(error.get("message"), "")
 
+    _normalize_geometry_2d(data, normalized, validation_errors, validation_warnings, image_size)
     _apply_safety_overrides(normalized, data)
+    normalized["target"]["candidate"] = normalized["manipulation_assessment"]["candidate"]
 
     return {
         "normalized_json": normalized,
@@ -318,10 +332,13 @@ def normalize_robot_task_json(data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def parse_robot_task_response(raw_response: str) -> Dict[str, Any]:
+def parse_robot_task_response(raw_response: str, image_size: Tuple[int, int] | None = None) -> Dict[str, Any]:
     extracted = extract_json_from_response(raw_response)
     if extracted["parse_status"] == "failed":
         normalized = deepcopy(DEFAULT_ROBOT_TASK_JSON)
+        if image_size:
+            normalized["geometry_2d"]["image_width"] = image_size[0]
+            normalized["geometry_2d"]["image_height"] = image_size[1]
         normalized["error"]["code"] = "E_PARSE"
         normalized["error"]["message"] = "; ".join(extracted["validation_errors"])
         return {
@@ -334,7 +351,7 @@ def parse_robot_task_response(raw_response: str) -> Dict[str, Any]:
             "validation_warnings": [],
         }
 
-    normalized = normalize_robot_task_json(extracted["data"])
+    normalized = normalize_robot_task_json(extracted["data"], image_size=image_size)
     return {
         "raw_response": raw_response,
         "parsed_json": deepcopy(extracted["data"]),
@@ -346,8 +363,18 @@ def attach_robot_task_json_fields(prompt_type: str, item: Dict[str, Any]) -> Dic
     if prompt_type != ROBOT_TASK_PROMPT_TYPE:
         return item
 
-    parsed = parse_robot_task_response(str(item.get("response", "")))
+    image_size, image_size_warning = _read_image_size(item.get("image_path"))
+    parsed = parse_robot_task_response(str(item.get("response", "")), image_size=image_size)
     item.update(parsed)
+    if image_size_warning:
+        item.setdefault("validation_warnings", []).append(image_size_warning)
+        normalized = item.get("normalized_json")
+        if isinstance(normalized, dict):
+            geometry = normalized.setdefault("geometry_2d", {})
+            geometry.setdefault("image_width", None)
+            geometry.setdefault("image_height", None)
+        if item.get("validation_status") == "passed":
+            item["validation_status"] = "warning"
     return item
 
 
@@ -399,6 +426,174 @@ def _normalize_relations(value: Any) -> List[Dict[str, str]]:
             }
         )
     return relations
+
+
+def _normalize_geometry_2d(
+    source: Dict[str, Any],
+    normalized: Dict[str, Any],
+    validation_errors: List[str],
+    validation_warnings: List[str],
+    image_size: Tuple[int, int] | None,
+) -> None:
+    bbox = _first_nested_value(
+        source,
+        ("target", "bbox_xyxy"),
+        ("target", "bbox"),
+        ("geometry_2d", "bbox_xyxy"),
+        ("objects", 0, "bbox_xyxy"),
+        ("objects", 0, "bbox"),
+        ("candidates", 0, "bbox_xyxy"),
+        ("candidates", 0, "bbox"),
+    )
+    geometry = source.get("geometry_2d", {}) if isinstance(source.get("geometry_2d"), dict) else {}
+    pixel_center = _first_nested_value(
+        source,
+        ("geometry_2d", "pixel_center"),
+        ("target", "pixel_center"),
+        ("objects", 0, "pixel_center"),
+        ("candidates", 0, "pixel_center"),
+    )
+    confidence = _normalize_optional_float(geometry.get("confidence"))
+    if confidence is None:
+        confidence = _normalize_optional_float(_first_nested_value(source, ("target", "grounding_confidence")))
+
+    model_width = _normalize_optional_int(geometry.get("image_width"))
+    model_height = _normalize_optional_int(geometry.get("image_height"))
+    image_width = image_size[0] if image_size else model_width
+    image_height = image_size[1] if image_size else model_height
+
+    normalized_bbox = _normalize_bbox(bbox, image_width, image_height, validation_errors, validation_warnings)
+    normalized_center = _normalize_pixel_center(
+        pixel_center,
+        image_width,
+        image_height,
+        validation_errors,
+        validation_warnings,
+    )
+    if normalized_bbox is not None and normalized_center is None:
+        normalized_center = [
+            (normalized_bbox[0] + normalized_bbox[2]) / 2,
+            (normalized_bbox[1] + normalized_bbox[3]) / 2,
+        ]
+        validation_warnings.append("pixel_center was inferred from bbox_xyxy")
+
+    if normalized_bbox is None and normalized_center is None:
+        validation_warnings.append("2D grounding is missing")
+
+    normalized["target"]["bbox_xyxy"] = normalized_bbox
+    normalized["geometry_2d"] = {
+        "pixel_center": normalized_center,
+        "image_width": image_width,
+        "image_height": image_height,
+        "confidence": confidence,
+    }
+
+
+def _normalize_bbox(
+    value: Any,
+    image_width: int | None,
+    image_height: int | None,
+    validation_errors: List[str],
+    validation_warnings: List[str],
+) -> List[float] | None:
+    if value is None:
+        return None
+    if not isinstance(value, list) or len(value) != 4:
+        validation_errors.append("target.bbox_xyxy must be null or a list of 4 numbers")
+        return None
+    if not all(_is_number(item) for item in value):
+        validation_errors.append("target.bbox_xyxy values must be numbers")
+        return None
+
+    bbox = [float(item) for item in value]
+    x_min, y_min, x_max, y_max = bbox
+    if x_min >= x_max:
+        validation_errors.append("target.bbox_xyxy must satisfy x_min < x_max")
+        return None
+    if y_min >= y_max:
+        validation_errors.append("target.bbox_xyxy must satisfy y_min < y_max")
+        return None
+
+    if image_width is not None and (x_min < 0 or x_max > image_width):
+        validation_warnings.append("target.bbox_xyxy x coordinates are outside image bounds")
+    if image_height is not None and (y_min < 0 or y_max > image_height):
+        validation_warnings.append("target.bbox_xyxy y coordinates are outside image bounds")
+    return bbox
+
+
+def _normalize_pixel_center(
+    value: Any,
+    image_width: int | None,
+    image_height: int | None,
+    validation_errors: List[str],
+    validation_warnings: List[str],
+) -> List[float] | None:
+    if value is None:
+        return None
+    if not isinstance(value, list) or len(value) != 2:
+        validation_errors.append("geometry_2d.pixel_center must be null or a list of 2 numbers")
+        return None
+    if not all(_is_number(item) for item in value):
+        validation_errors.append("geometry_2d.pixel_center values must be numbers")
+        return None
+
+    center = [float(item) for item in value]
+    cx, cy = center
+    if image_width is not None and not 0 <= cx <= image_width:
+        validation_warnings.append("geometry_2d.pixel_center x coordinate is outside image bounds")
+    if image_height is not None and not 0 <= cy <= image_height:
+        validation_warnings.append("geometry_2d.pixel_center y coordinate is outside image bounds")
+    return center
+
+
+def _read_image_size(image_path: Any) -> Tuple[Tuple[int, int] | None, str]:
+    if not image_path:
+        return None, "image size could not be read: image_path is missing"
+    try:
+        with Image.open(Path(str(image_path)).expanduser()) as image:
+            return image.size, ""
+    except Exception as exc:
+        return None, f"image size could not be read: {exc}"
+
+
+def _first_nested_value(data: Dict[str, Any], *paths: Tuple[Any, ...]) -> Any:
+    for path in paths:
+        current: Any = data
+        for key in path:
+            if isinstance(key, int):
+                if not isinstance(current, list) or key >= len(current):
+                    current = None
+                    break
+                current = current[key]
+            else:
+                if not isinstance(current, dict) or key not in current:
+                    current = None
+                    break
+                current = current[key]
+        if current is not None:
+            return current
+    return None
+
+
+def _normalize_optional_float(value: Any) -> float | None:
+    if not _is_number(value):
+        return None
+    number = float(value)
+    if 0.0 <= number <= 1.0:
+        return number
+    return None
+
+
+def _normalize_optional_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int) and value > 0:
+        return value
+    return None
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def _matches_terms(label: str, terms: set[str]) -> bool:

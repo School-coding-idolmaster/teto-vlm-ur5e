@@ -75,6 +75,8 @@ def test_inspector_handles_success_failed_and_unsafe_count(tmp_path):
         "validation_failed": 1,
         "unsafe_count": 1,
         "rejected_count": 2,
+        "grounding_count": 0,
+        "grounding_missing_count": 3,
     }
     assert inspection["items"][1]["target_label"] == "bird"
     assert inspection["items"][1]["candidate"] is False
@@ -182,6 +184,42 @@ def test_detail_format_displays_validation_errors(tmp_path):
     assert "  - unknown target should use a no-target error code" in text
 
 
+def test_detail_format_displays_grounding_fields(tmp_path):
+    run_dir = tmp_path / "run_20260527_120003_grounding"
+    _write_jsonl(
+        run_dir / "results.jsonl",
+        [
+            {
+                "image_path": "/tmp/red_cup.jpg",
+                "parse_status": "success",
+                "validation_status": "warning",
+                "normalized_json": {
+                    "target": {"label": "red cup", "bbox_xyxy": [420, 180, 610, 430]},
+                    "geometry_2d": {
+                        "pixel_center": [515, 305],
+                        "image_width": 1280,
+                        "image_height": 720,
+                        "confidence": 0.78,
+                    },
+                    "manipulation_assessment": {"candidate": True, "difficulty": "easy"},
+                    "error": {"code": "OK"},
+                },
+                "validation_warnings": ["pixel_center was inferred from bbox_xyxy"],
+            }
+        ],
+    )
+
+    inspection = inspect_robot_task_run(run_dir)
+    text = format_items(inspection["items"])
+
+    assert inspection["summary"]["grounding_count"] == 1
+    assert inspection["summary"]["grounding_missing_count"] == 0
+    assert "bbox_xyxy: [420, 180, 610, 430]" in text
+    assert "pixel_center: [515, 305]" in text
+    assert "image_size: 1280x720" in text
+    assert "geometry_2d.confidence: 0.78" in text
+
+
 def test_unsafe_and_rejected_counts_are_distinct(tmp_path):
     run_dir = tmp_path / "run_20260527_120003_counts"
     _write_jsonl(
@@ -224,6 +262,36 @@ def test_unsafe_and_rejected_counts_are_distinct(tmp_path):
 
     assert summary["unsafe_count"] == 1
     assert summary["rejected_count"] == 2
+    assert summary["grounding_count"] == 0
+    assert summary["grounding_missing_count"] == 3
+
+
+def test_legacy_result_without_geometry_does_not_crash(tmp_path):
+    run_dir = tmp_path / "run_20260527_120003_legacy"
+    _write_jsonl(
+        run_dir / "results.jsonl",
+        [
+            {
+                "image_path": "/tmp/legacy.jpg",
+                "parse_status": "success",
+                "validation_status": "passed",
+                "normalized_json": {
+                    "target": {"label": "box"},
+                    "manipulation_assessment": {"candidate": True, "difficulty": "easy"},
+                    "error": {"code": "OK"},
+                },
+            }
+        ],
+    )
+
+    inspection = inspect_robot_task_run(run_dir)
+    text = format_items(inspection["items"])
+
+    assert inspection["summary"]["grounding_count"] == 0
+    assert inspection["summary"]["grounding_missing_count"] == 1
+    assert "bbox_xyxy: null" in text
+    assert "pixel_center: null" in text
+    assert "image_size: unknown" in text
 
 
 def test_format_items_honors_limit(tmp_path):
@@ -318,6 +386,8 @@ def test_launcher_uses_robot_task_run_dir_for_inspector(monkeypatch, capsys):
                 "validation_failed": 0,
                 "unsafe_count": 0,
                 "rejected_count": 0,
+                "grounding_count": 0,
+                "grounding_missing_count": 0,
             },
             "items": [],
         }

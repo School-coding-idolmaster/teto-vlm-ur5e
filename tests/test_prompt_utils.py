@@ -28,6 +28,9 @@ def test_robot_task_json_prompt_type_is_available():
     assert "URScript" in prompt
     assert "Humans must not be selected" in prompt
     assert "candidate must be true or false" in prompt
+    assert "bbox_xyxy" in prompt
+    assert "geometry_2d" in prompt
+    assert "Do not output 3D coordinates" in prompt
 
 
 def test_build_robot_task_prompt_embeds_user_instruction():
