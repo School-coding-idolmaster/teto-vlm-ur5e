@@ -1,0 +1,20 @@
+model:
+  name: "mock-vlm"
+  path: null
+  device: "auto"
+
+image:
+  max_size: 1024
+  quality: 85
+  supported_formats:
+    - ".jpg"
+    - ".jpeg"
+    - ".png"
+    - ".webp"
+
+paths:
+  raw_data: "data/raw"
+  processed_data: "data/processed"
+  results: "outputs/results"
+  logs: "outputs/logs"
+

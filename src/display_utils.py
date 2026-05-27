@@ -1,0 +1,21 @@
+def print_vlm_result(result: dict):
+    print()
+    print("=" * 50)
+    print("VLM RESULT")
+    print("=" * 50)
+    print(f"Image: {result.get('image_path', 'N/A')}")
+    if result.get("source_image_path"):
+        print(f"Source: {result.get('source_image_path')}")
+    if result.get("image_max_size"):
+        print(f"Image max size: {result.get('image_max_size')}")
+    print(f"Backend: {result.get('backend', 'N/A')}")
+    print(f"Model: {result.get('model_path', 'N/A')}")
+    print(f"Status: {result.get('model_status', 'N/A')}")
+    print("-" * 50)
+    print("Prompt:")
+    print(result.get("prompt", "N/A"))
+    print("-" * 50)
+    print("Response:")
+    print(result.get("response", "N/A"))
+    print("=" * 50)
+    print()
