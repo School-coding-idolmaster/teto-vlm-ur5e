@@ -162,3 +162,100 @@ def test_normalize_robot_task_json_marks_unknown_candidate_as_no_target():
     assert result["validation_status"] == "failed"
     assert result["normalized_json"]["manipulation_assessment"]["candidate"] is False
     assert result["normalized_json"]["error"]["code"] == "E_NO_TARGET"
+
+
+def test_unknown_scene_without_living_terms_stays_no_target():
+    data = {
+        **VALID_ROBOT_TASK,
+        "target": {
+            "label": "unknown",
+            "approx_position": "unknown",
+            "visibility": "unknown",
+        },
+        "spatial_context": {
+            "surface": "unknown",
+            "nearby_objects": [],
+            "relations": [],
+            "obstacles": [],
+        },
+        "manipulation_assessment": {
+            "candidate": False,
+            "difficulty": "unknown",
+            "reason": "no clear object",
+        },
+        "error": {
+            "code": "E_NO_TARGET",
+            "message": "No target found.",
+        },
+    }
+
+    result = normalize_robot_task_json(data)
+
+    assert result["normalized_json"]["error"]["code"] == "E_NO_TARGET"
+
+
+def test_living_only_scene_with_unknown_target_normalizes_to_unsafe():
+    data = {
+        **VALID_ROBOT_TASK,
+        "target": {
+            "label": "unknown",
+            "approx_position": "unknown",
+            "visibility": "unknown",
+        },
+        "spatial_context": {
+            "surface": "floor",
+            "nearby_objects": ["person"],
+            "relations": [],
+            "obstacles": [],
+        },
+        "manipulation_assessment": {
+            "candidate": False,
+            "difficulty": "unknown",
+            "reason": "no manipulation candidate",
+        },
+        "error": {
+            "code": "E_NO_TARGET",
+            "message": "",
+        },
+    }
+
+    result = normalize_robot_task_json(data)
+
+    assert result["normalized_json"]["manipulation_assessment"]["candidate"] is False
+    assert result["normalized_json"]["manipulation_assessment"]["difficulty"] == "unsafe"
+    assert result["normalized_json"]["error"]["code"] == "E_UNSAFE"
+    assert (
+        result["normalized_json"]["error"]["message"]
+        == "Only living beings or unsafe targets were detected; no manipulation candidate is allowed."
+    )
+
+
+def test_living_only_scene_from_detected_objects_normalizes_to_unsafe():
+    data = {
+        **VALID_ROBOT_TASK,
+        "target": {
+            "label": "unknown",
+            "approx_position": "unknown",
+            "visibility": "unknown",
+        },
+        "spatial_context": {
+            "surface": "unknown",
+            "nearby_objects": [],
+            "relations": [],
+            "obstacles": [],
+        },
+        "detected_objects": [{"label": "woman"}],
+        "manipulation_assessment": {
+            "candidate": False,
+            "difficulty": "unknown",
+            "reason": "no manipulation candidate",
+        },
+        "error": {
+            "code": "E_NO_TARGET",
+            "message": "",
+        },
+    }
+
+    result = normalize_robot_task_json(data)
+
+    assert result["normalized_json"]["error"]["code"] == "E_UNSAFE"

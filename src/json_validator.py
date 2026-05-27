@@ -307,7 +307,7 @@ def normalize_robot_task_json(data: Dict[str, Any]) -> Dict[str, Any]:
     normalized["error"]["code"] = _controlled_value(error.get("code"), ERROR_CODES, "OK")
     normalized["error"]["message"] = _string_value(error.get("message"), "")
 
-    _apply_safety_overrides(normalized)
+    _apply_safety_overrides(normalized, data)
 
     return {
         "normalized_json": normalized,
@@ -412,12 +412,13 @@ def _matches_terms(label: str, terms: set[str]) -> bool:
     return False
 
 
-def _apply_safety_overrides(data: Dict[str, Any]) -> None:
+def _apply_safety_overrides(data: Dict[str, Any], source: Dict[str, Any] | None = None) -> None:
     label = data["target"]["label"]
     assessment = data["manipulation_assessment"]
     error = data["error"]
-    living_label = _find_matching_label(data, LIVING_TARGET_TERMS)
-    unsafe_label = _find_matching_label(data, UNSAFE_TARGET_TERMS)
+    label_source = source if source is not None else data
+    living_label = _find_matching_label(label_source, LIVING_TARGET_TERMS)
+    unsafe_label = _find_matching_label(label_source, UNSAFE_TARGET_TERMS)
 
     if living_label:
         assessment["candidate"] = False
@@ -426,7 +427,13 @@ def _apply_safety_overrides(data: Dict[str, Any]) -> None:
             assessment["reason"] = "Living humans or animals are not robot manipulation candidates."
         error["code"] = "E_UNSAFE"
         if not error["message"]:
-            error["message"] = "Living target is unsafe for robot manipulation."
+            if label == "unknown":
+                error["message"] = (
+                    "Only living beings or unsafe targets were detected; "
+                    "no manipulation candidate is allowed."
+                )
+            else:
+                error["message"] = "Living target is unsafe for robot manipulation."
         return
 
     if unsafe_label:
@@ -492,6 +499,18 @@ def _iter_object_labels(data: Dict[str, Any]):
                 value = relation.get(key)
                 if isinstance(value, str) and value:
                     yield value
+
+    for field in ("objects", "detected_objects", "visible_objects", "scene_objects"):
+        values = data.get(field, [])
+        if isinstance(values, list):
+            for value in values:
+                if isinstance(value, str) and value:
+                    yield value
+                elif isinstance(value, dict):
+                    for key in ("label", "name", "object", "target", "candidate_label"):
+                        label = value.get(key)
+                        if isinstance(label, str) and label:
+                            yield label
 
 
 def _validation_status(errors: List[str], warnings: List[str]) -> str:

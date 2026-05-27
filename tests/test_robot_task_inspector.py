@@ -35,6 +35,7 @@ def test_inspector_handles_success_failed_and_unsafe_count(tmp_path):
                     "error": {"code": "OK"},
                 },
                 "validation_warnings": [],
+                "validation_errors": [],
             },
             {
                 "image_path": "/tmp/bird.jpg",
@@ -46,6 +47,7 @@ def test_inspector_handles_success_failed_and_unsafe_count(tmp_path):
                     "error": {"code": "E_UNSAFE"},
                 },
                 "validation_warnings": ["living target detected; safety patch forced candidate=false"],
+                "validation_errors": [],
             },
             {
                 "image_path": "/tmp/bad.jpg",
@@ -56,6 +58,7 @@ def test_inspector_handles_success_failed_and_unsafe_count(tmp_path):
                     "manipulation_assessment": {"candidate": False, "difficulty": "unknown"},
                     "error": {"code": "E_PARSE"},
                 },
+                "validation_errors": ["invalid JSON: Expecting value"],
             },
         ],
     )
@@ -71,6 +74,7 @@ def test_inspector_handles_success_failed_and_unsafe_count(tmp_path):
         "validation_warning": 1,
         "validation_failed": 1,
         "unsafe_count": 1,
+        "rejected_count": 2,
     }
     assert inspection["items"][1]["target_label"] == "bird"
     assert inspection["items"][1]["candidate"] is False
@@ -100,6 +104,7 @@ def test_inspector_falls_back_to_parsed_json_without_normalized_json(tmp_path):
     assert item["candidate"] is True
     assert item["difficulty"] == "medium"
     assert item["validation_warnings"] == []
+    assert item["validation_errors"] == []
 
 
 def test_empty_results_jsonl_returns_zero_summary(tmp_path):
@@ -150,6 +155,75 @@ def test_bad_json_line_becomes_item_and_later_lines_continue(tmp_path):
     assert inspection["summary"]["parse_failed"] == 1
     assert inspection["items"][1]["error_code"] == "E_PARSE"
     assert inspection["items"][1]["line_error"]
+
+
+def test_detail_format_displays_validation_errors(tmp_path):
+    run_dir = tmp_path / "run_20260527_120003_errors"
+    _write_jsonl(
+        run_dir / "results.jsonl",
+        [
+            {
+                "image_path": "/tmp/failed.jpg",
+                "parse_status": "success",
+                "validation_status": "failed",
+                "normalized_json": {
+                    "target": {"label": "unknown"},
+                    "manipulation_assessment": {"candidate": False, "difficulty": "unknown"},
+                    "error": {"code": "E_NO_TARGET"},
+                },
+                "validation_errors": ["unknown target should use a no-target error code"],
+            }
+        ],
+    )
+
+    text = format_items(inspect_robot_task_run(run_dir)["items"])
+
+    assert "validation_errors:" in text
+    assert "  - unknown target should use a no-target error code" in text
+
+
+def test_unsafe_and_rejected_counts_are_distinct(tmp_path):
+    run_dir = tmp_path / "run_20260527_120003_counts"
+    _write_jsonl(
+        run_dir / "results.jsonl",
+        [
+            {
+                "image_path": "/tmp/cup.jpg",
+                "parse_status": "success",
+                "validation_status": "passed",
+                "normalized_json": {
+                    "target": {"label": "cup"},
+                    "manipulation_assessment": {"candidate": True, "difficulty": "easy"},
+                    "error": {"code": "OK"},
+                },
+            },
+            {
+                "image_path": "/tmp/empty.jpg",
+                "parse_status": "success",
+                "validation_status": "failed",
+                "normalized_json": {
+                    "target": {"label": "unknown"},
+                    "manipulation_assessment": {"candidate": False, "difficulty": "unknown"},
+                    "error": {"code": "E_NO_TARGET"},
+                },
+            },
+            {
+                "image_path": "/tmp/person.jpg",
+                "parse_status": "success",
+                "validation_status": "failed",
+                "normalized_json": {
+                    "target": {"label": "person"},
+                    "manipulation_assessment": {"candidate": False, "difficulty": "unsafe"},
+                    "error": {"code": "E_UNSAFE"},
+                },
+            },
+        ],
+    )
+
+    summary = inspect_robot_task_run(run_dir)["summary"]
+
+    assert summary["unsafe_count"] == 1
+    assert summary["rejected_count"] == 2
 
 
 def test_format_items_honors_limit(tmp_path):
@@ -243,6 +317,7 @@ def test_launcher_uses_robot_task_run_dir_for_inspector(monkeypatch, capsys):
                 "validation_warning": 0,
                 "validation_failed": 0,
                 "unsafe_count": 0,
+                "rejected_count": 0,
             },
             "items": [],
         }

@@ -107,6 +107,7 @@ def format_summary(inspection: Dict[str, Any]) -> str:
             f"  validation_warning: {summary['validation_warning']}",
             f"  validation_failed:  {summary['validation_failed']}",
             f"  unsafe_count:       {summary['unsafe_count']}",
+            f"  rejected_count:     {summary['rejected_count']}",
         ]
     )
     return "\n".join(lines)
@@ -140,6 +141,13 @@ def format_items(items: Iterable[Dict[str, Any]], limit: int | None = None) -> s
                 lines.append(f"  - {warning}")
         else:
             lines.append("validation_warnings: []")
+        errors = item.get("validation_errors", [])
+        if errors:
+            lines.append("validation_errors:")
+            for error in errors:
+                lines.append(f"  - {error}")
+        else:
+            lines.append("validation_errors: []")
         if item.get("line_error"):
             lines.append(f"line_error: {item['line_error']}")
         lines.append("")
@@ -176,6 +184,9 @@ def _inspect_item(index: int, item: Dict[str, Any]) -> Dict[str, Any]:
     warnings = item.get("validation_warnings", [])
     if not isinstance(warnings, list):
         warnings = [str(warnings)]
+    errors = item.get("validation_errors", [])
+    if not isinstance(errors, list):
+        errors = [str(errors)]
 
     return {
         "index": index,
@@ -187,8 +198,10 @@ def _inspect_item(index: int, item: Dict[str, Any]) -> Dict[str, Any]:
         "difficulty": _format_value(difficulty),
         "error_code": _format_value(error_code),
         "validation_warnings": warnings,
+        "validation_errors": errors,
         "line_error": item.get("line_error", ""),
         "unsafe": error_code == "E_UNSAFE" or difficulty == "unsafe",
+        "rejected": candidate is False,
     }
 
 
@@ -212,6 +225,8 @@ def _build_summary(items: List[Dict[str, Any]]) -> Dict[str, int]:
 
         if item.get("unsafe"):
             summary["unsafe_count"] += 1
+        if item.get("rejected"):
+            summary["rejected_count"] += 1
     return summary
 
 
@@ -224,6 +239,7 @@ def _empty_summary() -> Dict[str, int]:
         "validation_warning": 0,
         "validation_failed": 0,
         "unsafe_count": 0,
+        "rejected_count": 0,
     }
 
 
@@ -234,6 +250,7 @@ def _bad_line_item(line_number: int, message: str) -> Dict[str, Any]:
         "validation_status": "failed",
         "normalized_json": {"error": {"code": "E_PARSE"}},
         "validation_warnings": [],
+        "validation_errors": [message],
         "line_error": message,
     }
 
