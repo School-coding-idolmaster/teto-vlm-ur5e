@@ -6,3 +6,10 @@ __pycache__/
 venv/
 .venv/
 *.log
+data/processed/*
+!data/processed/.gitkeep
+data/raw/*
+!data/raw/.gitkeep
+data/annotations/*
+!data/annotations/.gitkeep
+data/processed/auto/
