@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -189,6 +190,65 @@ def write_smoke_report(run_dir: Path | str) -> Dict[str, str]:
     }
 
 
+def build_scene_index(inspection: Dict[str, Any]) -> Dict[str, Any]:
+    run_path = Path(str(inspection.get("run_dir", "")))
+    items = list(inspection.get("items", []))
+    summary = inspection.get("summary", _empty_summary())
+    scenes = [_scene_index_record(item) for item in items]
+    return {
+        "scene_index_version": "teto_scene_index.v1",
+        "run_id": run_path.name,
+        "generated_at": _generated_at(),
+        "results_path": inspection.get("results_path", ""),
+        "smoke_report_json_path": inspection.get("smoke_report_json_path", str(run_path / "smoke_report.json")),
+        "total_count": _summary_value(summary, "total_count", "total"),
+        "valid_scene_count": sum(1 for scene in scenes if scene["scene_status"] == "valid"),
+        "invalid_scene_count": sum(1 for scene in scenes if scene["scene_status"] == "invalid"),
+        "candidate_scene_count": sum(1 for scene in scenes if scene["candidate"] is True),
+        "rejected_scene_count": sum(1 for scene in scenes if scene["candidate"] is False),
+        "no_target_count": _summary_value(summary, "no_target_count"),
+        "unsafe_count": _summary_value(summary, "unsafe_count"),
+        "grounding_count": _summary_value(summary, "grounding_count"),
+        "grounding_missing_count": _summary_value(summary, "grounding_missing_count"),
+        "scene_versions": [scene["scene_version"] for scene in scenes],
+        "scenes": scenes,
+    }
+
+
+def build_replay_index(inspection: Dict[str, Any]) -> Dict[str, Any]:
+    run_path = Path(str(inspection.get("run_dir", "")))
+    results_path = inspection.get("results_path", "")
+    return {
+        "replay_index_version": "teto_replay_index.v1",
+        "run_id": run_path.name,
+        "generated_at": _generated_at(),
+        "results_path": results_path,
+        "records": [_replay_index_record(item, results_path) for item in inspection.get("items", [])],
+    }
+
+
+def write_scene_and_replay_indexes(run_dir: Path | str) -> Dict[str, str]:
+    inspection = inspect_robot_task_run(run_dir)
+    if not inspection.get("ok"):
+        raise FileNotFoundError(inspection.get("message", "robot_task_json inspection failed"))
+
+    run_path = Path(str(inspection["run_dir"]))
+    scene_index_path = run_path / "scene_index.json"
+    replay_index_path = run_path / "replay_index.json"
+    scene_index_path.write_text(
+        json.dumps(build_scene_index(inspection), ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    replay_index_path.write_text(
+        json.dumps(build_replay_index(inspection), ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return {
+        "scene_index_path": str(scene_index_path),
+        "replay_index_path": str(replay_index_path),
+    }
+
+
 def _inspect_item(index: int, item: Dict[str, Any]) -> Dict[str, Any]:
     target_label = _first_value(
         item,
@@ -313,6 +373,74 @@ def _inspect_item(index: int, item: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _scene_index_record(item: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "scene_version": item.get("scene_version", UNKNOWN),
+        "scene_status": item.get("scene_status", UNKNOWN),
+        "image_path": item.get("image_path", UNKNOWN),
+        "target_id": item.get("target_id", UNKNOWN),
+        "target_label": item.get("target_label", UNKNOWN),
+        "candidate": item.get("candidate", UNKNOWN),
+        "error_code": item.get("error_code", UNKNOWN),
+        "grounded": bool(item.get("grounded")),
+        "bbox_xyxy": item.get("bbox_xyxy"),
+        "pixel_center": item.get("pixel_center"),
+        "geometry_2d_confidence": item.get("geometry_2d_confidence"),
+        "result_record_index": max(int(item.get("index", 1)) - 1, 0),
+    }
+
+
+def _replay_index_record(item: Dict[str, Any], results_path: str) -> Dict[str, Any]:
+    scene_status = item.get("scene_status", UNKNOWN)
+    candidate = item.get("candidate", UNKNOWN)
+    error_code = item.get("error_code", UNKNOWN)
+    parse_status = item.get("parse_status", UNKNOWN)
+    validation_status = item.get("validation_status", UNKNOWN)
+    positive = scene_status == "valid" and candidate is True and error_code == "OK"
+    hard_negative = (
+        candidate is False
+        or error_code != "OK"
+        or scene_status != "valid"
+        or parse_status == "failed"
+        or validation_status == "failed"
+        or item.get("no_target") is True
+        or item.get("unsafe") is True
+    )
+    geometry_confidence = item.get("geometry_2d_confidence")
+    return {
+        "scene_version": item.get("scene_version", UNKNOWN),
+        "image_path": item.get("image_path", UNKNOWN),
+        "result_jsonl_path": results_path,
+        "result_record_index": max(int(item.get("index", 1)) - 1, 0),
+        "scene_status": scene_status,
+        "target_id": item.get("target_id", UNKNOWN),
+        "target_label": item.get("target_label", UNKNOWN),
+        "candidate": candidate,
+        "error_code": error_code,
+        "grounded": bool(item.get("grounded")),
+        "bbox_xyxy": item.get("bbox_xyxy"),
+        "pixel_center": item.get("pixel_center"),
+        "confidence": {
+            "semantic": None,
+            "geometry": geometry_confidence,
+            "overall": geometry_confidence,
+        },
+        "positive_replay_sample": positive,
+        "hard_negative_sample": hard_negative,
+        "rejection_reason": _rejection_reason(error_code, scene_status, candidate),
+    }
+
+
+def _rejection_reason(error_code: Any, scene_status: Any, candidate: Any) -> str:
+    if error_code != "OK":
+        return str(error_code)
+    if scene_status != "valid":
+        return f"scene_status:{scene_status}"
+    if candidate is False:
+        return "not_candidate"
+    return ""
+
+
 def _build_summary(items: List[Dict[str, Any]]) -> Dict[str, int]:
     summary = _empty_summary()
     summary["total"] = len(items)
@@ -427,6 +555,10 @@ def _summary_value(summary: Dict[str, Any], key: str, fallback_key: str | None =
     if fallback_key and fallback_key in summary:
         return summary[fallback_key]
     return 0
+
+
+def _generated_at() -> str:
+    return datetime.now().isoformat(timespec="seconds")
 
 
 def _append_list(lines: List[str], label: str, values: List[Any]) -> None:

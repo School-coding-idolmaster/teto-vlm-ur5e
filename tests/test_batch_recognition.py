@@ -192,6 +192,43 @@ def test_batch_recognition_saves_robot_task_json_fields(tmp_path, monkeypatch):
     assert (output_root / result["run_name"] / "smoke_report.json").exists()
     assert result["smoke_report_md_path"] == str(output_root / result["run_name"] / "smoke_report.md")
     assert result["smoke_report_json_path"] == str(output_root / result["run_name"] / "smoke_report.json")
+    assert (output_root / result["run_name"] / "scene_index.json").exists()
+    assert (output_root / result["run_name"] / "replay_index.json").exists()
+    assert result["scene_index_path"] == str(output_root / result["run_name"] / "scene_index.json")
+    assert result["replay_index_path"] == str(output_root / result["run_name"] / "replay_index.json")
+
+
+def test_batch_recognition_writes_scene_and_replay_indexes_for_robot_task_json(tmp_path, monkeypatch):
+    input_dir = tmp_path / "images"
+    input_dir.mkdir()
+    Image.new("RGB", (8, 8), (255, 255, 255)).save(input_dir / "one.jpg")
+
+    monkeypatch.setattr(batch_recognition, "VLMInferencer", RobotTaskInferencer)
+
+    output_root = tmp_path / "recognition_runs"
+    index_path = tmp_path / "results" / "index.jsonl"
+    monkeypatch.setattr(batch_recognition, "results_index_path", lambda: index_path)
+    result = batch_recognition.run_batch_recognition(
+        input_dir,
+        prompt_type="robot_task_json",
+        prompt="robot prompt",
+        backend="mock",
+        output_root=output_root,
+    )
+
+    scene_index = json.loads((output_root / result["run_name"] / "scene_index.json").read_text(encoding="utf-8"))
+    replay_index = json.loads((output_root / result["run_name"] / "replay_index.json").read_text(encoding="utf-8"))
+
+    assert scene_index["scene_index_version"] == "teto_scene_index.v1"
+    assert scene_index["run_id"] == result["run_name"]
+    assert scene_index["total_count"] == 1
+    assert scene_index["candidate_scene_count"] == 1
+    assert scene_index["scenes"][0]["scene_version"] == f"{result['run_name']}_item_001"
+    assert scene_index["scenes"][0]["target_id"] == "obj_001"
+    assert replay_index["replay_index_version"] == "teto_replay_index.v1"
+    assert replay_index["records"][0]["scene_version"] == f"{result['run_name']}_item_001"
+    assert replay_index["records"][0]["positive_replay_sample"] is True
+    assert replay_index["records"][0]["hard_negative_sample"] is False
 
 
 def test_robot_task_json_defaults_to_dedicated_output_root(tmp_path, monkeypatch):
@@ -221,3 +258,5 @@ def test_robot_task_json_defaults_to_dedicated_output_root(tmp_path, monkeypatch
     assert (run_dir / "summary.json").exists()
     assert (run_dir / "smoke_report.md").exists()
     assert (run_dir / "smoke_report.json").exists()
+    assert (run_dir / "scene_index.json").exists()
+    assert (run_dir / "replay_index.json").exists()

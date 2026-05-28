@@ -11,7 +11,7 @@ from src.output_paths import (
 )
 from src.json_validator import attach_robot_task_json_fields
 from src.prompt_utils import get_prompt
-from src.robot_task_inspector import write_smoke_report
+from src.robot_task_inspector import write_scene_and_replay_indexes, write_smoke_report
 from src.vlm_infer import VLMInferencer
 
 
@@ -161,8 +161,10 @@ def run_batch_recognition(
     errors_path.write_text("\n".join(error_lines) + ("\n" if error_lines else ""), encoding="utf-8")
     _append_index(index_path, summary)
     smoke_report_paths = {}
+    scene_replay_paths = {}
     if prompt_type == ROBOT_TASK_PROMPT_TYPE:
         smoke_report_paths = write_smoke_report(run_dir)
+        scene_replay_paths = write_scene_and_replay_indexes(run_dir)
 
     result = {
         "ok": True,
@@ -172,6 +174,7 @@ def run_batch_recognition(
         "errors_path": str(errors_path),
         "index_path": str(index_path),
         **smoke_report_paths,
+        **scene_replay_paths,
         **summary,
     }
     if prompt_type == ROBOT_TASK_PROMPT_TYPE:

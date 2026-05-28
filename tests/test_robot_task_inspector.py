@@ -5,9 +5,12 @@ from pathlib import Path
 
 from src import robot_task_inspector
 from src.robot_task_inspector import (
+    build_replay_index,
+    build_scene_index,
     format_items,
     inspect_robot_task_run,
     load_results_jsonl,
+    write_scene_and_replay_indexes,
     write_smoke_report,
 )
 import teto_V1
@@ -447,6 +450,214 @@ def test_inspector_displays_scene_snapshot_fields(tmp_path):
     assert "scene_version: run_20260527_120003_scene_item_001" in text
     assert "scene.status: valid" in text
     assert "target_id: obj_001" in text
+
+
+def test_scene_index_files_are_generated(tmp_path):
+    run_dir = tmp_path / "run_20260527_120003_scene_index"
+    _write_jsonl(
+        run_dir / "results.jsonl",
+        [
+            {
+                "image_path": "/tmp/camera.jpg",
+                "parse_status": "success",
+                "validation_status": "passed",
+                "normalized_json": {
+                    "scene": {"scene_version": "run_scene_index_item_001", "status": "valid"},
+                    "target": {"label": "camera", "target_id": "obj_001", "bbox_xyxy": [1, 2, 11, 22]},
+                    "geometry_2d": {"pixel_center": [6, 12], "confidence": 0.6},
+                    "manipulation_assessment": {"candidate": True, "difficulty": "easy"},
+                    "error": {"code": "OK"},
+                },
+            }
+        ],
+    )
+
+    paths = write_scene_and_replay_indexes(run_dir)
+    scene_index = json.loads(Path(paths["scene_index_path"]).read_text(encoding="utf-8"))
+
+    assert Path(paths["scene_index_path"]).exists()
+    assert scene_index["scene_index_version"] == "teto_scene_index.v1"
+    assert scene_index["run_id"] == run_dir.name
+    assert scene_index["results_path"] == str(run_dir / "results.jsonl")
+    assert scene_index["scene_versions"] == ["run_scene_index_item_001"]
+
+
+def test_scene_index_counts_valid_invalid_rejected(tmp_path):
+    run_dir = tmp_path / "run_20260527_120003_scene_counts"
+    _write_jsonl(
+        run_dir / "results.jsonl",
+        [
+            {
+                "image_path": "/tmp/camera.jpg",
+                "parse_status": "success",
+                "validation_status": "passed",
+                "normalized_json": {
+                    "scene": {"scene_version": "run_scene_counts_item_001", "status": "valid"},
+                    "target": {"label": "camera", "target_id": "obj_001", "bbox_xyxy": [1, 2, 11, 22]},
+                    "geometry_2d": {"pixel_center": [6, 12], "confidence": 0.6},
+                    "manipulation_assessment": {"candidate": True, "difficulty": "easy"},
+                    "error": {"code": "OK"},
+                },
+            },
+            {
+                "image_path": "/tmp/person.jpg",
+                "parse_status": "success",
+                "validation_status": "failed",
+                "normalized_json": {
+                    "scene": {"scene_version": "run_scene_counts_item_002", "status": "invalid"},
+                    "target": {"label": "person", "target_id": "unknown", "bbox_xyxy": None},
+                    "geometry_2d": {"pixel_center": None, "confidence": 0.0},
+                    "manipulation_assessment": {"candidate": False, "difficulty": "unsafe"},
+                    "error": {"code": "E_UNSAFE"},
+                },
+            },
+        ],
+    )
+
+    scene_index = build_scene_index(inspect_robot_task_run(run_dir))
+
+    assert scene_index["total_count"] == 2
+    assert scene_index["valid_scene_count"] == 1
+    assert scene_index["invalid_scene_count"] == 1
+    assert scene_index["candidate_scene_count"] == 1
+    assert scene_index["rejected_scene_count"] == 1
+    assert scene_index["unsafe_count"] == 1
+    assert scene_index["grounding_count"] == 1
+    assert scene_index["grounding_missing_count"] == 1
+
+
+def test_scene_index_records_scene_version_and_target_id(tmp_path):
+    run_dir = tmp_path / "run_20260527_120003_scene_record"
+    _write_jsonl(
+        run_dir / "results.jsonl",
+        [
+            {
+                "image_path": "/tmp/camera.jpg",
+                "parse_status": "success",
+                "validation_status": "passed",
+                "normalized_json": {
+                    "scene": {"scene_version": "run_scene_record_item_001", "status": "valid"},
+                    "target": {"label": "camera", "target_id": "obj_001", "bbox_xyxy": [1, 2, 11, 22]},
+                    "geometry_2d": {"pixel_center": [6, 12], "confidence": 0.6},
+                    "manipulation_assessment": {"candidate": True, "difficulty": "easy"},
+                    "error": {"code": "OK"},
+                },
+            }
+        ],
+    )
+
+    record = build_scene_index(inspect_robot_task_run(run_dir))["scenes"][0]
+
+    assert record["scene_version"] == "run_scene_record_item_001"
+    assert record["scene_status"] == "valid"
+    assert record["target_id"] == "obj_001"
+    assert record["target_label"] == "camera"
+    assert record["grounded"] is True
+    assert record["bbox_xyxy"] == [1, 2, 11, 22]
+    assert record["pixel_center"] == [6, 12]
+    assert record["geometry_2d_confidence"] == 0.6
+    assert record["result_record_index"] == 0
+
+
+def test_replay_index_files_are_generated(tmp_path):
+    run_dir = tmp_path / "run_20260527_120003_replay_index"
+    _write_jsonl(
+        run_dir / "results.jsonl",
+        [
+            {
+                "image_path": "/tmp/camera.jpg",
+                "parse_status": "success",
+                "validation_status": "passed",
+                "normalized_json": {
+                    "scene": {"scene_version": "run_replay_index_item_001", "status": "valid"},
+                    "target": {"label": "camera", "target_id": "obj_001", "bbox_xyxy": [1, 2, 11, 22]},
+                    "geometry_2d": {"pixel_center": [6, 12], "confidence": 0.6},
+                    "manipulation_assessment": {"candidate": True, "difficulty": "easy"},
+                    "error": {"code": "OK"},
+                },
+            }
+        ],
+    )
+
+    paths = write_scene_and_replay_indexes(run_dir)
+    replay_index = json.loads(Path(paths["replay_index_path"]).read_text(encoding="utf-8"))
+
+    assert Path(paths["replay_index_path"]).exists()
+    assert replay_index["replay_index_version"] == "teto_replay_index.v1"
+    assert replay_index["run_id"] == run_dir.name
+    assert replay_index["results_path"] == str(run_dir / "results.jsonl")
+    assert replay_index["records"][0]["result_jsonl_path"] == str(run_dir / "results.jsonl")
+
+
+def test_replay_index_positive_and_hard_negative_flags(tmp_path):
+    run_dir = tmp_path / "run_20260527_120003_replay_flags"
+    _write_jsonl(
+        run_dir / "results.jsonl",
+        [
+            {
+                "image_path": "/tmp/camera.jpg",
+                "parse_status": "success",
+                "validation_status": "passed",
+                "normalized_json": {
+                    "scene": {"scene_version": "run_replay_flags_item_001", "status": "valid"},
+                    "target": {"label": "camera", "target_id": "obj_001", "bbox_xyxy": [1, 2, 11, 22]},
+                    "geometry_2d": {"pixel_center": [6, 12], "confidence": 0.6},
+                    "manipulation_assessment": {"candidate": True, "difficulty": "easy"},
+                    "error": {"code": "OK"},
+                },
+            },
+            {
+                "image_path": "/tmp/empty.jpg",
+                "parse_status": "success",
+                "validation_status": "failed",
+                "normalized_json": {
+                    "scene": {"scene_version": "run_replay_flags_item_002", "status": "invalid"},
+                    "target": {"label": "unknown", "target_id": "unknown", "bbox_xyxy": None},
+                    "geometry_2d": {"pixel_center": None, "confidence": 0.0},
+                    "manipulation_assessment": {"candidate": False, "difficulty": "unknown"},
+                    "error": {"code": "E_NO_TARGET"},
+                },
+            },
+        ],
+    )
+
+    records = build_replay_index(inspect_robot_task_run(run_dir))["records"]
+
+    assert records[0]["positive_replay_sample"] is True
+    assert records[0]["hard_negative_sample"] is False
+    assert records[0]["rejection_reason"] == ""
+    assert records[0]["confidence"] == {"semantic": None, "geometry": 0.6, "overall": 0.6}
+    assert records[1]["positive_replay_sample"] is False
+    assert records[1]["hard_negative_sample"] is True
+    assert records[1]["rejection_reason"] == "E_NO_TARGET"
+
+
+def test_legacy_results_without_scene_do_not_crash_index_generation(tmp_path):
+    run_dir = tmp_path / "run_20260527_120003_legacy_index"
+    _write_jsonl(
+        run_dir / "results.jsonl",
+        [
+            {
+                "image_path": "/tmp/legacy.jpg",
+                "parse_status": "success",
+                "validation_status": "passed",
+                "normalized_json": {
+                    "target": {"label": "box"},
+                    "manipulation_assessment": {"candidate": True, "difficulty": "easy"},
+                    "error": {"code": "OK"},
+                },
+            }
+        ],
+    )
+
+    paths = write_scene_and_replay_indexes(run_dir)
+    scene_index = json.loads(Path(paths["scene_index_path"]).read_text(encoding="utf-8"))
+    replay_index = json.loads(Path(paths["replay_index_path"]).read_text(encoding="utf-8"))
+
+    assert scene_index["scenes"][0]["scene_version"] == "unknown"
+    assert scene_index["scenes"][0]["scene_status"] == "unknown"
+    assert scene_index["scenes"][0]["target_id"] == "unknown"
+    assert replay_index["records"][0]["hard_negative_sample"] is True
 
 
 def test_format_items_honors_limit(tmp_path):

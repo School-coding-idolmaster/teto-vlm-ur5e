@@ -333,6 +333,33 @@ does not read depth, compute camera/world coordinates, publish TF, call MoveIt,
 connect to UR5, generate URScript, generate joint angles, generate trajectories,
 or send robot control commands.
 
+## TETO V1.4.0 scene cache replay contract preparation
+
+Each `robot_task_json` batch run now writes lightweight scene and replay index
+files beside the existing results and smoke report:
+
+```text
+outputs/results/robot_task_json/run_YYYYMMDD_HHMMSS/scene_index.json
+outputs/results/robot_task_json/run_YYYYMMDD_HHMMSS/replay_index.json
+```
+
+`normalized_json.scene` remains a per-record scene snapshot. `scene_index.json`
+is the run-level scene cache: it lists scene versions, scene status, target
+IDs, labels, candidate flags, error codes, and normalized 2D grounding fields
+for quick lookup. It uses normalized `bbox_xyxy`, `pixel_center`, and
+`geometry_2d.confidence`; raw model grounding is kept only in the smoke report
+audit fields and does not affect grounding counts.
+
+`replay_index.json` is a semantic replay contract for future tooling. It does
+not rerun the model and does not execute any robot behavior. It records the
+result JSONL path, record index, scene identity, target identity, normalized
+grounding hints, replay sample flags, and rejection reason so later tools can
+answer why a scene was accepted or rejected.
+
+These indexes are still only software-readable semantic middleware artifacts.
+They are not 3D coordinates, MoveIt goals, UR5 commands, URScript, joint
+angles, trajectories, or robot control instructions.
+
 In the `python3 teto_V1.py` launcher, single image recognition and batch image
 recognition also show prompt helper keywords. You can type a built-in prompt
 type, a shortcut keyword, or a free-form prompt. Useful shortcuts include:
@@ -498,7 +525,11 @@ outputs/results/robot_task_json/run_YYYYMMDD_HHMMSS/
 ├── input_manifest.json
 ├── results.jsonl
 ├── summary.json
-└── errors.log
+├── errors.log
+├── smoke_report.md
+├── smoke_report.json
+├── scene_index.json
+└── replay_index.json
 ```
 
 `input_manifest.json` records run metadata and image paths only. It does not
