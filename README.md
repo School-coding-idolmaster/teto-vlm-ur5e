@@ -436,6 +436,43 @@ planner_gateway, rerun models, call Qwen, change prompts, connect to ROS2 /
 MoveIt / UR5, generate URScript, generate joint angles, generate trajectories,
 or send robot control commands.
 
+## TETO V1.6.0 planner gateway input contract preparation
+
+`src/planner_gateway_contract.py` defines the first dry-run contract boundary
+between TETO semantic results and a future `planner_gateway`. It answers
+whether a normalized semantic result is eligible for planner handoff, why it is
+rejected when it is not eligible, and what a future planner input skeleton would
+look like when the semantic result is eligible.
+
+The eligibility check requires a valid scene, `candidate=true`, `error.code=OK`,
+a known `target_id`, a known target label, normalized `bbox_xyxy`, normalized
+`pixel_center`, grounded status, positive geometry confidence, and the current
+`teto_robot_task.v1` schema. Rejection reason codes include
+`E_SCENE_INVALID`, `E_NOT_CANDIDATE`, `E_NO_TARGET`, `E_UNKNOWN_TARGET`,
+`E_MISSING_BBOX`, `E_MISSING_PIXEL_CENTER`, `E_NOT_GROUNDED`,
+`E_LOW_GEOMETRY_CONFIDENCE`, `E_SCHEMA_UNSUPPORTED`, and
+`E_MISSING_NORMALIZED_JSON`.
+
+Eligible records can build a `teto_planner_gateway_input.v1` skeleton with 2D
+target fields, confidence fields, dry-run execution policy, and explicit
+planner requirements. The skeleton always sets `dry_run_only=true` and
+`allow_robot_motion=false`.
+
+The contract explicitly lists missing runtime inputs that future systems must
+provide before any real planning could occur:
+
+- `depth_aligned_to_color`
+- `camera_point_m`
+- `world_point_m`
+- `tf_timestamp`
+- `scene_ttl_ms`
+- `robot_safety_state`
+
+V1.6.0 is still semantic middleware only. It does not implement planner_gateway,
+connect to ROS2 / MoveIt / UR5, call Qwen, rerun VLM inference, change prompts,
+generate URScript, generate joint angles, generate trajectories, or send robot
+control commands.
+
 In the `python3 teto_V1.py` launcher, single image recognition and batch image
 recognition also show prompt helper keywords. You can type a built-in prompt
 type, a shortcut keyword, or a free-form prompt. Useful shortcuts include:
