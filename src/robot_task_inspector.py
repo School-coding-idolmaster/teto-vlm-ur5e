@@ -163,6 +163,278 @@ def inspect_run_indexes(run_dir: Path | str) -> Dict[str, Any]:
     }
 
 
+def load_replay_index(run_dir: Path | str) -> Dict[str, Any]:
+    run_path = Path(run_dir).expanduser()
+    replay_path = run_path / "replay_index.json"
+    if not run_path.exists() or not run_path.is_dir():
+        return {
+            "ok": False,
+            "message": f"Run directory not found: {run_path}",
+            "run_dir": str(run_path),
+            "replay_index_path": str(replay_path),
+            "results_path": str(run_path / "results.jsonl"),
+            "records": [],
+            "replay_index": {},
+        }
+    if not replay_path.exists():
+        return {
+            "ok": False,
+            "message": f"replay_index.json not found: {replay_path}",
+            "run_dir": str(run_path),
+            "replay_index_path": str(replay_path),
+            "results_path": str(run_path / "results.jsonl"),
+            "records": [],
+            "replay_index": {},
+        }
+
+    replay_index, error = _read_index_json(replay_path)
+    if error:
+        return {
+            "ok": False,
+            "message": f"replay_index.json read failed: {error}",
+            "run_dir": str(run_path),
+            "replay_index_path": str(replay_path),
+            "results_path": str(run_path / "results.jsonl"),
+            "records": [],
+            "replay_index": {},
+        }
+
+    records = replay_index.get("records", [])
+    if not isinstance(records, list):
+        return {
+            "ok": False,
+            "message": "replay_index.records is not a list",
+            "run_dir": str(run_path),
+            "replay_index_path": str(replay_path),
+            "results_path": str(run_path / "results.jsonl"),
+            "records": [],
+            "replay_index": replay_index,
+        }
+
+    return {
+        "ok": True,
+        "message": "",
+        "run_dir": str(run_path),
+        "replay_index_path": str(replay_path),
+        "results_path": str(replay_index.get("results_path") or run_path / "results.jsonl"),
+        "records": [record for record in records if isinstance(record, dict)],
+        "replay_index": replay_index,
+    }
+
+
+def filter_replay_records(
+    records: Iterable[Dict[str, Any]],
+    positive: bool | None = None,
+    hard_negative: bool | None = None,
+    reason: str | None = None,
+    error_code: str | None = None,
+    candidate: bool | None = None,
+    grounded: bool | None = None,
+) -> List[Dict[str, Any]]:
+    selected: List[Dict[str, Any]] = []
+    for record in records:
+        if positive is not None and record.get("positive_replay_sample") is not positive:
+            continue
+        if hard_negative is not None and record.get("hard_negative_sample") is not hard_negative:
+            continue
+        if reason is not None and record.get("rejection_reason") != reason:
+            continue
+        if error_code is not None and record.get("error_code") != error_code:
+            continue
+        if candidate is not None and record.get("candidate") is not candidate:
+            continue
+        if grounded is not None and record.get("grounded") is not grounded:
+            continue
+        selected.append(record)
+    return selected
+
+
+def summarize_replay_records(records: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
+    selected = [record for record in records if isinstance(record, dict)]
+    rejection_reasons = Counter(str(record.get("rejection_reason")) for record in selected if record.get("rejection_reason"))
+    error_codes = Counter(str(record.get("error_code")) for record in selected if record.get("error_code"))
+    return {
+        "total_count": len(selected),
+        "positive_replay_sample_count": sum(1 for record in selected if record.get("positive_replay_sample") is True),
+        "hard_negative_sample_count": sum(1 for record in selected if record.get("hard_negative_sample") is True),
+        "rejection_reasons": dict(sorted(rejection_reasons.items())),
+        "error_codes": dict(sorted(error_codes.items())),
+        "grounded_count": sum(1 for record in selected if record.get("grounded") is True),
+        "ungrounded_count": sum(1 for record in selected if record.get("grounded") is False),
+        "candidate_count": sum(1 for record in selected if record.get("candidate") is True),
+        "non_candidate_count": sum(1 for record in selected if record.get("candidate") is False),
+    }
+
+
+def get_replay_record_detail(run_dir: Path | str, replay_record_index: int) -> Dict[str, Any]:
+    loaded = load_replay_index(run_dir)
+    if not loaded.get("ok"):
+        return {"ok": False, "message": loaded.get("message", "replay index load failed")}
+
+    records = loaded["records"]
+    if replay_record_index < 0 or replay_record_index >= len(records):
+        return {
+            "ok": False,
+            "message": f"replay record index out of range: {replay_record_index}",
+            "replay_record_index": replay_record_index,
+        }
+
+    replay_record = records[replay_record_index]
+    result_index = replay_record.get("result_record_index")
+    if not isinstance(result_index, int):
+        return {
+            "ok": False,
+            "message": f"result_record_index is not an integer: {result_index}",
+            "replay_record_index": replay_record_index,
+            "replay_record": replay_record,
+        }
+
+    results = _load_replay_results(loaded["results_path"])
+    if not results.get("ok"):
+        return {
+            "ok": False,
+            "message": results["message"],
+            "replay_record_index": replay_record_index,
+            "replay_record": replay_record,
+        }
+    result_records = results["records"]
+    if result_index < 0 or result_index >= len(result_records):
+        return {
+            "ok": False,
+            "message": f"result_record_index out of range: {result_index}",
+            "replay_record_index": replay_record_index,
+            "result_record_index": result_index,
+            "replay_record": replay_record,
+        }
+
+    result_record = result_records[result_index]
+    return {
+        "ok": True,
+        "message": "",
+        "run_dir": loaded["run_dir"],
+        "replay_index_path": loaded["replay_index_path"],
+        "results_path": loaded["results_path"],
+        "replay_record_index": replay_record_index,
+        "result_record_index": result_index,
+        "replay_record": replay_record,
+        "result_record": result_record,
+        "normalized_summary": _normalized_replay_summary(result_record),
+        "audit": _replay_audit_summary(result_record),
+    }
+
+
+def export_replay_subset(
+    run_dir: Path | str,
+    export_path: Path | str,
+    positive: bool | None = None,
+    hard_negative: bool | None = None,
+    reason: str | None = None,
+    error_code: str | None = None,
+    candidate: bool | None = None,
+    grounded: bool | None = None,
+) -> Dict[str, Any]:
+    loaded = load_replay_index(run_dir)
+    if not loaded.get("ok"):
+        return {"ok": False, "message": loaded.get("message", "replay index load failed"), "export_path": str(export_path)}
+
+    results = _load_replay_results(loaded["results_path"])
+    if not results.get("ok"):
+        return {"ok": False, "message": results["message"], "export_path": str(export_path)}
+
+    selected = filter_replay_records(
+        loaded["records"],
+        positive=positive,
+        hard_negative=hard_negative,
+        reason=reason,
+        error_code=error_code,
+        candidate=candidate,
+        grounded=grounded,
+    )
+    result_records = results["records"]
+    export_items = []
+    for replay_record in selected:
+        result_index = replay_record.get("result_record_index")
+        if not isinstance(result_index, int):
+            return {"ok": False, "message": f"result_record_index is not an integer: {result_index}", "export_path": str(export_path)}
+        if result_index < 0 or result_index >= len(result_records):
+            return {"ok": False, "message": f"result_record_index out of range: {result_index}", "export_path": str(export_path)}
+        export_items.append(_replay_export_item(loaded, replay_record, result_records[result_index]))
+
+    path = Path(export_path).expanduser()
+    if path.parent != Path("."):
+        path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as output_file:
+        for item in export_items:
+            output_file.write(json.dumps(item, ensure_ascii=False) + "\n")
+
+    return {
+        "ok": True,
+        "message": "",
+        "export_path": str(path),
+        "export_count": len(export_items),
+    }
+
+
+def format_replay_records(records: Iterable[Dict[str, Any]]) -> str:
+    lines = []
+    for index, record in enumerate(records):
+        parts = [
+            f"[{index}]",
+            f"scene={record.get('scene_version', UNKNOWN)}",
+            f"label={record.get('target_label', UNKNOWN)}",
+            f"candidate={_format_replay_value(record.get('candidate', UNKNOWN))}",
+            f"error={record.get('error_code', UNKNOWN)}",
+            f"positive={_format_replay_value(record.get('positive_replay_sample', False))}",
+            f"hard_negative={_format_replay_value(record.get('hard_negative_sample', False))}",
+            f"grounded={_format_replay_value(record.get('grounded', False))}",
+        ]
+        if record.get("rejection_reason"):
+            parts.append(f"rejection={record['rejection_reason']}")
+        if record.get("image_path"):
+            parts.append(f"image={record['image_path']}")
+        lines.append(" ".join(parts))
+    return "\n".join(lines) if lines else "(no replay records)"
+
+
+def format_replay_stats(stats: Dict[str, Any]) -> str:
+    lines = [
+        "Replay statistics",
+        f"  total: {stats.get('total_count', 0)}",
+        f"  positive: {stats.get('positive_replay_sample_count', 0)}",
+        f"  hard_negative: {stats.get('hard_negative_sample_count', 0)}",
+        f"  grounded: {stats.get('grounded_count', 0)}",
+        f"  ungrounded: {stats.get('ungrounded_count', 0)}",
+        f"  candidate: {stats.get('candidate_count', 0)}",
+        f"  non_candidate: {stats.get('non_candidate_count', 0)}",
+        "  rejection_reasons:",
+    ]
+    _append_count_lines(lines, stats.get("rejection_reasons", {}))
+    lines.append("  error_codes:")
+    _append_count_lines(lines, stats.get("error_codes", {}))
+    return "\n".join(lines)
+
+
+def format_replay_detail(detail: Dict[str, Any]) -> str:
+    if not detail.get("ok"):
+        return f"Error: {detail.get('message', 'replay detail unavailable')}"
+    lines = [
+        f"Replay record [{detail['replay_record_index']}]",
+        json.dumps(detail["replay_record"], ensure_ascii=False, indent=2),
+        "",
+        f"Result record [{detail['result_record_index']}]",
+        f"  image_path: {detail['result_record'].get('image_path', UNKNOWN)}",
+        f"  parse_status: {detail['result_record'].get('parse_status', UNKNOWN)}",
+        f"  validation_status: {detail['result_record'].get('validation_status', UNKNOWN)}",
+        "",
+        "normalized_json summary",
+        json.dumps(detail["normalized_summary"], ensure_ascii=False, indent=2),
+        "",
+        "audit",
+        json.dumps(detail["audit"], ensure_ascii=False, indent=2),
+    ]
+    return "\n".join(lines)
+
+
 def summarize_scene_index(path: Path | str) -> tuple[Dict[str, Any], Dict[str, Any] | None]:
     index_path = Path(path).expanduser()
     summary: Dict[str, Any] = {
@@ -451,6 +723,98 @@ def _read_index_json(path: Path) -> tuple[Dict[str, Any], str]:
     if not isinstance(data, dict):
         return {}, "top-level JSON value must be an object"
     return data, ""
+
+
+def _load_replay_results(results_path: Path | str) -> Dict[str, Any]:
+    path = Path(results_path).expanduser()
+    if not path.exists():
+        return {
+            "ok": False,
+            "message": f"results.jsonl not found: {path}",
+            "results_path": str(path),
+            "records": [],
+        }
+    try:
+        records = load_results_jsonl(path)
+    except OSError as exc:
+        return {
+            "ok": False,
+            "message": f"results.jsonl read failed: {exc}",
+            "results_path": str(path),
+            "records": [],
+        }
+    return {
+        "ok": True,
+        "message": "",
+        "results_path": str(path),
+        "records": records,
+    }
+
+
+def _normalized_replay_summary(result_record: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = result_record.get("normalized_json", {})
+    if not isinstance(normalized, dict):
+        normalized = {}
+    return {
+        "scene": normalized.get("scene", {}),
+        "target": normalized.get("target", {}),
+        "geometry_2d": normalized.get("geometry_2d", {}),
+        "manipulation_assessment": normalized.get("manipulation_assessment", {}),
+        "error": normalized.get("error", {}),
+    }
+
+
+def _replay_audit_summary(result_record: Dict[str, Any]) -> Dict[str, Any]:
+    raw_bbox = _first_value(
+        result_record,
+        ("parsed_json", "target", "bbox_xyxy"),
+        ("parsed_json", "target", "bbox"),
+        ("parsed_json", "geometry_2d", "bbox_xyxy"),
+        default=None,
+    )
+    raw_pixel_center = _first_value(
+        result_record,
+        ("parsed_json", "geometry_2d", "pixel_center"),
+        ("parsed_json", "target", "pixel_center"),
+        default=None,
+    )
+    return {
+        "raw_bbox_xyxy": raw_bbox,
+        "raw_pixel_center": raw_pixel_center,
+        "pre_normalization_errors": result_record.get("pre_normalization_errors", []),
+        "post_normalization_errors": result_record.get("post_normalization_errors", []),
+    }
+
+
+def _replay_export_item(
+    loaded: Dict[str, Any],
+    replay_record: Dict[str, Any],
+    result_record: Dict[str, Any],
+) -> Dict[str, Any]:
+    return {
+        "source_run_dir": loaded["run_dir"],
+        "source_replay_index_path": loaded["replay_index_path"],
+        "source_results_path": loaded["results_path"],
+        "result_record_index": replay_record.get("result_record_index"),
+        "scene_version": replay_record.get("scene_version", UNKNOWN),
+        "image_path": replay_record.get("image_path", UNKNOWN),
+        "target_label": replay_record.get("target_label", UNKNOWN),
+        "candidate": replay_record.get("candidate"),
+        "error_code": replay_record.get("error_code", UNKNOWN),
+        "positive_replay_sample": replay_record.get("positive_replay_sample", False),
+        "hard_negative_sample": replay_record.get("hard_negative_sample", False),
+        "rejection_reason": replay_record.get("rejection_reason", ""),
+        "replay_record": replay_record,
+        "result_record": result_record,
+    }
+
+
+def _append_count_lines(lines: List[str], counts: Dict[str, Any]) -> None:
+    if not counts:
+        lines.append("    none: 0")
+        return
+    for key, count in counts.items():
+        lines.append(f"    {key}: {count}")
 
 
 def _consistency_result(warnings: List[str], errors: List[str]) -> Dict[str, Any]:
@@ -760,6 +1124,16 @@ def _format_value(value: Any) -> str:
         return "true"
     if value is False:
         return "false"
+    if value is None:
+        return "null"
+    return str(value)
+
+
+def _format_replay_value(value: Any) -> str:
+    if value is True:
+        return "True"
+    if value is False:
+        return "False"
     if value is None:
         return "null"
     return str(value)

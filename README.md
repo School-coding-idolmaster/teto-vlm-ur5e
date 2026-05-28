@@ -380,6 +380,36 @@ This remains semantic middleware inspection only. TETO does not execute robot
 behavior, connect to ROS2 / MoveIt / UR5, generate URScript, generate joint
 angles, generate trajectories, or send robot control commands.
 
+## TETO V1.5.0 semantic replay CLI
+
+`scripts/semantic_replay.py` adds a semantic replay sample manager for saved
+`robot_task_json` runs. It reads existing `replay_index.json` and
+`results.jsonl` files to list, filter, inspect, and export replay subsets
+without rerunning the model.
+
+```bash
+python3 scripts/semantic_replay.py outputs/results/robot_task_json/run_YYYYMMDD_HHMMSS --stats
+python3 scripts/semantic_replay.py outputs/results/robot_task_json/run_YYYYMMDD_HHMMSS --list
+python3 scripts/semantic_replay.py outputs/results/robot_task_json/run_YYYYMMDD_HHMMSS --show 0
+python3 scripts/semantic_replay.py outputs/results/robot_task_json/run_YYYYMMDD_HHMMSS --hard-negative --export hard_negatives.jsonl
+```
+
+Filters include `--positive`, `--hard-negative`, `--reason`, `--error-code`,
+`--candidate true|false`, and `--grounded true|false`. The statistics view
+reports total records, positive samples, hard negatives, rejection reason
+counts, error code counts, grounded/ungrounded counts, and candidate /
+non-candidate counts.
+
+Exports are JSONL references to the original run, replay record, and result
+record. They do not copy images or large files and do not write under
+`outputs/` unless that path is explicitly requested. This is intended for hard
+negative review, positive sample review, and later data-loop preparation.
+
+Semantic replay is still only semantic middleware. It does not call Qwen, does
+not change prompts, does not rerun VLM inference, does not connect to ROS2 /
+MoveIt / UR5, and does not generate URScript, joint angles, trajectories, or
+robot control commands.
+
 In the `python3 teto_V1.py` launcher, single image recognition and batch image
 recognition also show prompt helper keywords. You can type a built-in prompt
 type, a shortcut keyword, or a free-form prompt. Useful shortcuts include:
