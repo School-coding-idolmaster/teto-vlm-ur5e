@@ -8,6 +8,8 @@ from src.robot_task_inspector import (
     build_replay_index,
     build_scene_index,
     format_items,
+    format_summary,
+    inspect_run_indexes,
     inspect_robot_task_run,
     load_results_jsonl,
     write_scene_and_replay_indexes,
@@ -630,6 +632,171 @@ def test_replay_index_positive_and_hard_negative_flags(tmp_path):
     assert records[1]["positive_replay_sample"] is False
     assert records[1]["hard_negative_sample"] is True
     assert records[1]["rejection_reason"] == "E_NO_TARGET"
+
+
+def test_inspect_run_indexes_reports_scene_and_replay_summary(tmp_path):
+    run_dir = tmp_path / "run_20260527_120003_index_summary"
+    _write_jsonl(
+        run_dir / "results.jsonl",
+        [
+            {
+                "image_path": "/tmp/camera.jpg",
+                "parse_status": "success",
+                "validation_status": "passed",
+                "normalized_json": {
+                    "scene": {"scene_version": "run_index_summary_item_001", "status": "valid"},
+                    "target": {"label": "camera", "target_id": "obj_001", "bbox_xyxy": [1, 2, 11, 22]},
+                    "geometry_2d": {"pixel_center": [6, 12], "confidence": 0.6},
+                    "manipulation_assessment": {"candidate": True, "difficulty": "easy"},
+                    "error": {"code": "OK"},
+                },
+            },
+            {
+                "image_path": "/tmp/empty.jpg",
+                "parse_status": "success",
+                "validation_status": "failed",
+                "normalized_json": {
+                    "scene": {"scene_version": "run_index_summary_item_002", "status": "valid"},
+                    "target": {"label": "unknown", "target_id": "unknown", "bbox_xyxy": None},
+                    "geometry_2d": {"pixel_center": None, "confidence": 0.0},
+                    "manipulation_assessment": {"candidate": False, "difficulty": "unknown"},
+                    "error": {"code": "E_NO_TARGET"},
+                },
+            },
+        ],
+    )
+    write_scene_and_replay_indexes(run_dir)
+
+    indexes = inspect_run_indexes(run_dir)
+
+    assert indexes["scene_index"]["exists"] is True
+    assert indexes["scene_index"]["scene_count"] == 2
+    assert indexes["scene_index"]["total_count"] == 2
+    assert indexes["replay_index"]["exists"] is True
+    assert indexes["replay_index"]["record_count"] == 2
+    assert indexes["replay_index"]["positive_replay_sample_count"] == 1
+    assert indexes["replay_index"]["hard_negative_sample_count"] == 1
+    assert indexes["consistency"]["status"] == "ok"
+
+
+def test_inspect_run_indexes_reports_rejection_reason_counts(tmp_path):
+    run_dir = tmp_path / "run_20260527_120003_rejection_counts"
+    _write_jsonl(
+        run_dir / "results.jsonl",
+        [
+            {
+                "image_path": "/tmp/empty1.jpg",
+                "parse_status": "success",
+                "validation_status": "failed",
+                "normalized_json": {
+                    "scene": {"scene_version": "run_rejection_counts_item_001", "status": "valid"},
+                    "target": {"label": "unknown", "target_id": "unknown", "bbox_xyxy": None},
+                    "geometry_2d": {"pixel_center": None, "confidence": 0.0},
+                    "manipulation_assessment": {"candidate": False, "difficulty": "unknown"},
+                    "error": {"code": "E_NO_TARGET"},
+                },
+            },
+            {
+                "image_path": "/tmp/empty2.jpg",
+                "parse_status": "success",
+                "validation_status": "failed",
+                "normalized_json": {
+                    "scene": {"scene_version": "run_rejection_counts_item_002", "status": "valid"},
+                    "target": {"label": "unknown", "target_id": "unknown", "bbox_xyxy": None},
+                    "geometry_2d": {"pixel_center": None, "confidence": 0.0},
+                    "manipulation_assessment": {"candidate": False, "difficulty": "unknown"},
+                    "error": {"code": "E_NO_TARGET"},
+                },
+            },
+        ],
+    )
+    write_scene_and_replay_indexes(run_dir)
+
+    indexes = inspect_run_indexes(run_dir)
+
+    assert indexes["replay_index"]["rejection_reasons"] == {"E_NO_TARGET": 2}
+
+
+def test_inspect_run_indexes_detects_missing_indexes_without_crashing(tmp_path):
+    run_dir = tmp_path / "run_20260527_120003_missing_indexes"
+    run_dir.mkdir()
+
+    indexes = inspect_run_indexes(run_dir)
+
+    assert indexes["scene_index"]["exists"] is False
+    assert indexes["replay_index"]["exists"] is False
+    assert indexes["consistency"]["status"] == "warning"
+    assert indexes["consistency"]["errors"] == []
+    assert len(indexes["consistency"]["warnings"]) == 2
+
+
+def test_inspect_run_indexes_detects_count_mismatch(tmp_path):
+    run_dir = tmp_path / "run_20260527_120003_count_mismatch"
+    run_dir.mkdir()
+    (run_dir / "scene_index.json").write_text(
+        json.dumps(
+            {
+                "scene_index_version": "teto_scene_index.v1",
+                "run_id": run_dir.name,
+                "total_count": 2,
+                "scene_versions": ["scene_001", "scene_002"],
+                "scenes": [
+                    {"scene_version": "scene_001"},
+                    {"scene_version": "scene_002"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "replay_index.json").write_text(
+        json.dumps(
+            {
+                "replay_index_version": "teto_replay_index.v1",
+                "run_id": run_dir.name,
+                "records": [{"scene_version": "scene_001"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    indexes = inspect_run_indexes(run_dir)
+
+    assert indexes["consistency"]["status"] == "error"
+    assert "records count 1" in indexes["consistency"]["errors"][0]
+
+
+def test_inspector_summary_displays_index_paths_and_counts(tmp_path):
+    run_dir = tmp_path / "run_20260527_120003_index_display"
+    _write_jsonl(
+        run_dir / "results.jsonl",
+        [
+            {
+                "image_path": "/tmp/camera.jpg",
+                "parse_status": "success",
+                "validation_status": "passed",
+                "normalized_json": {
+                    "scene": {"scene_version": "run_index_display_item_001", "status": "valid"},
+                    "target": {"label": "camera", "target_id": "obj_001", "bbox_xyxy": [1, 2, 11, 22]},
+                    "geometry_2d": {"pixel_center": [6, 12], "confidence": 0.6},
+                    "manipulation_assessment": {"candidate": True, "difficulty": "easy"},
+                    "error": {"code": "OK"},
+                },
+            }
+        ],
+    )
+    write_scene_and_replay_indexes(run_dir)
+
+    text = format_summary(inspect_robot_task_run(run_dir))
+
+    assert "Index summary" in text
+    assert "scene_index:" in text
+    assert "path: scene_index.json" in text
+    assert "scenes: 1" in text
+    assert "replay_index:" in text
+    assert "path: replay_index.json" in text
+    assert "records: 1" in text
+    assert "positive_replay_samples: 1" in text
+    assert "index_consistency: ok" in text
 
 
 def test_legacy_results_without_scene_do_not_crash_index_generation(tmp_path):

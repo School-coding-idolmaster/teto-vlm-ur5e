@@ -360,6 +360,26 @@ These indexes are still only software-readable semantic middleware artifacts.
 They are not 3D coordinates, MoveIt goals, UR5 commands, URScript, joint
 angles, trajectories, or robot control instructions.
 
+## TETO V1.4.1 real-run replay index verification
+
+The saved run inspector now includes read-only `scene_index.json` and
+`replay_index.json` inspection. It can summarize scene count, valid/rejected
+scene counts, no-target count, normalized grounding count, positive replay
+sample count, hard negative sample count, and `rejection_reason` distribution.
+
+It also performs a run-level consistency check between the two index files:
+scene and replay record counts, run IDs, and scene version sets are compared
+without rerunning the model. Missing index files in older runs are reported as
+warnings instead of crashes.
+
+```bash
+python3 scripts/inspect_robot_task_json.py --run-dir outputs/results/robot_task_json/run_YYYYMMDD_HHMMSS --indexes
+```
+
+This remains semantic middleware inspection only. TETO does not execute robot
+behavior, connect to ROS2 / MoveIt / UR5, generate URScript, generate joint
+angles, generate trajectories, or send robot control commands.
+
 In the `python3 teto_V1.py` launcher, single image recognition and batch image
 recognition also show prompt helper keywords. You can type a built-in prompt
 type, a shortcut keyword, or a free-form prompt. Useful shortcuts include:

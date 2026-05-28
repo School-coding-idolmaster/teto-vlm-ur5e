@@ -15,6 +15,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--run-dir", help="robot_task_json run directory. Defaults to the latest run.")
     parser.add_argument("--limit", type=int, help="Maximum number of detailed items to display.")
     parser.add_argument("--details", action="store_true", help="Show per-item inspection details.")
+    parser.add_argument("--indexes", action="store_true", help="Show scene/replay index summary; included in summary output.")
     return parser
 
 

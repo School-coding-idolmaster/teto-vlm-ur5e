@@ -1,4 +1,5 @@
 import json
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -84,6 +85,7 @@ def inspect_robot_task_run(run_dir: Path | str | None = None) -> Dict[str, Any]:
         "smoke_report_md_path": str(selected_run_dir / "smoke_report.md"),
         "smoke_report_json_path": str(selected_run_dir / "smoke_report.json"),
         "summary": _build_summary(items),
+        "indexes": inspect_run_indexes(selected_run_dir),
         "items": items,
     }
 
@@ -120,12 +122,202 @@ def format_summary(inspection: Dict[str, Any]) -> str:
         lines.extend(
             [
                 "",
+                *format_index_summary_lines(inspection.get("indexes", {})),
+                "",
                 "Smoke report:",
                 f"- Markdown: {inspection['smoke_report_md_path']}",
                 f"- JSON: {inspection['smoke_report_json_path']}",
             ]
         )
     return "\n".join(lines)
+
+
+def inspect_run_indexes(run_dir: Path | str) -> Dict[str, Any]:
+    run_path = Path(run_dir).expanduser()
+    scene_path = run_path / "scene_index.json"
+    replay_path = run_path / "replay_index.json"
+    warnings: List[str] = []
+    errors: List[str] = []
+
+    scene_index, scene_data = summarize_scene_index(scene_path)
+    replay_index, replay_data = summarize_replay_index(replay_path)
+
+    if not scene_index["exists"]:
+        warnings.append(f"scene_index.json missing: {scene_path}")
+    if not replay_index["exists"]:
+        warnings.append(f"replay_index.json missing: {replay_path}")
+    if scene_index.get("read_error"):
+        errors.append(f"scene_index.json read failed: {scene_index['read_error']}")
+    if replay_index.get("read_error"):
+        errors.append(f"replay_index.json read failed: {replay_index['read_error']}")
+
+    if scene_data is not None and replay_data is not None:
+        verification = verify_scene_and_replay_indexes(scene_data, replay_data)
+        warnings.extend(verification["warnings"])
+        errors.extend(verification["errors"])
+
+    return {
+        "scene_index": scene_index,
+        "replay_index": replay_index,
+        "consistency": _consistency_result(warnings, errors),
+    }
+
+
+def summarize_scene_index(path: Path | str) -> tuple[Dict[str, Any], Dict[str, Any] | None]:
+    index_path = Path(path).expanduser()
+    summary: Dict[str, Any] = {
+        "exists": index_path.exists(),
+        "path": str(index_path),
+    }
+    if not index_path.exists():
+        return summary, None
+
+    data, error = _read_index_json(index_path)
+    if error:
+        summary["read_error"] = error
+        return summary, None
+
+    scenes = data.get("scenes", [])
+    if not isinstance(scenes, list):
+        scenes = []
+    for key in [
+        "scene_index_version",
+        "run_id",
+        "total_count",
+        "valid_scene_count",
+        "invalid_scene_count",
+        "candidate_scene_count",
+        "rejected_scene_count",
+        "no_target_count",
+        "grounding_count",
+        "grounding_missing_count",
+    ]:
+        summary[key] = data.get(key, 0 if key.endswith("_count") else "")
+    summary["scene_count"] = len(scenes)
+    return summary, data
+
+
+def summarize_replay_index(path: Path | str) -> tuple[Dict[str, Any], Dict[str, Any] | None]:
+    index_path = Path(path).expanduser()
+    summary: Dict[str, Any] = {
+        "exists": index_path.exists(),
+        "path": str(index_path),
+    }
+    if not index_path.exists():
+        return summary, None
+
+    data, error = _read_index_json(index_path)
+    if error:
+        summary["read_error"] = error
+        return summary, None
+
+    records = data.get("records", [])
+    if not isinstance(records, list):
+        records = []
+    reasons = Counter(
+        str(record.get("rejection_reason"))
+        for record in records
+        if isinstance(record, dict) and record.get("rejection_reason")
+    )
+    summary.update(
+        {
+            "replay_index_version": data.get("replay_index_version", ""),
+            "run_id": data.get("run_id", ""),
+            "record_count": len(records),
+            "positive_replay_sample_count": sum(
+                1 for record in records if isinstance(record, dict) and record.get("positive_replay_sample") is True
+            ),
+            "hard_negative_sample_count": sum(
+                1 for record in records if isinstance(record, dict) and record.get("hard_negative_sample") is True
+            ),
+            "rejection_reasons": dict(sorted(reasons.items())),
+        }
+    )
+    return summary, data
+
+
+def verify_scene_and_replay_indexes(scene_index: Dict[str, Any], replay_index: Dict[str, Any]) -> Dict[str, Any]:
+    warnings: List[str] = []
+    errors: List[str] = []
+    scenes = scene_index.get("scenes", [])
+    records = replay_index.get("records", [])
+    if not isinstance(scenes, list):
+        scenes = []
+        errors.append("scene_index.scenes is not a list")
+    if not isinstance(records, list):
+        records = []
+        errors.append("replay_index.records is not a list")
+
+    total_count = scene_index.get("total_count")
+    if len(scenes) != total_count:
+        errors.append(f"scene_index.scenes count {len(scenes)} does not match total_count {total_count}")
+    if len(records) != total_count:
+        errors.append(f"replay_index.records count {len(records)} does not match scene_index total_count {total_count}")
+
+    scene_run_id = scene_index.get("run_id")
+    replay_run_id = replay_index.get("run_id")
+    if scene_run_id != replay_run_id:
+        errors.append(f"run_id mismatch: scene_index={scene_run_id}, replay_index={replay_run_id}")
+
+    scene_versions = scene_index.get("scene_versions")
+    if not isinstance(scene_versions, list):
+        scene_versions = [scene.get("scene_version") for scene in scenes if isinstance(scene, dict)]
+    replay_versions = [record.get("scene_version") for record in records if isinstance(record, dict)]
+    if set(scene_versions) != set(replay_versions):
+        warnings.append("scene_version set mismatch between scene_index and replay_index")
+
+    return _consistency_result(warnings, errors)
+
+
+def format_index_summary_lines(indexes: Dict[str, Any]) -> List[str]:
+    if not indexes:
+        return []
+    scene_index = indexes.get("scene_index", {})
+    replay_index = indexes.get("replay_index", {})
+    consistency = indexes.get("consistency", {"status": "warning", "warnings": [], "errors": []})
+    lines = ["Index summary"]
+    if scene_index.get("exists"):
+        lines.extend(
+            [
+                "  scene_index:",
+                f"    path: {_display_index_path(scene_index.get('path', ''))}",
+                f"    scenes: {scene_index.get('scene_count', 0)}",
+                f"    valid: {scene_index.get('valid_scene_count', 0)}",
+                f"    rejected: {scene_index.get('rejected_scene_count', 0)}",
+                f"    no_target: {scene_index.get('no_target_count', 0)}",
+                f"    grounding: {scene_index.get('grounding_count', 0)}",
+                f"    grounding_missing: {scene_index.get('grounding_missing_count', 0)}",
+            ]
+        )
+    else:
+        lines.append("  scene_index: missing")
+
+    if replay_index.get("exists"):
+        lines.extend(
+            [
+                "  replay_index:",
+                f"    path: {_display_index_path(replay_index.get('path', ''))}",
+                f"    records: {replay_index.get('record_count', 0)}",
+                f"    positive_replay_samples: {replay_index.get('positive_replay_sample_count', 0)}",
+                f"    hard_negative_samples: {replay_index.get('hard_negative_sample_count', 0)}",
+                "    rejection_reasons:",
+            ]
+        )
+        reasons = replay_index.get("rejection_reasons", {})
+        if reasons:
+            for reason, count in reasons.items():
+                lines.append(f"      {reason}: {count}")
+        else:
+            lines.append("      none: 0")
+    else:
+        lines.append("  replay_index: missing")
+
+    lines.append(f"  index_consistency: {consistency.get('status', 'warning')}")
+    for error in consistency.get("errors", []):
+        lines.append(f"    error: {error}")
+    for warning in consistency.get("warnings", []):
+        lines.append(f"    warning: {warning}")
+    return lines
 
 
 def format_items(items: Iterable[Dict[str, Any]], limit: int | None = None) -> str:
@@ -247,6 +439,36 @@ def write_scene_and_replay_indexes(run_dir: Path | str) -> Dict[str, str]:
         "scene_index_path": str(scene_index_path),
         "replay_index_path": str(replay_index_path),
     }
+
+
+def _read_index_json(path: Path) -> tuple[Dict[str, Any], str]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        return {}, str(exc)
+    except json.JSONDecodeError as exc:
+        return {}, f"{exc.msg} at column {exc.colno}"
+    if not isinstance(data, dict):
+        return {}, "top-level JSON value must be an object"
+    return data, ""
+
+
+def _consistency_result(warnings: List[str], errors: List[str]) -> Dict[str, Any]:
+    status = "ok"
+    if errors:
+        status = "error"
+    elif warnings:
+        status = "warning"
+    return {
+        "status": status,
+        "warnings": warnings,
+        "errors": errors,
+    }
+
+
+def _display_index_path(value: Any) -> str:
+    text = str(value)
+    return Path(text).name if text else ""
 
 
 def _inspect_item(index: int, item: Dict[str, Any]) -> Dict[str, Any]:
