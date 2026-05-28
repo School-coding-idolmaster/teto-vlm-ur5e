@@ -217,6 +217,7 @@ def load_replay_index(run_dir: Path | str) -> Dict[str, Any]:
         "run_dir": str(run_path),
         "replay_index_path": str(replay_path),
         "results_path": str(replay_index.get("results_path") or run_path / "results.jsonl"),
+        "run_id": str(replay_index.get("run_id", run_path.name)),
         "records": [record for record in records if isinstance(record, dict)],
         "replay_index": replay_index,
     }
@@ -314,6 +315,7 @@ def get_replay_record_detail(run_dir: Path | str, replay_record_index: int) -> D
         "run_dir": loaded["run_dir"],
         "replay_index_path": loaded["replay_index_path"],
         "results_path": loaded["results_path"],
+        "run_id": loaded.get("run_id", ""),
         "replay_record_index": replay_record_index,
         "result_record_index": result_index,
         "replay_record": replay_record,
@@ -375,9 +377,15 @@ def export_replay_subset(
     }
 
 
-def format_replay_records(records: Iterable[Dict[str, Any]]) -> str:
+def format_replay_records(records: Iterable[Dict[str, Any]], limit: int | None = None) -> str:
+    selected = list(records)
+    total_count = len(selected)
+    if limit is not None:
+        selected = selected[: max(limit, 0)]
     lines = []
-    for index, record in enumerate(records):
+    if limit is not None:
+        lines.append(f"Showing {len(selected)} of {total_count} records")
+    for index, record in enumerate(selected):
         parts = [
             f"[{index}]",
             f"scene={record.get('scene_version', UNKNOWN)}",
@@ -396,41 +404,100 @@ def format_replay_records(records: Iterable[Dict[str, Any]]) -> str:
     return "\n".join(lines) if lines else "(no replay records)"
 
 
-def format_replay_stats(stats: Dict[str, Any]) -> str:
+def format_replay_stats(
+    stats: Dict[str, Any],
+    source: Dict[str, Any] | None = None,
+    active_filters: Dict[str, Any] | None = None,
+) -> str:
     lines = [
         "Replay statistics",
-        f"  total: {stats.get('total_count', 0)}",
-        f"  positive: {stats.get('positive_replay_sample_count', 0)}",
-        f"  hard_negative: {stats.get('hard_negative_sample_count', 0)}",
-        f"  grounded: {stats.get('grounded_count', 0)}",
-        f"  ungrounded: {stats.get('ungrounded_count', 0)}",
-        f"  candidate: {stats.get('candidate_count', 0)}",
-        f"  non_candidate: {stats.get('non_candidate_count', 0)}",
-        "  rejection_reasons:",
     ]
+    if source:
+        lines.extend(
+            [
+                f"  run_dir: {source.get('run_dir', '')}",
+                f"  replay_index: {_display_index_path(source.get('replay_index_path', ''))}",
+                f"  results: {_display_index_path(source.get('results_path', ''))}",
+                f"  run_id: {source.get('run_id', '')}",
+            ]
+        )
+    lines.append(f"  total: {stats.get('total_count', 0)}")
+    if source and "filtered_total" in source:
+        lines.append(f"  filtered_total: {source['filtered_total']}")
+    lines.extend(
+        [
+            f"  positive: {stats.get('positive_replay_sample_count', 0)}",
+            f"  hard_negative: {stats.get('hard_negative_sample_count', 0)}",
+            f"  grounded: {stats.get('grounded_count', 0)}",
+            f"  ungrounded: {stats.get('ungrounded_count', 0)}",
+            f"  candidate: {stats.get('candidate_count', 0)}",
+            f"  non_candidate: {stats.get('non_candidate_count', 0)}",
+        ]
+    )
+    lines.extend(format_active_filter_lines(active_filters))
+    lines.append("  rejection_reasons:")
     _append_count_lines(lines, stats.get("rejection_reasons", {}))
     lines.append("  error_codes:")
     _append_count_lines(lines, stats.get("error_codes", {}))
     return "\n".join(lines)
 
 
+def format_active_filter_lines(active_filters: Dict[str, Any] | None) -> List[str]:
+    filters = active_filters or {}
+    if not filters:
+        return []
+    lines = ["Active filters:"]
+    for key, value in filters.items():
+        lines.append(f"  {key}: {_format_value(value)}")
+    return lines
+
+
 def format_replay_detail(detail: Dict[str, Any]) -> str:
     if not detail.get("ok"):
         return f"Error: {detail.get('message', 'replay detail unavailable')}"
+    replay_record = detail["replay_record"]
+    result_record = detail["result_record"]
+    normalized = detail["normalized_summary"]
+    scene = normalized.get("scene", {})
+    target = normalized.get("target", {})
+    geometry = normalized.get("geometry_2d", {})
+    error = normalized.get("error", {})
+    audit = detail["audit"]
     lines = [
-        f"Replay record [{detail['replay_record_index']}]",
-        json.dumps(detail["replay_record"], ensure_ascii=False, indent=2),
+        "Replay record",
+        f"  index: {detail['replay_record_index']}",
+        f"  scene_version: {replay_record.get('scene_version', UNKNOWN)}",
+        f"  scene_status: {replay_record.get('scene_status', UNKNOWN)}",
+        f"  target_id: {replay_record.get('target_id', UNKNOWN)}",
+        f"  target_label: {replay_record.get('target_label', UNKNOWN)}",
+        f"  candidate: {_format_replay_value(replay_record.get('candidate', UNKNOWN))}",
+        f"  error_code: {replay_record.get('error_code', UNKNOWN)}",
+        f"  grounded: {_format_replay_value(replay_record.get('grounded', False))}",
+        f"  positive_replay_sample: {_format_replay_value(replay_record.get('positive_replay_sample', False))}",
+        f"  hard_negative_sample: {_format_replay_value(replay_record.get('hard_negative_sample', False))}",
+        f"  rejection_reason: {replay_record.get('rejection_reason', '')}",
         "",
-        f"Result record [{detail['result_record_index']}]",
-        f"  image_path: {detail['result_record'].get('image_path', UNKNOWN)}",
-        f"  parse_status: {detail['result_record'].get('parse_status', UNKNOWN)}",
-        f"  validation_status: {detail['result_record'].get('validation_status', UNKNOWN)}",
+        "Result record",
+        f"  result_record_index: {detail['result_record_index']}",
+        f"  parse_status: {result_record.get('parse_status', UNKNOWN)}",
+        f"  validation_status: {result_record.get('validation_status', UNKNOWN)}",
+        f"  image_path: {result_record.get('image_path', UNKNOWN)}",
         "",
-        "normalized_json summary",
-        json.dumps(detail["normalized_summary"], ensure_ascii=False, indent=2),
+        "Normalized result",
+        f"  scene.status: {scene.get('status', UNKNOWN)}",
+        f"  target.target_id: {target.get('target_id', UNKNOWN)}",
+        f"  target.label: {target.get('label', UNKNOWN)}",
+        f"  target.candidate: {_format_replay_value(target.get('candidate', UNKNOWN))}",
+        f"  error.code: {error.get('code', UNKNOWN)}",
+        f"  bbox_xyxy: {_format_value(target.get('bbox_xyxy'))}",
+        f"  pixel_center: {_format_value(geometry.get('pixel_center'))}",
+        f"  grounded: {_format_replay_value(replay_record.get('grounded', False))}",
         "",
-        "audit",
-        json.dumps(detail["audit"], ensure_ascii=False, indent=2),
+        "Audit raw fields",
+        f"  raw_bbox_xyxy: {_format_value(audit.get('raw_bbox_xyxy'))}",
+        f"  raw_pixel_center: {_format_value(audit.get('raw_pixel_center'))}",
+        f"  pre_normalization_errors: {audit.get('pre_normalization_errors', [])}",
+        f"  post_normalization_errors: {audit.get('post_normalization_errors', [])}",
     ]
     return "\n".join(lines)
 

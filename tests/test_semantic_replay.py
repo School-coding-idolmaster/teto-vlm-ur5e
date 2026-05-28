@@ -6,6 +6,10 @@ from pathlib import Path
 from src.robot_task_inspector import (
     export_replay_subset,
     filter_replay_records,
+    format_active_filter_lines,
+    format_replay_detail,
+    format_replay_records,
+    format_replay_stats,
     get_replay_record_detail,
     load_replay_index,
     summarize_replay_records,
@@ -113,6 +117,26 @@ def test_semantic_replay_stats_counts_positive_and_hard_negative(tmp_path):
     assert stats["error_codes"] == {"E_NO_TARGET": 1, "E_UNSAFE": 1, "OK": 1}
 
 
+def test_semantic_replay_stats_displays_run_sources(tmp_path):
+    run_dir = _make_replay_run(tmp_path)
+    loaded = load_replay_index(run_dir)
+    stats = summarize_replay_records(loaded["records"])
+    text = format_replay_stats(
+        stats,
+        source={
+            "run_dir": loaded["run_dir"],
+            "replay_index_path": loaded["replay_index_path"],
+            "results_path": loaded["results_path"],
+            "run_id": loaded["run_id"],
+        },
+    )
+
+    assert f"run_dir: {run_dir}" in text
+    assert "replay_index: replay_index.json" in text
+    assert "results: results.jsonl" in text
+    assert f"run_id: {run_dir.name}" in text
+
+
 def test_semantic_replay_filters_hard_negative_by_reason(tmp_path):
     run_dir = _make_replay_run(tmp_path)
     records = load_replay_index(run_dir)["records"]
@@ -135,6 +159,38 @@ def test_semantic_replay_filters_positive_samples(tmp_path):
     assert selected[0]["target_label"] == "camera"
 
 
+def test_semantic_replay_list_limit_limits_display_only(tmp_path):
+    run_dir = _make_replay_run(tmp_path)
+    records = load_replay_index(run_dir)["records"]
+    selected = filter_replay_records(records, hard_negative=True)
+
+    text = format_replay_records(selected, limit=1)
+
+    assert len(selected) == 2
+    assert "Showing 1 of 2 records" in text
+    assert "[0] scene=run_20260529_150000_item_002" in text
+    assert "run_20260529_150000_item_003" not in text
+
+
+def test_semantic_replay_list_displays_active_filters():
+    text = "\n".join(
+        format_active_filter_lines(
+            {
+                "hard_negative": True,
+                "reason": "E_NO_TARGET",
+                "candidate": False,
+                "grounded": False,
+            }
+        )
+    )
+
+    assert "Active filters:" in text
+    assert "hard_negative: true" in text
+    assert "reason: E_NO_TARGET" in text
+    assert "candidate: false" in text
+    assert "grounded: false" in text
+
+
 def test_semantic_replay_show_record_returns_replay_and_result_record(tmp_path):
     run_dir = _make_replay_run(tmp_path)
 
@@ -147,6 +203,20 @@ def test_semantic_replay_show_record_returns_replay_and_result_record(tmp_path):
     assert detail["audit"]["raw_bbox_xyxy"] == [0, 0, 10, 10]
     assert detail["audit"]["raw_pixel_center"] == [5, 5]
     assert detail["audit"]["pre_normalization_errors"] == ["raw target was unknown"]
+
+
+def test_semantic_replay_show_displays_audit_sections(tmp_path):
+    run_dir = _make_replay_run(tmp_path)
+
+    text = format_replay_detail(get_replay_record_detail(run_dir, 1))
+
+    assert "Replay record" in text
+    assert "Result record" in text
+    assert "Normalized result" in text
+    assert "Audit raw fields" in text
+    assert "raw_bbox_xyxy: [0, 0, 10, 10]" in text
+    assert "raw_pixel_center: [5, 5]" in text
+    assert "pre_normalization_errors: ['raw target was unknown']" in text
 
 
 def test_semantic_replay_export_subset_writes_jsonl(tmp_path):
@@ -214,6 +284,22 @@ def test_semantic_replay_cli_lists_records(tmp_path):
     assert "positive=True" in completed.stdout
     assert "hard_negative=True" in completed.stdout
     assert "rejection=E_NO_TARGET" in completed.stdout
+
+
+def test_semantic_replay_limit_invalid_value_reports_error(tmp_path):
+    run_dir = _make_replay_run(tmp_path)
+
+    completed = subprocess.run(
+        [sys.executable, "scripts/semantic_replay.py", str(run_dir), "--list", "--limit", "0"],
+        cwd=Path(__file__).resolve().parents[1],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 1
+    assert "--limit must be a positive integer" in completed.stdout
+    assert "Traceback" not in completed.stderr
 
 
 def test_semantic_replay_cli_exports_hard_negatives(tmp_path):

@@ -410,6 +410,32 @@ not change prompts, does not rerun VLM inference, does not connect to ROS2 /
 MoveIt / UR5, and does not generate URScript, joint angles, trajectories, or
 robot control commands.
 
+## TETO V1.5.1 semantic replay real-run polish
+
+The semantic replay CLI now prints run source context in `--stats`, including
+the run directory, replay index path, results JSONL path, and replay `run_id`.
+When filters are active, it also reports `filtered_total` and prints the active
+filter set so real-run reviews are easier to audit.
+
+`--list` accepts `--limit N` to cap display output without changing the
+filtered record set used by stats or export:
+
+```bash
+python3 scripts/semantic_replay.py outputs/results/robot_task_json/run_YYYYMMDD_HHMMSS --list --limit 10
+python3 scripts/semantic_replay.py outputs/results/robot_task_json/run_YYYYMMDD_HHMMSS --hard-negative --reason E_NO_TARGET --list --limit 10
+```
+
+`--show N` now uses stable review sections for replay record fields, matching
+result record status, normalized scene/target/error fields, and raw audit
+fields. Raw bbox and pixel-center fields are displayed only for audit; they do
+not affect normalized grounding, positive replay sample, or hard negative
+sample decisions.
+
+V1.5.1 remains semantic middleware polish only. It does not implement
+planner_gateway, rerun models, call Qwen, change prompts, connect to ROS2 /
+MoveIt / UR5, generate URScript, generate joint angles, generate trajectories,
+or send robot control commands.
+
 In the `python3 teto_V1.py` launcher, single image recognition and batch image
 recognition also show prompt helper keywords. You can type a built-in prompt
 type, a shortcut keyword, or a free-form prompt. Useful shortcuts include:
