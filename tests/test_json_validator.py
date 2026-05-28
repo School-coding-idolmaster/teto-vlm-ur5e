@@ -77,9 +77,10 @@ def test_normalize_robot_task_json_marks_invalid_vocab():
     result = normalize_robot_task_json(data)
 
     assert result["parse_status"] == "success"
-    assert result["validation_status"] == "failed"
+    assert result["validation_status"] == "warning"
     assert result["normalized_json"]["target"]["approx_position"] == "unknown"
-    assert result["validation_errors"]
+    assert result["pre_normalization_errors"]
+    assert result["post_normalization_errors"] == []
 
 
 def test_parse_robot_task_response_handles_parse_failure():
@@ -114,12 +115,13 @@ def test_parse_robot_task_response_forces_living_target_unsafe():
     result = parse_robot_task_response(json.dumps(data))
 
     assert result["parse_status"] == "success"
-    assert result["validation_status"] == "failed"
+    assert result["validation_status"] == "warning"
     assert result["parsed_json"]["manipulation_assessment"]["candidate"] is True
     assert result["normalized_json"]["manipulation_assessment"]["candidate"] is False
     assert result["normalized_json"]["manipulation_assessment"]["difficulty"] == "unsafe"
     assert result["normalized_json"]["error"]["code"] == "E_UNSAFE"
-    assert result["validation_errors"]
+    assert result["pre_normalization_errors"]
+    assert result["post_normalization_errors"] == []
     assert result["validation_warnings"]
 
 
@@ -136,7 +138,7 @@ def test_parse_robot_task_response_forces_living_being_unsafe():
     result = parse_robot_task_response(json.dumps(data))
 
     assert result["parse_status"] == "success"
-    assert result["validation_status"] == "failed"
+    assert result["validation_status"] == "warning"
     assert result["normalized_json"]["manipulation_assessment"]["candidate"] is False
     assert result["normalized_json"]["manipulation_assessment"]["difficulty"] == "unsafe"
     assert result["normalized_json"]["error"]["code"] == "E_UNSAFE"
@@ -159,7 +161,9 @@ def test_normalize_robot_task_json_marks_unknown_candidate_as_no_target():
 
     result = normalize_robot_task_json(data)
 
-    assert result["validation_status"] == "failed"
+    assert result["validation_status"] == "warning"
+    assert result["pre_normalization_errors"]
+    assert result["post_normalization_errors"] == []
     assert result["normalized_json"]["manipulation_assessment"]["candidate"] is False
     assert result["normalized_json"]["error"]["code"] == "E_NO_TARGET"
 
@@ -308,8 +312,9 @@ def test_bad_bbox_format_reports_validation_error_without_crashing():
 
     result = normalize_robot_task_json(data, image_size=(640, 480))
 
-    assert result["validation_status"] == "failed"
-    assert "target.bbox_xyxy must be null or a list of 4 numbers" in result["validation_errors"]
+    assert result["validation_status"] == "warning"
+    assert "target.bbox_xyxy must be null or a list of 4 numbers" in result["pre_normalization_errors"]
+    assert result["post_normalization_errors"] == []
 
 
 def test_valid_pixel_center_is_preserved():
@@ -366,11 +371,70 @@ def test_unsafe_target_with_bbox_keeps_safety_override_and_bbox_for_audit():
 
     result = normalize_robot_task_json(data, image_size=(640, 480))
 
-    assert result["normalized_json"]["target"]["bbox_xyxy"] == [10.0, 20.0, 110.0, 220.0]
+    assert result["normalized_json"]["target"]["bbox_xyxy"] is None
+    assert result["normalized_json"]["geometry_2d"]["pixel_center"] is None
     assert result["normalized_json"]["target"]["candidate"] is False
     assert result["normalized_json"]["manipulation_assessment"]["candidate"] is False
     assert result["normalized_json"]["manipulation_assessment"]["difficulty"] == "unsafe"
     assert result["normalized_json"]["error"]["code"] == "E_UNSAFE"
+
+
+def test_no_target_does_not_keep_whole_image_bbox_or_high_confidence():
+    data = {
+        **VALID_ROBOT_TASK,
+        "target": {
+            "label": "unknown",
+            "bbox_xyxy": [0, 0, 640, 480],
+            "approx_position": "unknown",
+            "visibility": "unknown",
+        },
+        "geometry_2d": {
+            "pixel_center": [320, 240],
+            "confidence": 1.0,
+        },
+        "manipulation_assessment": {
+            "candidate": False,
+            "difficulty": "unknown",
+            "reason": "no target",
+        },
+        "error": {
+            "code": "E_NO_TARGET",
+            "message": "No target.",
+        },
+    }
+
+    result = normalize_robot_task_json(data, image_size=(640, 480))
+
+    assert result["normalized_json"]["target"]["bbox_xyxy"] is None
+    assert result["normalized_json"]["geometry_2d"]["pixel_center"] is None
+    assert result["normalized_json"]["geometry_2d"]["confidence"] == 0.0
+
+
+def test_living_target_post_normalization_errors_do_not_keep_fixed_safety_errors():
+    data = {
+        **VALID_ROBOT_TASK,
+        "target": {
+            "label": "person",
+            "approx_position": "center",
+            "visibility": "clear",
+        },
+        "manipulation_assessment": {
+            "candidate": True,
+            "difficulty": "easy",
+            "reason": "visible",
+        },
+        "error": {
+            "code": "OK",
+            "message": "",
+        },
+    }
+
+    result = normalize_robot_task_json(data)
+
+    assert "living target must have manipulation_assessment.candidate=false" in result["pre_normalization_errors"]
+    assert "living target must have manipulation_assessment.difficulty=unsafe" in result["pre_normalization_errors"]
+    assert "living target must have error.code=E_UNSAFE" in result["pre_normalization_errors"]
+    assert result["post_normalization_errors"] == []
 
 
 def test_bbox_can_be_read_from_common_object_locations():

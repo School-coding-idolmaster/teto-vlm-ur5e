@@ -147,7 +147,6 @@ def build_prompt(prompt_type: str, user_instruction: str | None = None) -> str:
     instruction = (user_instruction or "").strip() or "unknown"
     return (
         f"{prompt}\n\n"
-        "User instruction:\n"
-        f"{instruction}\n\n"
+        f"User instruction: {instruction}\n\n"
         "Copy the user instruction string into the user_instruction field."
     )

@@ -181,6 +181,10 @@ def test_batch_recognition_saves_robot_task_json_fields(tmp_path, monkeypatch):
     assert result_rows[0]["normalized_json"]["geometry_2d"]["image_width"] == 8
     assert result_rows[0]["normalized_json"]["geometry_2d"]["image_height"] == 8
     assert (output_root / result["run_name"] / "input_manifest.json").exists()
+    assert (output_root / result["run_name"] / "smoke_report.md").exists()
+    assert (output_root / result["run_name"] / "smoke_report.json").exists()
+    assert result["smoke_report_md_path"] == str(output_root / result["run_name"] / "smoke_report.md")
+    assert result["smoke_report_json_path"] == str(output_root / result["run_name"] / "smoke_report.json")
 
 
 def test_robot_task_json_defaults_to_dedicated_output_root(tmp_path, monkeypatch):
@@ -208,3 +212,5 @@ def test_robot_task_json_defaults_to_dedicated_output_root(tmp_path, monkeypatch
     assert (run_dir / "input_manifest.json").exists()
     assert (run_dir / "results.jsonl").exists()
     assert (run_dir / "summary.json").exists()
+    assert (run_dir / "smoke_report.md").exists()
+    assert (run_dir / "smoke_report.json").exists()

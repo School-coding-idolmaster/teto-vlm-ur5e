@@ -80,6 +80,8 @@ def inspect_robot_task_run(run_dir: Path | str | None = None) -> Dict[str, Any]:
         "message": "",
         "run_dir": str(selected_run_dir),
         "results_path": str(results_path),
+        "smoke_report_md_path": str(selected_run_dir / "smoke_report.md"),
+        "smoke_report_json_path": str(selected_run_dir / "smoke_report.json"),
         "summary": _build_summary(items),
         "items": items,
     }
@@ -110,8 +112,18 @@ def format_summary(inspection: Dict[str, Any]) -> str:
             f"  rejected_count:     {summary['rejected_count']}",
             f"  grounding_count:    {summary['grounding_count']}",
             f"  grounding_missing_count: {summary['grounding_missing_count']}",
+            f"  no_target_count:    {summary['no_target_count']}",
         ]
     )
+    if inspection.get("ok", False) and inspection.get("smoke_report_md_path"):
+        lines.extend(
+            [
+                "",
+                "Smoke report:",
+                f"- Markdown: {inspection['smoke_report_md_path']}",
+                f"- JSON: {inspection['smoke_report_json_path']}",
+            ]
+        )
     return "\n".join(lines)
 
 
@@ -140,24 +152,35 @@ def format_items(items: Iterable[Dict[str, Any]], limit: int | None = None) -> s
                 f"geometry_2d.confidence: {_format_value(item['geometry_2d_confidence'])}",
             ]
         )
-        warnings = item.get("validation_warnings", [])
-        if warnings:
-            lines.append("validation_warnings:")
-            for warning in warnings:
-                lines.append(f"  - {warning}")
-        else:
-            lines.append("validation_warnings: []")
-        errors = item.get("validation_errors", [])
-        if errors:
-            lines.append("validation_errors:")
-            for error in errors:
-                lines.append(f"  - {error}")
-        else:
-            lines.append("validation_errors: []")
+        _append_list(lines, "validation_warnings", item.get("validation_warnings", []))
+        _append_list(lines, "pre_normalization_errors", item.get("pre_normalization_errors", []))
+        _append_list(lines, "post_normalization_errors", item.get("post_normalization_errors", []))
         if item.get("line_error"):
             lines.append(f"line_error: {item['line_error']}")
         lines.append("")
     return "\n".join(lines).rstrip()
+
+
+def write_smoke_report(run_dir: Path | str) -> Dict[str, str]:
+    inspection = inspect_robot_task_run(run_dir)
+    if not inspection.get("ok"):
+        raise FileNotFoundError(inspection.get("message", "robot_task_json inspection failed"))
+
+    run_path = Path(str(inspection["run_dir"]))
+    md_path = run_path / "smoke_report.md"
+    json_path = run_path / "smoke_report.json"
+    report = {
+        "run_path": inspection["run_dir"],
+        "results_path": inspection["results_path"],
+        "summary": inspection["summary"],
+        "items": inspection["items"],
+    }
+    json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    md_path.write_text(_format_smoke_report_markdown(report), encoding="utf-8")
+    return {
+        "smoke_report_md_path": str(md_path),
+        "smoke_report_json_path": str(json_path),
+    }
 
 
 def _inspect_item(index: int, item: Dict[str, Any]) -> Dict[str, Any]:
@@ -216,6 +239,12 @@ def _inspect_item(index: int, item: Dict[str, Any]) -> Dict[str, Any]:
     errors = item.get("validation_errors", [])
     if not isinstance(errors, list):
         errors = [str(errors)]
+    pre_errors = item.get("pre_normalization_errors", item.get("raw_validation_errors", errors))
+    if not isinstance(pre_errors, list):
+        pre_errors = [str(pre_errors)]
+    post_errors = item.get("post_normalization_errors", item.get("normalized_validation_errors", errors))
+    if not isinstance(post_errors, list):
+        post_errors = [str(post_errors)]
 
     return {
         "index": index,
@@ -232,10 +261,15 @@ def _inspect_item(index: int, item: Dict[str, Any]) -> Dict[str, Any]:
         "geometry_2d_confidence": geometry_confidence,
         "validation_warnings": warnings,
         "validation_errors": errors,
+        "raw_validation_errors": pre_errors,
+        "pre_normalization_errors": pre_errors,
+        "normalized_validation_errors": post_errors,
+        "post_normalization_errors": post_errors,
         "line_error": item.get("line_error", ""),
         "unsafe": error_code == "E_UNSAFE" or difficulty == "unsafe",
         "rejected": candidate is False,
         "grounded": bbox_xyxy is not None or pixel_center is not None,
+        "no_target": error_code == "E_NO_TARGET",
     }
 
 
@@ -265,6 +299,8 @@ def _build_summary(items: List[Dict[str, Any]]) -> Dict[str, int]:
             summary["grounding_count"] += 1
         else:
             summary["grounding_missing_count"] += 1
+        if item.get("no_target"):
+            summary["no_target_count"] += 1
     return summary
 
 
@@ -280,6 +316,7 @@ def _empty_summary() -> Dict[str, int]:
         "rejected_count": 0,
         "grounding_count": 0,
         "grounding_missing_count": 0,
+        "no_target_count": 0,
     }
 
 
@@ -291,6 +328,10 @@ def _bad_line_item(line_number: int, message: str) -> Dict[str, Any]:
         "normalized_json": {"error": {"code": "E_PARSE"}},
         "validation_warnings": [],
         "validation_errors": [message],
+        "raw_validation_errors": [message],
+        "pre_normalization_errors": [message],
+        "normalized_validation_errors": [message],
+        "post_normalization_errors": [message],
         "line_error": message,
     }
 
@@ -326,3 +367,61 @@ def _format_image_size(width: Any, height: Any) -> str:
     if width is None or height is None:
         return "unknown"
     return f"{width}x{height}"
+
+
+def _append_list(lines: List[str], label: str, values: List[Any]) -> None:
+    if values:
+        lines.append(f"{label}:")
+        for value in values:
+            lines.append(f"  - {value}")
+    else:
+        lines.append(f"{label}: []")
+
+
+def _format_smoke_report_markdown(report: Dict[str, Any]) -> str:
+    summary = report["summary"]
+    lines = [
+        "# TETO robot_task_json smoke report",
+        "",
+        f"Run path: {report['run_path']}",
+        f"Results: {report['results_path']}",
+        "",
+        "## Summary",
+        "",
+        f"- total_count: {summary['total']}",
+        f"- parse_success_count: {summary['parse_success']}",
+        f"- validation_passed_count: {summary['validation_passed']}",
+        f"- validation_failed_count: {summary['validation_failed']}",
+        f"- rejected_count: {summary['rejected_count']}",
+        f"- unsafe_count: {summary['unsafe_count']}",
+        f"- grounding_count: {summary['grounding_count']}",
+        f"- grounding_missing_count: {summary['grounding_missing_count']}",
+        f"- no_target_count: {summary['no_target_count']}",
+        f"- parse_failed_count: {summary['parse_failed']}",
+        "",
+        "## Items",
+        "",
+    ]
+    for item in report["items"]:
+        lines.extend(
+            [
+                f"### [{item['index']}]",
+                "",
+                f"- image_path: {item['image_path']}",
+                f"- parse_status: {item['parse_status']}",
+                f"- validation_status: {item['validation_status']}",
+                f"- target.label: {item['target_label']}",
+                f"- candidate: {_format_value(item['candidate'])}",
+                f"- difficulty: {item['difficulty']}",
+                f"- error.code: {item['error_code']}",
+                f"- bbox_xyxy: {_format_value(item['bbox_xyxy'])}",
+                f"- pixel_center: {_format_value(item['pixel_center'])}",
+                f"- image_size: {item['image_size']}",
+                f"- geometry_2d.confidence: {_format_value(item['geometry_2d_confidence'])}",
+                f"- validation_warnings: {item['validation_warnings']}",
+                f"- pre_normalization_errors: {item['pre_normalization_errors']}",
+                f"- post_normalization_errors: {item['post_normalization_errors']}",
+                "",
+            ]
+        )
+    return "\n".join(lines)

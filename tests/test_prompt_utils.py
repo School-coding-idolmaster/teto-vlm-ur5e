@@ -36,5 +36,11 @@ def test_robot_task_json_prompt_type_is_available():
 def test_build_robot_task_prompt_embeds_user_instruction():
     prompt = build_prompt("robot_task_json", "pick the red cup")
 
-    assert "pick the red cup" in prompt
+    assert "User instruction: pick the red cup" in prompt
     assert "Copy the user instruction" in prompt
+
+
+def test_build_robot_task_prompt_defaults_unknown_instruction():
+    prompt = build_prompt("robot_task_json")
+
+    assert "User instruction: unknown" in prompt

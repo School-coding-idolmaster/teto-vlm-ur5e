@@ -8,6 +8,7 @@ from src.robot_task_inspector import (
     format_items,
     inspect_robot_task_run,
     load_results_jsonl,
+    write_smoke_report,
 )
 import teto_V1
 
@@ -77,6 +78,7 @@ def test_inspector_handles_success_failed_and_unsafe_count(tmp_path):
         "rejected_count": 2,
         "grounding_count": 0,
         "grounding_missing_count": 3,
+        "no_target_count": 0,
     }
     assert inspection["items"][1]["target_label"] == "bird"
     assert inspection["items"][1]["candidate"] is False
@@ -159,7 +161,7 @@ def test_bad_json_line_becomes_item_and_later_lines_continue(tmp_path):
     assert inspection["items"][1]["line_error"]
 
 
-def test_detail_format_displays_validation_errors(tmp_path):
+def test_detail_format_displays_pre_and_post_normalization_errors(tmp_path):
     run_dir = tmp_path / "run_20260527_120003_errors"
     _write_jsonl(
         run_dir / "results.jsonl",
@@ -173,15 +175,17 @@ def test_detail_format_displays_validation_errors(tmp_path):
                     "manipulation_assessment": {"candidate": False, "difficulty": "unknown"},
                     "error": {"code": "E_NO_TARGET"},
                 },
-                "validation_errors": ["unknown target should use a no-target error code"],
+                "pre_normalization_errors": ["unknown target should use a no-target error code"],
+                "post_normalization_errors": [],
             }
         ],
     )
 
     text = format_items(inspect_robot_task_run(run_dir)["items"])
 
-    assert "validation_errors:" in text
+    assert "pre_normalization_errors:" in text
     assert "  - unknown target should use a no-target error code" in text
+    assert "post_normalization_errors: []" in text
 
 
 def test_detail_format_displays_grounding_fields(tmp_path):
@@ -264,6 +268,7 @@ def test_unsafe_and_rejected_counts_are_distinct(tmp_path):
     assert summary["rejected_count"] == 2
     assert summary["grounding_count"] == 0
     assert summary["grounding_missing_count"] == 3
+    assert summary["no_target_count"] == 1
 
 
 def test_legacy_result_without_geometry_does_not_crash(tmp_path):
@@ -292,6 +297,45 @@ def test_legacy_result_without_geometry_does_not_crash(tmp_path):
     assert "bbox_xyxy: null" in text
     assert "pixel_center: null" in text
     assert "image_size: unknown" in text
+
+
+def test_smoke_report_files_are_generated(tmp_path):
+    run_dir = tmp_path / "run_20260527_120003_report"
+    _write_jsonl(
+        run_dir / "results.jsonl",
+        [
+            {
+                "image_path": "/tmp/report.jpg",
+                "parse_status": "success",
+                "validation_status": "warning",
+                "normalized_json": {
+                    "target": {"label": "box", "bbox_xyxy": [1, 2, 11, 22]},
+                    "geometry_2d": {
+                        "pixel_center": [6, 12],
+                        "image_width": 100,
+                        "image_height": 80,
+                        "confidence": 0.5,
+                    },
+                    "manipulation_assessment": {"candidate": True, "difficulty": "easy"},
+                    "error": {"code": "OK"},
+                },
+                "validation_warnings": [],
+                "pre_normalization_errors": [],
+                "post_normalization_errors": [],
+            }
+        ],
+    )
+
+    paths = write_smoke_report(run_dir)
+    md_text = Path(paths["smoke_report_md_path"]).read_text(encoding="utf-8")
+    json_data = json.loads(Path(paths["smoke_report_json_path"]).read_text(encoding="utf-8"))
+
+    assert "total_count: 1" in md_text
+    assert "pre_normalization_errors" in md_text
+    assert "post_normalization_errors" in md_text
+    assert json_data["summary"]["total"] == 1
+    assert json_data["summary"]["grounding_count"] == 1
+    assert json_data["items"][0]["target_label"] == "box"
 
 
 def test_format_items_honors_limit(tmp_path):
@@ -388,6 +432,7 @@ def test_launcher_uses_robot_task_run_dir_for_inspector(monkeypatch, capsys):
                 "rejected_count": 0,
                 "grounding_count": 0,
                 "grounding_missing_count": 0,
+                "no_target_count": 0,
             },
             "items": [],
         }

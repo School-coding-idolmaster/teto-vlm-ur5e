@@ -34,6 +34,7 @@ ERROR_CODES = {
     "E_PARSE",
     "E_PARSE_FAILED",
 }
+NO_TARGET_OR_UNSAFE_CODES = {"E_NO_TARGET", "E_UNCLEAR_IMAGE", "E_AMBIGUOUS_TARGET", "E_UNSAFE"}
 
 LIVING_TARGET_TERMS = {
     "human",
@@ -251,18 +252,24 @@ def validate_robot_task_safety(data: Dict[str, Any]) -> Tuple[List[str], List[st
 
 def normalize_robot_task_json(data: Dict[str, Any], image_size: Tuple[int, int] | None = None) -> Dict[str, Any]:
     if not isinstance(data, dict):
+        normalized = deepcopy(DEFAULT_ROBOT_TASK_JSON)
         return {
             "parsed_json": deepcopy(DEFAULT_ROBOT_TASK_JSON),
-            "normalized_json": deepcopy(DEFAULT_ROBOT_TASK_JSON),
+            "normalized_json": normalized,
             "parse_status": "failed",
             "validation_status": "failed",
+            "raw_validation_errors": ["top-level JSON value must be an object"],
+            "pre_normalization_errors": ["top-level JSON value must be an object"],
+            "normalized_validation_errors": ["top-level JSON value must be an object"],
+            "post_normalization_errors": ["top-level JSON value must be an object"],
             "validation_errors": ["top-level JSON value must be an object"],
             "validation_warnings": [],
         }
 
-    validation_errors = validate_robot_task_json(data)
+    pre_normalization_errors = validate_robot_task_json(data)
     safety_errors, validation_warnings = validate_robot_task_safety(data)
-    validation_errors.extend(safety_errors)
+    pre_normalization_errors.extend(safety_errors)
+    geometry_errors: List[str] = []
     normalized = deepcopy(DEFAULT_ROBOT_TASK_JSON)
 
     normalized["schema_version"] = _string_value(data.get("schema_version"), "teto_robot_task.v1")
@@ -319,15 +326,26 @@ def normalize_robot_task_json(data: Dict[str, Any], image_size: Tuple[int, int] 
     normalized["error"]["code"] = _controlled_value(error.get("code"), ERROR_CODES, "OK")
     normalized["error"]["message"] = _string_value(error.get("message"), "")
 
-    _normalize_geometry_2d(data, normalized, validation_errors, validation_warnings, image_size)
+    _normalize_geometry_2d(data, normalized, geometry_errors, validation_warnings, image_size)
+    pre_normalization_errors.extend(geometry_errors)
     _apply_safety_overrides(normalized, data)
     normalized["target"]["candidate"] = normalized["manipulation_assessment"]["candidate"]
+    _clear_grounding_for_no_target(normalized)
+
+    normalized_validation_errors = validate_robot_task_json(normalized)
+    normalized_safety_errors, normalized_safety_warnings = validate_robot_task_safety(normalized)
+    normalized_validation_errors.extend(normalized_safety_errors)
+    validation_warnings.extend(_new_warnings_only(normalized_safety_warnings, validation_warnings))
 
     return {
         "normalized_json": normalized,
         "parse_status": "success",
-        "validation_status": _validation_status(validation_errors, validation_warnings),
-        "validation_errors": validation_errors,
+        "validation_status": _validation_status(normalized_validation_errors, validation_warnings),
+        "raw_validation_errors": pre_normalization_errors,
+        "pre_normalization_errors": pre_normalization_errors,
+        "normalized_validation_errors": normalized_validation_errors,
+        "post_normalization_errors": normalized_validation_errors,
+        "validation_errors": normalized_validation_errors,
         "validation_warnings": validation_warnings,
     }
 
@@ -347,6 +365,10 @@ def parse_robot_task_response(raw_response: str, image_size: Tuple[int, int] | N
             "normalized_json": normalized,
             "parse_status": "failed",
             "validation_status": "failed",
+            "raw_validation_errors": extracted["validation_errors"],
+            "pre_normalization_errors": extracted["validation_errors"],
+            "normalized_validation_errors": extracted["validation_errors"],
+            "post_normalization_errors": extracted["validation_errors"],
             "validation_errors": extracted["validation_errors"],
             "validation_warnings": [],
         }
@@ -649,6 +671,35 @@ def _apply_safety_overrides(data: Dict[str, Any], source: Dict[str, Any] | None 
             error["code"] = "E_NO_TARGET"
         if not error["message"]:
             error["message"] = "No suitable manipulation target was identified."
+
+
+def _clear_grounding_for_no_target(data: Dict[str, Any]) -> None:
+    target = data.get("target", {}) if isinstance(data.get("target"), dict) else {}
+    geometry = data.get("geometry_2d", {}) if isinstance(data.get("geometry_2d"), dict) else {}
+    assessment = (
+        data.get("manipulation_assessment", {})
+        if isinstance(data.get("manipulation_assessment"), dict)
+        else {}
+    )
+    error = data.get("error", {}) if isinstance(data.get("error"), dict) else {}
+    no_clear_target = (
+        assessment.get("candidate") is False
+        and (
+            target.get("label") == "unknown"
+            or error.get("code") in NO_TARGET_OR_UNSAFE_CODES
+        )
+    )
+    if not no_clear_target:
+        return
+
+    target["bbox_xyxy"] = None
+    geometry["pixel_center"] = None
+    if geometry.get("confidence") is not None:
+        geometry["confidence"] = 0.0
+
+
+def _new_warnings_only(new_warnings: List[str], existing_warnings: List[str]) -> List[str]:
+    return [warning for warning in new_warnings if warning not in existing_warnings]
 
 
 def _find_matching_label(data: Dict[str, Any], terms: set[str]) -> str:

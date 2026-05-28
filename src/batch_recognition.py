@@ -11,13 +11,14 @@ from src.output_paths import (
 )
 from src.json_validator import attach_robot_task_json_fields
 from src.prompt_utils import get_prompt
+from src.robot_task_inspector import write_smoke_report
 from src.vlm_infer import VLMInferencer
 
 
 SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 DEFAULT_OUTPUT_ROOT = BATCH_RECOGNITION_ROOT
 ROBOT_TASK_PROMPT_TYPE = "robot_task_json"
-CURRENT_TETO_VERSION = "TETO V1.2.0"
+CURRENT_TETO_VERSION = "TETO V1.2.1"
 
 
 def _normalize_path(path) -> Path:
@@ -155,6 +156,9 @@ def run_batch_recognition(
 
     errors_path.write_text("\n".join(error_lines) + ("\n" if error_lines else ""), encoding="utf-8")
     _append_index(index_path, summary)
+    smoke_report_paths = {}
+    if prompt_type == ROBOT_TASK_PROMPT_TYPE:
+        smoke_report_paths = write_smoke_report(run_dir)
 
     result = {
         "ok": True,
@@ -163,6 +167,7 @@ def run_batch_recognition(
         "summary_path": str(summary_path),
         "errors_path": str(errors_path),
         "index_path": str(index_path),
+        **smoke_report_paths,
         **summary,
     }
     if prompt_type == ROBOT_TASK_PROMPT_TYPE:

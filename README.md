@@ -259,6 +259,22 @@ robot execution. Later versions may feed `pixel_center` into a separate
 2D-to-3D projector, but V1.2.0 does not read depth images, compute TF, generate
 trajectories, or command hardware.
 
+## TETO V1.2.1 smoke report and validation display hardening
+
+After each `robot_task_json` batch run, TETO writes a queryable smoke report in
+the run directory:
+
+```text
+outputs/results/robot_task_json/run_YYYYMMDD_HHMMSS/smoke_report.md
+outputs/results/robot_task_json/run_YYYYMMDD_HHMMSS/smoke_report.json
+```
+
+The report summarizes parse, validation, rejection, unsafe, no-target, and 2D
+grounding counts, then lists compact per-image details. Inspector output now
+distinguishes pre-normalization errors from post-normalization errors, so safety
+issues corrected by normalization remain visible for audit without being shown
+as unresolved normalized-state failures.
+
 In the `python3 teto_V1.py` launcher, single image recognition and batch image
 recognition also show prompt helper keywords. You can type a built-in prompt
 type, a shortcut keyword, or a free-form prompt. Useful shortcuts include:
