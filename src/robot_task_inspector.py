@@ -102,17 +102,17 @@ def format_summary(inspection: Dict[str, Any]) -> str:
     lines.extend(
         [
             "Summary",
-            f"  total:              {summary['total']}",
-            f"  parse_success:      {summary['parse_success']}",
-            f"  parse_failed:       {summary['parse_failed']}",
-            f"  validation_passed:  {summary['validation_passed']}",
-            f"  validation_warning: {summary['validation_warning']}",
-            f"  validation_failed:  {summary['validation_failed']}",
-            f"  unsafe_count:       {summary['unsafe_count']}",
-            f"  rejected_count:     {summary['rejected_count']}",
-            f"  grounding_count:    {summary['grounding_count']}",
-            f"  grounding_missing_count: {summary['grounding_missing_count']}",
-            f"  no_target_count:    {summary['no_target_count']}",
+            f"  total:              {_summary_value(summary, 'total_count', 'total')}",
+            f"  parse_success:      {_summary_value(summary, 'parse_success_count', 'parse_success')}",
+            f"  parse_failed:       {_summary_value(summary, 'parse_failed_count', 'parse_failed')}",
+            f"  validation_passed:  {_summary_value(summary, 'validation_passed_count', 'validation_passed')}",
+            f"  validation_warning: {_summary_value(summary, 'validation_warning_count', 'validation_warning')}",
+            f"  validation_failed:  {_summary_value(summary, 'validation_failed_count', 'validation_failed')}",
+            f"  unsafe_count:       {_summary_value(summary, 'unsafe_count')}",
+            f"  rejected_count:     {_summary_value(summary, 'rejected_count')}",
+            f"  grounding_count:    {_summary_value(summary, 'grounding_count')}",
+            f"  grounding_missing_count: {_summary_value(summary, 'grounding_missing_count')}",
+            f"  no_target_count:    {_summary_value(summary, 'no_target_count')}",
         ]
     )
     if inspection.get("ok", False) and inspection.get("smoke_report_md_path"):
@@ -150,6 +150,9 @@ def format_items(items: Iterable[Dict[str, Any]], limit: int | None = None) -> s
                 f"pixel_center: {_format_value(item['pixel_center'])}",
                 f"image_size: {item['image_size']}",
                 f"geometry_2d.confidence: {_format_value(item['geometry_2d_confidence'])}",
+                f"raw_bbox_xyxy: {_format_value(item['raw_bbox_xyxy'])}",
+                f"raw_pixel_center: {_format_value(item['raw_pixel_center'])}",
+                f"raw_geometry_2d.confidence: {_format_value(item['raw_geometry_2d_confidence'])}",
             ]
         )
         _append_list(lines, "validation_warnings", item.get("validation_warnings", []))
@@ -213,16 +216,11 @@ def _inspect_item(index: int, item: Dict[str, Any]) -> Dict[str, Any]:
     bbox_xyxy = _first_value(
         item,
         ("normalized_json", "target", "bbox_xyxy"),
-        ("parsed_json", "target", "bbox_xyxy"),
-        ("parsed_json", "target", "bbox"),
-        ("parsed_json", "geometry_2d", "bbox_xyxy"),
         default=None,
     )
     pixel_center = _first_value(
         item,
         ("normalized_json", "geometry_2d", "pixel_center"),
-        ("parsed_json", "geometry_2d", "pixel_center"),
-        ("parsed_json", "target", "pixel_center"),
         default=None,
     )
     image_width = _first_value(item, ("normalized_json", "geometry_2d", "image_width"), default=None)
@@ -230,7 +228,25 @@ def _inspect_item(index: int, item: Dict[str, Any]) -> Dict[str, Any]:
     geometry_confidence = _first_value(
         item,
         ("normalized_json", "geometry_2d", "confidence"),
+        default=None,
+    )
+    raw_bbox_xyxy = _first_value(
+        item,
+        ("parsed_json", "target", "bbox_xyxy"),
+        ("parsed_json", "target", "bbox"),
+        ("parsed_json", "geometry_2d", "bbox_xyxy"),
+        default=None,
+    )
+    raw_pixel_center = _first_value(
+        item,
+        ("parsed_json", "geometry_2d", "pixel_center"),
+        ("parsed_json", "target", "pixel_center"),
+        default=None,
+    )
+    raw_geometry_confidence = _first_value(
+        item,
         ("parsed_json", "geometry_2d", "confidence"),
+        ("parsed_json", "target", "grounding_confidence"),
         default=None,
     )
     warnings = item.get("validation_warnings", [])
@@ -259,6 +275,9 @@ def _inspect_item(index: int, item: Dict[str, Any]) -> Dict[str, Any]:
         "pixel_center": pixel_center,
         "image_size": _format_image_size(image_width, image_height),
         "geometry_2d_confidence": geometry_confidence,
+        "raw_bbox_xyxy": raw_bbox_xyxy,
+        "raw_pixel_center": raw_pixel_center,
+        "raw_geometry_2d_confidence": raw_geometry_confidence,
         "validation_warnings": warnings,
         "validation_errors": errors,
         "raw_validation_errors": pre_errors,
@@ -276,20 +295,26 @@ def _inspect_item(index: int, item: Dict[str, Any]) -> Dict[str, Any]:
 def _build_summary(items: List[Dict[str, Any]]) -> Dict[str, int]:
     summary = _empty_summary()
     summary["total"] = len(items)
+    summary["total_count"] = len(items)
     for item in items:
         parse_status = item.get("parse_status")
         validation_status = item.get("validation_status")
         if parse_status == "success":
             summary["parse_success"] += 1
+            summary["parse_success_count"] += 1
         elif parse_status == "failed":
             summary["parse_failed"] += 1
+            summary["parse_failed_count"] += 1
 
         if validation_status == "passed":
             summary["validation_passed"] += 1
+            summary["validation_passed_count"] += 1
         elif validation_status == "warning":
             summary["validation_warning"] += 1
+            summary["validation_warning_count"] += 1
         elif validation_status == "failed":
             summary["validation_failed"] += 1
+            summary["validation_failed_count"] += 1
 
         if item.get("unsafe"):
             summary["unsafe_count"] += 1
@@ -307,11 +332,17 @@ def _build_summary(items: List[Dict[str, Any]]) -> Dict[str, int]:
 def _empty_summary() -> Dict[str, int]:
     return {
         "total": 0,
+        "total_count": 0,
         "parse_success": 0,
+        "parse_success_count": 0,
         "parse_failed": 0,
+        "parse_failed_count": 0,
         "validation_passed": 0,
+        "validation_passed_count": 0,
         "validation_warning": 0,
+        "validation_warning_count": 0,
         "validation_failed": 0,
+        "validation_failed_count": 0,
         "unsafe_count": 0,
         "rejected_count": 0,
         "grounding_count": 0,
@@ -369,6 +400,14 @@ def _format_image_size(width: Any, height: Any) -> str:
     return f"{width}x{height}"
 
 
+def _summary_value(summary: Dict[str, Any], key: str, fallback_key: str | None = None) -> Any:
+    if key in summary:
+        return summary[key]
+    if fallback_key and fallback_key in summary:
+        return summary[fallback_key]
+    return 0
+
+
 def _append_list(lines: List[str], label: str, values: List[Any]) -> None:
     if values:
         lines.append(f"{label}:")
@@ -388,16 +427,16 @@ def _format_smoke_report_markdown(report: Dict[str, Any]) -> str:
         "",
         "## Summary",
         "",
-        f"- total_count: {summary['total']}",
-        f"- parse_success_count: {summary['parse_success']}",
-        f"- validation_passed_count: {summary['validation_passed']}",
-        f"- validation_failed_count: {summary['validation_failed']}",
+        f"- total_count: {summary['total_count']}",
+        f"- parse_success_count: {summary['parse_success_count']}",
+        f"- validation_passed_count: {summary['validation_passed_count']}",
+        f"- validation_failed_count: {summary['validation_failed_count']}",
         f"- rejected_count: {summary['rejected_count']}",
         f"- unsafe_count: {summary['unsafe_count']}",
         f"- grounding_count: {summary['grounding_count']}",
         f"- grounding_missing_count: {summary['grounding_missing_count']}",
         f"- no_target_count: {summary['no_target_count']}",
-        f"- parse_failed_count: {summary['parse_failed']}",
+        f"- parse_failed_count: {summary['parse_failed_count']}",
         "",
         "## Items",
         "",
@@ -418,6 +457,9 @@ def _format_smoke_report_markdown(report: Dict[str, Any]) -> str:
                 f"- pixel_center: {_format_value(item['pixel_center'])}",
                 f"- image_size: {item['image_size']}",
                 f"- geometry_2d.confidence: {_format_value(item['geometry_2d_confidence'])}",
+                f"- raw_bbox_xyxy: {_format_value(item['raw_bbox_xyxy'])}",
+                f"- raw_pixel_center: {_format_value(item['raw_pixel_center'])}",
+                f"- raw_geometry_2d.confidence: {_format_value(item['raw_geometry_2d_confidence'])}",
                 f"- validation_warnings: {item['validation_warnings']}",
                 f"- pre_normalization_errors: {item['pre_normalization_errors']}",
                 f"- post_normalization_errors: {item['post_normalization_errors']}",

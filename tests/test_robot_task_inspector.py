@@ -67,19 +67,23 @@ def test_inspector_handles_success_failed_and_unsafe_count(tmp_path):
     inspection = inspect_robot_task_run(run_dir)
 
     assert inspection["ok"] is True
-    assert inspection["summary"] == {
-        "total": 3,
-        "parse_success": 2,
-        "parse_failed": 1,
-        "validation_passed": 1,
-        "validation_warning": 1,
-        "validation_failed": 1,
-        "unsafe_count": 1,
-        "rejected_count": 2,
-        "grounding_count": 0,
-        "grounding_missing_count": 3,
-        "no_target_count": 0,
-    }
+    assert inspection["summary"]["total"] == 3
+    assert inspection["summary"]["total_count"] == 3
+    assert inspection["summary"]["parse_success"] == 2
+    assert inspection["summary"]["parse_success_count"] == 2
+    assert inspection["summary"]["parse_failed"] == 1
+    assert inspection["summary"]["parse_failed_count"] == 1
+    assert inspection["summary"]["validation_passed"] == 1
+    assert inspection["summary"]["validation_passed_count"] == 1
+    assert inspection["summary"]["validation_warning"] == 1
+    assert inspection["summary"]["validation_warning_count"] == 1
+    assert inspection["summary"]["validation_failed"] == 1
+    assert inspection["summary"]["validation_failed_count"] == 1
+    assert inspection["summary"]["unsafe_count"] == 1
+    assert inspection["summary"]["rejected_count"] == 2
+    assert inspection["summary"]["grounding_count"] == 0
+    assert inspection["summary"]["grounding_missing_count"] == 3
+    assert inspection["summary"]["no_target_count"] == 0
     assert inspection["items"][1]["target_label"] == "bird"
     assert inspection["items"][1]["candidate"] is False
 
@@ -299,6 +303,58 @@ def test_legacy_result_without_geometry_does_not_crash(tmp_path):
     assert "image_size: unknown" in text
 
 
+def test_grounding_uses_normalized_fields_not_raw_parsed_bbox(tmp_path):
+    run_dir = tmp_path / "run_20260527_120003_normalized_grounding"
+    _write_jsonl(
+        run_dir / "results.jsonl",
+        [
+            {
+                "image_path": "/tmp/no_target.jpg",
+                "parse_status": "success",
+                "validation_status": "passed",
+                "parsed_json": {
+                    "target": {
+                        "label": "unknown",
+                        "bbox_xyxy": [0, 0, 588, 756],
+                    },
+                    "geometry_2d": {
+                        "pixel_center": [294, 294],
+                        "confidence": 1.0,
+                    },
+                },
+                "normalized_json": {
+                    "target": {
+                        "label": "unknown",
+                        "bbox_xyxy": None,
+                    },
+                    "geometry_2d": {
+                        "pixel_center": None,
+                        "image_width": 768,
+                        "image_height": 1024,
+                        "confidence": 0.0,
+                    },
+                    "manipulation_assessment": {"candidate": False, "difficulty": "unknown"},
+                    "error": {"code": "E_NO_TARGET"},
+                },
+            }
+        ],
+    )
+
+    inspection = inspect_robot_task_run(run_dir)
+    item = inspection["items"][0]
+
+    assert item["bbox_xyxy"] is None
+    assert item["pixel_center"] is None
+    assert item["geometry_2d_confidence"] == 0.0
+    assert item["raw_bbox_xyxy"] == [0, 0, 588, 756]
+    assert item["raw_pixel_center"] == [294, 294]
+    assert item["raw_geometry_2d_confidence"] == 1.0
+    assert item["grounded"] is False
+    assert inspection["summary"]["grounding_count"] == 0
+    assert inspection["summary"]["grounding_missing_count"] == 1
+    assert inspection["summary"]["no_target_count"] == 1
+
+
 def test_smoke_report_files_are_generated(tmp_path):
     run_dir = tmp_path / "run_20260527_120003_report"
     _write_jsonl(
@@ -334,6 +390,8 @@ def test_smoke_report_files_are_generated(tmp_path):
     assert "pre_normalization_errors" in md_text
     assert "post_normalization_errors" in md_text
     assert json_data["summary"]["total"] == 1
+    assert json_data["summary"]["total_count"] == 1
+    assert json_data["summary"]["parse_success_count"] == 1
     assert json_data["summary"]["grounding_count"] == 1
     assert json_data["items"][0]["target_label"] == "box"
 
