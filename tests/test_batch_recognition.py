@@ -178,8 +178,15 @@ def test_batch_recognition_saves_robot_task_json_fields(tmp_path, monkeypatch):
     assert result_rows[0]["validation_warnings"] == ["2D grounding is missing"]
     assert result_rows[0]["parsed_json"]["target"]["label"] == "red cup"
     assert result_rows[0]["normalized_json"]["target"]["label"] == "red cup"
+    assert result_rows[0]["normalized_json"]["target"]["target_id"] == "obj_001"
     assert result_rows[0]["normalized_json"]["geometry_2d"]["image_width"] == 8
     assert result_rows[0]["normalized_json"]["geometry_2d"]["image_height"] == 8
+    assert result_rows[0]["normalized_json"]["scene"]["scene_version"] == f"{result['run_name']}_item_001"
+    assert result_rows[0]["normalized_json"]["scene"]["image_path"] == str(input_dir / "one.jpg")
+    assert result_rows[0]["normalized_json"]["scene"]["image_width"] == 8
+    assert result_rows[0]["normalized_json"]["scene"]["image_height"] == 8
+    assert result_rows[0]["normalized_json"]["scene"]["source"] == "single_image"
+    assert result_rows[0]["normalized_json"]["scene"]["status"] == "valid"
     assert (output_root / result["run_name"] / "input_manifest.json").exists()
     assert (output_root / result["run_name"] / "smoke_report.md").exists()
     assert (output_root / result["run_name"] / "smoke_report.json").exists()

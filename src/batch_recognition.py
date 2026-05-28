@@ -18,7 +18,7 @@ from src.vlm_infer import VLMInferencer
 SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 DEFAULT_OUTPUT_ROOT = BATCH_RECOGNITION_ROOT
 ROBOT_TASK_PROMPT_TYPE = "robot_task_json"
-CURRENT_TETO_VERSION = "TETO V1.2.1"
+CURRENT_TETO_VERSION = "TETO V1.3.0"
 
 
 def _normalize_path(path) -> Path:
@@ -122,6 +122,9 @@ def run_batch_recognition(
                 "prompt_type": prompt_type,
                 "prompt": prompt,
                 "backend": selected_backend,
+                "run_name": run_metadata["run_name"],
+                "item_index": index,
+                "created_at": run_metadata["created_at"],
                 "response": "",
                 "status": "success",
                 "error": "",
@@ -136,6 +139,7 @@ def run_batch_recognition(
                 item["status"] = "failed"
                 item["error"] = str(exc)
                 error_lines.append(f"{image_path}\t{exc}")
+                attach_robot_task_json_fields(prompt_type, item)
 
             results_file.write(json.dumps(item, ensure_ascii=False) + "\n")
 

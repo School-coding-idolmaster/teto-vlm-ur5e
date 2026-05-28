@@ -142,6 +142,9 @@ def format_items(items: Iterable[Dict[str, Any]], limit: int | None = None) -> s
                 f"image_path: {item['image_path']}",
                 f"parse_status: {item['parse_status']}",
                 f"validation_status: {item['validation_status']}",
+                f"scene_version: {item['scene_version']}",
+                f"scene.status: {item['scene_status']}",
+                f"target_id: {item['target_id']}",
                 f"target.label: {item['target_label']}",
                 f"candidate: {_format_value(item['candidate'])}",
                 f"difficulty: {item['difficulty']}",
@@ -191,6 +194,21 @@ def _inspect_item(index: int, item: Dict[str, Any]) -> Dict[str, Any]:
         item,
         ("normalized_json", "target", "label"),
         ("parsed_json", "target", "label"),
+        default=UNKNOWN,
+    )
+    target_id = _first_value(
+        item,
+        ("normalized_json", "target", "target_id"),
+        default=UNKNOWN,
+    )
+    scene_version = _first_value(
+        item,
+        ("normalized_json", "scene", "scene_version"),
+        default=UNKNOWN,
+    )
+    scene_status = _first_value(
+        item,
+        ("normalized_json", "scene", "status"),
         default=UNKNOWN,
     )
     candidate = _first_value(
@@ -267,6 +285,9 @@ def _inspect_item(index: int, item: Dict[str, Any]) -> Dict[str, Any]:
         "image_path": item.get("image_path", UNKNOWN),
         "parse_status": item.get("parse_status", UNKNOWN),
         "validation_status": item.get("validation_status", UNKNOWN),
+        "scene_version": _format_value(scene_version),
+        "scene_status": _format_value(scene_status),
+        "target_id": _format_value(target_id),
         "target_label": _format_value(target_label),
         "candidate": candidate,
         "difficulty": _format_value(difficulty),
@@ -449,6 +470,9 @@ def _format_smoke_report_markdown(report: Dict[str, Any]) -> str:
                 f"- image_path: {item['image_path']}",
                 f"- parse_status: {item['parse_status']}",
                 f"- validation_status: {item['validation_status']}",
+                f"- scene_version: {item['scene_version']}",
+                f"- scene.status: {item['scene_status']}",
+                f"- target_id: {item['target_id']}",
                 f"- target.label: {item['target_label']}",
                 f"- candidate: {_format_value(item['candidate'])}",
                 f"- difficulty: {item['difficulty']}",

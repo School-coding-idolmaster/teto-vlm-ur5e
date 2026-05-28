@@ -365,7 +365,11 @@ def test_smoke_report_files_are_generated(tmp_path):
                 "parse_status": "success",
                 "validation_status": "warning",
                 "normalized_json": {
-                    "target": {"label": "box", "bbox_xyxy": [1, 2, 11, 22]},
+                    "scene": {
+                        "scene_version": "run_20260527_120003_report_item_001",
+                        "status": "valid",
+                    },
+                    "target": {"label": "box", "target_id": "obj_001", "bbox_xyxy": [1, 2, 11, 22]},
                     "geometry_2d": {
                         "pixel_center": [6, 12],
                         "image_width": 100,
@@ -394,6 +398,55 @@ def test_smoke_report_files_are_generated(tmp_path):
     assert json_data["summary"]["parse_success_count"] == 1
     assert json_data["summary"]["grounding_count"] == 1
     assert json_data["items"][0]["target_label"] == "box"
+    assert json_data["items"][0]["target_id"] == "obj_001"
+    assert json_data["items"][0]["scene_version"] == "run_20260527_120003_report_item_001"
+    assert json_data["items"][0]["scene_status"] == "valid"
+    assert "scene_version: run_20260527_120003_report_item_001" in md_text
+    assert "target_id: obj_001" in md_text
+
+
+def test_inspector_displays_scene_snapshot_fields(tmp_path):
+    run_dir = tmp_path / "run_20260527_120003_scene"
+    _write_jsonl(
+        run_dir / "results.jsonl",
+        [
+            {
+                "image_path": "/tmp/scene.jpg",
+                "parse_status": "success",
+                "validation_status": "passed",
+                "normalized_json": {
+                    "scene": {
+                        "scene_version": "run_20260527_120003_scene_item_001",
+                        "status": "valid",
+                    },
+                    "target": {
+                        "label": "camera",
+                        "target_id": "obj_001",
+                        "bbox_xyxy": [1, 2, 11, 22],
+                    },
+                    "geometry_2d": {
+                        "pixel_center": [6, 12],
+                        "image_width": 100,
+                        "image_height": 80,
+                        "confidence": 0.5,
+                    },
+                    "manipulation_assessment": {"candidate": True, "difficulty": "easy"},
+                    "error": {"code": "OK"},
+                },
+            }
+        ],
+    )
+
+    inspection = inspect_robot_task_run(run_dir)
+    item = inspection["items"][0]
+    text = format_items(inspection["items"])
+
+    assert item["scene_version"] == "run_20260527_120003_scene_item_001"
+    assert item["scene_status"] == "valid"
+    assert item["target_id"] == "obj_001"
+    assert "scene_version: run_20260527_120003_scene_item_001" in text
+    assert "scene.status: valid" in text
+    assert "target_id: obj_001" in text
 
 
 def test_format_items_honors_limit(tmp_path):

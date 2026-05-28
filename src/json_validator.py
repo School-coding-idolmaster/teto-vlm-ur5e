@@ -1,5 +1,7 @@
 import json
 from copy import deepcopy
+from datetime import datetime
+import hashlib
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -81,7 +83,17 @@ DEFAULT_ROBOT_TASK_JSON = {
     "schema_version": "teto_robot_task.v1",
     "task_type": "target_analysis",
     "user_instruction": "unknown",
+    "scene": {
+        "scene_version": "unknown",
+        "capture_timestamp": "unknown",
+        "image_path": "unknown",
+        "image_width": None,
+        "image_height": None,
+        "source": "single_image",
+        "status": "unknown",
+    },
     "target": {
+        "target_id": "unknown",
         "label": "unknown",
         "candidate": False,
         "bbox_xyxy": None,
@@ -250,9 +262,14 @@ def validate_robot_task_safety(data: Dict[str, Any]) -> Tuple[List[str], List[st
     return errors, warnings
 
 
-def normalize_robot_task_json(data: Dict[str, Any], image_size: Tuple[int, int] | None = None) -> Dict[str, Any]:
+def normalize_robot_task_json(
+    data: Dict[str, Any],
+    image_size: Tuple[int, int] | None = None,
+    scene_context: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
     if not isinstance(data, dict):
         normalized = deepcopy(DEFAULT_ROBOT_TASK_JSON)
+        _apply_scene_snapshot(normalized, scene_context, image_size, "invalid")
         return {
             "parsed_json": deepcopy(DEFAULT_ROBOT_TASK_JSON),
             "normalized_json": normalized,
@@ -336,6 +353,9 @@ def normalize_robot_task_json(data: Dict[str, Any], image_size: Tuple[int, int] 
     normalized_safety_errors, normalized_safety_warnings = validate_robot_task_safety(normalized)
     normalized_validation_errors.extend(normalized_safety_errors)
     validation_warnings.extend(_new_warnings_only(normalized_safety_warnings, validation_warnings))
+    status = "invalid" if normalized_validation_errors else "valid"
+    _apply_target_id(normalized)
+    _apply_scene_snapshot(normalized, scene_context, image_size, status)
 
     return {
         "normalized_json": normalized,
@@ -350,13 +370,18 @@ def normalize_robot_task_json(data: Dict[str, Any], image_size: Tuple[int, int] 
     }
 
 
-def parse_robot_task_response(raw_response: str, image_size: Tuple[int, int] | None = None) -> Dict[str, Any]:
+def parse_robot_task_response(
+    raw_response: str,
+    image_size: Tuple[int, int] | None = None,
+    scene_context: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
     extracted = extract_json_from_response(raw_response)
     if extracted["parse_status"] == "failed":
         normalized = deepcopy(DEFAULT_ROBOT_TASK_JSON)
         if image_size:
             normalized["geometry_2d"]["image_width"] = image_size[0]
             normalized["geometry_2d"]["image_height"] = image_size[1]
+        _apply_scene_snapshot(normalized, scene_context, image_size, "invalid")
         normalized["error"]["code"] = "E_PARSE"
         normalized["error"]["message"] = "; ".join(extracted["validation_errors"])
         return {
@@ -373,7 +398,11 @@ def parse_robot_task_response(raw_response: str, image_size: Tuple[int, int] | N
             "validation_warnings": [],
         }
 
-    normalized = normalize_robot_task_json(extracted["data"], image_size=image_size)
+    normalized = normalize_robot_task_json(
+        extracted["data"],
+        image_size=image_size,
+        scene_context=scene_context,
+    )
     return {
         "raw_response": raw_response,
         "parsed_json": deepcopy(extracted["data"]),
@@ -386,7 +415,17 @@ def attach_robot_task_json_fields(prompt_type: str, item: Dict[str, Any]) -> Dic
         return item
 
     image_size, image_size_warning = _read_image_size(item.get("image_path"))
-    parsed = parse_robot_task_response(str(item.get("response", "")), image_size=image_size)
+    scene_context = {
+        "image_path": item.get("image_path"),
+        "run_id": item.get("run_name") or item.get("run_id"),
+        "item_index": item.get("item_index") or item.get("index"),
+        "capture_timestamp": item.get("created_at"),
+    }
+    parsed = parse_robot_task_response(
+        str(item.get("response", "")),
+        image_size=image_size,
+        scene_context=scene_context,
+    )
     item.update(parsed)
     if image_size_warning:
         item.setdefault("validation_warnings", []).append(image_size_warning)
@@ -696,6 +735,66 @@ def _clear_grounding_for_no_target(data: Dict[str, Any]) -> None:
     geometry["pixel_center"] = None
     if geometry.get("confidence") is not None:
         geometry["confidence"] = 0.0
+
+
+def _apply_target_id(data: Dict[str, Any]) -> None:
+    target = data.get("target", {}) if isinstance(data.get("target"), dict) else {}
+    assessment = (
+        data.get("manipulation_assessment", {})
+        if isinstance(data.get("manipulation_assessment"), dict)
+        else {}
+    )
+    label = target.get("label")
+    target["target_id"] = (
+        "obj_001"
+        if assessment.get("candidate") is True and isinstance(label, str) and label != "unknown"
+        else "unknown"
+    )
+
+
+def _apply_scene_snapshot(
+    data: Dict[str, Any],
+    scene_context: Dict[str, Any] | None,
+    image_size: Tuple[int, int] | None,
+    status: str,
+) -> None:
+    context = scene_context or {}
+    geometry = data.get("geometry_2d", {}) if isinstance(data.get("geometry_2d"), dict) else {}
+    image_width = image_size[0] if image_size else geometry.get("image_width")
+    image_height = image_size[1] if image_size else geometry.get("image_height")
+    if isinstance(geometry, dict):
+        geometry["image_width"] = image_width
+        geometry["image_height"] = image_height
+
+    data["scene"] = {
+        "scene_version": _scene_version(context),
+        "capture_timestamp": _scene_timestamp(context.get("capture_timestamp")),
+        "image_path": _string_value(context.get("image_path"), "unknown"),
+        "image_width": image_width,
+        "image_height": image_height,
+        "source": "single_image",
+        "status": status if status in {"valid", "invalid", "unknown"} else "unknown",
+    }
+
+
+def _scene_version(context: Dict[str, Any]) -> str:
+    run_id = _string_value(context.get("run_id"), "")
+    item_index = context.get("item_index")
+    if run_id and isinstance(item_index, int):
+        return f"{run_id}_item_{item_index:03d}"
+    if run_id and isinstance(item_index, str) and item_index.isdigit():
+        return f"{run_id}_item_{int(item_index):03d}"
+
+    image_path = _string_value(context.get("image_path"), "unknown")
+    digest_source = f"{run_id}|{item_index}|{image_path}".encode("utf-8")
+    digest = hashlib.sha1(digest_source).hexdigest()[:12]
+    return f"scene_{digest}"
+
+
+def _scene_timestamp(value: Any) -> str:
+    if isinstance(value, str) and value:
+        return value.replace(" ", "T")
+    return datetime.now().isoformat(timespec="seconds")
 
 
 def _new_warnings_only(new_warnings: List[str], existing_warnings: List[str]) -> List[str]:

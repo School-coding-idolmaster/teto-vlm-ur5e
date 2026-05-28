@@ -446,3 +446,82 @@ def test_bbox_can_be_read_from_common_object_locations():
     result = normalize_robot_task_json(data, image_size=(100, 100))
 
     assert result["normalized_json"]["target"]["bbox_xyxy"] == [1.0, 2.0, 11.0, 22.0]
+
+
+def test_scene_snapshot_fields_are_added_for_valid_candidate():
+    result = normalize_robot_task_json(
+        VALID_ROBOT_TASK,
+        image_size=(640, 480),
+        scene_context={
+            "run_id": "run_20260528_172133",
+            "item_index": 1,
+            "image_path": "/tmp/red_cup.jpg",
+            "capture_timestamp": "2026-05-28 17:21:33",
+        },
+    )
+    normalized = result["normalized_json"]
+
+    assert normalized["scene"]["scene_version"] == "run_20260528_172133_item_001"
+    assert normalized["scene"]["capture_timestamp"] == "2026-05-28T17:21:33"
+    assert normalized["scene"]["image_path"] == "/tmp/red_cup.jpg"
+    assert normalized["scene"]["image_width"] == normalized["geometry_2d"]["image_width"] == 640
+    assert normalized["scene"]["image_height"] == normalized["geometry_2d"]["image_height"] == 480
+    assert normalized["scene"]["source"] == "single_image"
+    assert normalized["scene"]["status"] == "valid"
+    assert normalized["target"]["target_id"] == "obj_001"
+
+
+def test_scene_snapshot_no_target_uses_unknown_target_id():
+    data = {
+        **VALID_ROBOT_TASK,
+        "target": {
+            "label": "unknown",
+            "approx_position": "unknown",
+            "visibility": "unknown",
+        },
+        "manipulation_assessment": {
+            "candidate": False,
+            "difficulty": "unknown",
+            "reason": "no target",
+        },
+        "error": {
+            "code": "E_NO_TARGET",
+            "message": "No target.",
+        },
+    }
+
+    result = normalize_robot_task_json(
+        data,
+        image_size=(320, 240),
+        scene_context={
+            "run_id": "run_20260528_172133",
+            "item_index": 2,
+            "image_path": "/tmp/no_target.jpg",
+        },
+    )
+    normalized = result["normalized_json"]
+
+    assert normalized["scene"]["scene_version"] == "run_20260528_172133_item_002"
+    assert normalized["scene"]["image_path"] == "/tmp/no_target.jpg"
+    assert normalized["scene"]["status"] == "valid"
+    assert normalized["target"]["target_id"] == "unknown"
+
+
+def test_scene_snapshot_parse_failure_is_invalid():
+    result = parse_robot_task_response(
+        "not json",
+        image_size=(320, 240),
+        scene_context={
+            "run_id": "run_20260528_172133",
+            "item_index": 3,
+            "image_path": "/tmp/bad.jpg",
+        },
+    )
+
+    assert result["parse_status"] == "failed"
+    assert result["normalized_json"]["scene"]["scene_version"] == "run_20260528_172133_item_003"
+    assert result["normalized_json"]["scene"]["image_path"] == "/tmp/bad.jpg"
+    assert result["normalized_json"]["scene"]["image_width"] == 320
+    assert result["normalized_json"]["scene"]["image_height"] == 240
+    assert result["normalized_json"]["scene"]["status"] == "invalid"
+    assert result["normalized_json"]["target"]["target_id"] == "unknown"

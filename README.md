@@ -275,6 +275,64 @@ distinguishes pre-normalization errors from post-normalization errors, so safety
 issues corrected by normalization remain visible for audit without being shown
 as unresolved normalized-state failures.
 
+## TETO V1.2.2 real Qwen smoke verified
+
+TETO V1.2.2 fixes smoke report grounding display to use normalized grounding
+fields only. Raw model grounding is retained separately as `raw_*` audit data
+and does not affect `grounding_count`.
+
+Verified real Qwen smoke run:
+
+```text
+outputs/results/robot_task_json/run_20260528_172133
+```
+
+Observed summary:
+
+- `total_count`: 4
+- `parse_success_count`: 4
+- `validation_failed_count`: 0
+- `rejected_count`: 3
+- `grounding_count`: 1
+- `grounding_missing_count`: 3
+- `no_target_count`: 3
+
+For `E_NO_TARGET` / `unknown` items, normalized `bbox_xyxy` and `pixel_center`
+are `null`, and `grounded` is `false`. The valid `camera` target is counted as
+the single grounded item. `post_normalization_errors` is empty for all four
+items.
+
+## TETO V1.3.0 scene snapshot contract preparation
+
+`robot_task_json` normalized output now includes a lightweight scene snapshot
+contract for later planner_gateway / semantic_task_server stages:
+
+```json
+{
+  "scene": {
+    "scene_version": "run_YYYYMMDD_HHMMSS_item_001",
+    "capture_timestamp": "ISO8601 string or unknown",
+    "image_path": "input image path",
+    "image_width": 640,
+    "image_height": 480,
+    "source": "single_image",
+    "status": "valid"
+  }
+}
+```
+
+The scene image size mirrors `geometry_2d.image_width` and
+`geometry_2d.image_height`. `scene.status` is `invalid` for parse failures or
+post-normalization validation failures, otherwise `valid`. Candidate targets
+also receive `target.target_id="obj_001"` when `candidate=true` and the target
+label is known; no-target, unknown, rejected, or unsafe cases use
+`target_id="unknown"`.
+
+This is still only a software-readable VLM intermediate representation. It
+does not read depth, compute camera/world coordinates, publish TF, call MoveIt,
+connect to UR5, generate URScript, generate joint angles, generate trajectories,
+or send robot control commands.
+
 In the `python3 teto_V1.py` launcher, single image recognition and batch image
 recognition also show prompt helper keywords. You can type a built-in prompt
 type, a shortcut keyword, or a free-form prompt. Useful shortcuts include:
