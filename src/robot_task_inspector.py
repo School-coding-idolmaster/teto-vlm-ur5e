@@ -8,6 +8,10 @@ from src.execution_readiness_contract import evaluate_execution_readiness
 from src.output_paths import ROBOT_TASK_JSON_ROOT
 from src.planner_gateway_contract import evaluate_replay_record_for_planner
 from src.projector_contract import evaluate_projector_eligibility
+from src.simulation_bridge_contract import (
+    evaluate_replay_record_for_simulation,
+    evaluate_simulation_bridge_eligibility,
+)
 
 
 UNKNOWN = "unknown"
@@ -119,6 +123,10 @@ def format_summary(inspection: Dict[str, Any]) -> str:
             f"  grounding_count:    {_summary_value(summary, 'grounding_count')}",
             f"  grounding_missing_count: {_summary_value(summary, 'grounding_missing_count')}",
             f"  no_target_count:    {_summary_value(summary, 'no_target_count')}",
+            "",
+            "Simulation Bridge Summary",
+            f"  Simulation Ready: {_summary_value(summary, 'simulation_ready_count')}",
+            f"  Simulation Rejected: {_summary_value(summary, 'simulation_not_ready_count')}",
         ]
     )
     if inspection.get("ok", False) and inspection.get("smoke_report_md_path"):
@@ -387,6 +395,7 @@ def get_replay_record_detail(run_dir: Path | str, replay_record_index: int) -> D
         "planner": evaluate_replay_record_for_planner(replay_record, result_record),
         "projector": evaluate_projector_eligibility(result_record),
         "execution_readiness": evaluate_execution_readiness(result_record),
+        "simulation_bridge": evaluate_replay_record_for_simulation(replay_record, result_record),
     }
 
 
@@ -569,6 +578,7 @@ def format_replay_detail(detail: Dict[str, Any]) -> str:
     lines.extend(_format_planner_detail_lines(detail.get("planner", {})))
     lines.extend(_format_projector_detail_lines(detail.get("projector", {})))
     lines.extend(_format_execution_readiness_detail_lines(detail.get("execution_readiness", {})))
+    lines.extend(_format_simulation_bridge_detail_lines(detail.get("simulation_bridge", {})))
     lines.extend(
         [
             "",
@@ -648,6 +658,51 @@ def _format_planner_detail_lines(planner: Dict[str, Any]) -> List[str]:
             f"    allow_robot_motion: {_format_value(policy.get('allow_robot_motion', False))}",
         ]
     )
+    return lines
+
+
+def _format_simulation_bridge_detail_lines(simulation: Dict[str, Any]) -> List[str]:
+    if not simulation:
+        return [
+            "",
+            "Simulation Bridge",
+            "  status: FAIL",
+            "  simulation_ready: false",
+            "  allow_robot_motion: false",
+            "  blocking_reasons:",
+            "    E_MISSING_SIMULATION_BRIDGE_RESULT",
+            "  missing_runtime_inputs:",
+            "    none",
+        ]
+
+    lines = [
+        "",
+        "Simulation Bridge",
+        f"  status: {'PASS' if simulation.get('simulation_ready') is True else 'FAIL'}",
+        f"  simulation_ready: {_format_value(simulation.get('simulation_ready', False))}",
+        f"  task_type: {simulation.get('task_type', 'hover_to_object')}",
+        f"  target_label: {simulation.get('target_label', UNKNOWN)}",
+        f"  world_point_m: {_format_value(simulation.get('world_point_m'))}",
+        f"  allow_robot_motion: {_format_value(simulation.get('allow_robot_motion', False))}",
+        "  blocking_reasons:",
+    ]
+    _append_indented_values(lines, simulation.get("blocking_reasons", []), indent="    ")
+    lines.append("  missing_runtime_inputs:")
+    _append_indented_values(lines, simulation.get("missing_runtime_inputs", []), indent="    ")
+    simulation_task = simulation.get("simulation_task")
+    if isinstance(simulation_task, dict):
+        lines.extend(
+            [
+                "  simulation_task:",
+                f"    task_type: {simulation_task.get('task_type', '')}",
+                f"    target_label: {simulation_task.get('target_label', '')}",
+                f"    target_world_point: {_format_value(simulation_task.get('target_world_point'))}",
+                f"    scene_version: {simulation_task.get('scene_version', '')}",
+                f"    ttl_ms: {simulation_task.get('ttl_ms', '')}",
+            ]
+        )
+    else:
+        lines.append("  simulation_task: null")
     return lines
 
 
@@ -903,8 +958,13 @@ def format_items(items: Iterable[Dict[str, Any]], limit: int | None = None) -> s
                 f"raw_bbox_xyxy: {_format_value(item['raw_bbox_xyxy'])}",
                 f"raw_pixel_center: {_format_value(item['raw_pixel_center'])}",
                 f"raw_geometry_2d.confidence: {_format_value(item['raw_geometry_2d_confidence'])}",
+                "Simulation Bridge:",
+                "PASS" if item.get("simulation_ready") else "FAIL",
             ]
         )
+        simulation = item.get("simulation_bridge_result", {})
+        if isinstance(simulation, dict) and simulation.get("blocking_reasons"):
+            _append_list(lines, "Reason", simulation.get("blocking_reasons", []))
         _append_list(lines, "validation_warnings", item.get("validation_warnings", []))
         _append_list(lines, "pre_normalization_errors", item.get("pre_normalization_errors", []))
         _append_list(lines, "post_normalization_errors", item.get("post_normalization_errors", []))
@@ -1146,6 +1206,14 @@ def _display_index_path(value: Any) -> str:
 
 
 def _inspect_item(index: int, item: Dict[str, Any]) -> Dict[str, Any]:
+    simulation_bridge = item.get("simulation_bridge_result")
+    if not isinstance(simulation_bridge, dict):
+        normalized = item.get("normalized_json")
+        readiness = evaluate_execution_readiness(normalized if isinstance(normalized, dict) else None)
+        simulation_bridge = evaluate_simulation_bridge_eligibility(
+            normalized if isinstance(normalized, dict) else None,
+            readiness,
+        )
     target_label = _first_value(
         item,
         ("normalized_json", "target", "label"),
@@ -1266,6 +1334,8 @@ def _inspect_item(index: int, item: Dict[str, Any]) -> Dict[str, Any]:
         "rejected": candidate is False,
         "grounded": bbox_xyxy is not None or pixel_center is not None,
         "no_target": error_code == "E_NO_TARGET",
+        "simulation_ready": simulation_bridge.get("simulation_ready") is True,
+        "simulation_bridge_result": simulation_bridge,
     }
 
 
@@ -1371,6 +1441,10 @@ def _build_summary(items: List[Dict[str, Any]]) -> Dict[str, int]:
             summary["grounding_missing_count"] += 1
         if item.get("no_target"):
             summary["no_target_count"] += 1
+        if item.get("simulation_ready"):
+            summary["simulation_ready_count"] += 1
+        else:
+            summary["simulation_not_ready_count"] += 1
     return summary
 
 
@@ -1393,6 +1467,8 @@ def _empty_summary() -> Dict[str, int]:
         "grounding_count": 0,
         "grounding_missing_count": 0,
         "no_target_count": 0,
+        "simulation_ready_count": 0,
+        "simulation_not_ready_count": 0,
     }
 
 
@@ -1495,6 +1571,8 @@ def _format_smoke_report_markdown(report: Dict[str, Any]) -> str:
         f"- grounding_count: {summary['grounding_count']}",
         f"- grounding_missing_count: {summary['grounding_missing_count']}",
         f"- no_target_count: {summary['no_target_count']}",
+        f"- simulation_ready_count: {summary['simulation_ready_count']}",
+        f"- simulation_not_ready_count: {summary['simulation_not_ready_count']}",
         f"- parse_failed_count: {summary['parse_failed_count']}",
         "",
         "## Items",
@@ -1522,6 +1600,8 @@ def _format_smoke_report_markdown(report: Dict[str, Any]) -> str:
                 f"- raw_bbox_xyxy: {_format_value(item['raw_bbox_xyxy'])}",
                 f"- raw_pixel_center: {_format_value(item['raw_pixel_center'])}",
                 f"- raw_geometry_2d.confidence: {_format_value(item['raw_geometry_2d_confidence'])}",
+                f"- simulation_bridge: {'PASS' if item.get('simulation_ready') else 'FAIL'}",
+                f"- simulation_blocking_reasons: {item.get('simulation_bridge_result', {}).get('blocking_reasons', [])}",
                 f"- validation_warnings: {item['validation_warnings']}",
                 f"- pre_normalization_errors: {item['pre_normalization_errors']}",
                 f"- post_normalization_errors: {item['post_normalization_errors']}",

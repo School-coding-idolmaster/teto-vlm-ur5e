@@ -578,6 +578,34 @@ This is replay visibility only. It does not add ROS2, MoveIt, Isaac Sim, UR5,
 RTDE, TF, depth projection, world coordinates, robot motion, URScript, joint
 angles, trajectories, or `tcp_pose_world`.
 
+## TETO V1.9.0 simulation bridge contract
+
+`src/simulation_bridge_contract.py` adds the final semantic preparation layer
+before V2.0. It connects Execution Readiness to a simulation task
+representation and answers whether a normalized semantic result is ready to be
+consumed by a future simulation bridge.
+
+The contract checks that execution readiness is already `true`, that a
+`world_point_m` exists, that `scene_version` exists, and that `ttl_ms` exists.
+If any requirement is missing, it reports blocking reasons such as
+`E_NOT_EXECUTION_READY`, `E_NO_WORLD_POINT`, `E_NO_SCENE_VERSION`, or
+`E_NO_TTL`.
+
+When ready, `build_simulation_task` produces only a semantic simulation task:
+
+- `task_type`
+- `target_label`
+- `target_world_point`
+- `scene_version`
+- `ttl_ms`
+
+`robot_task_json` results now include `simulation_bridge_result`, and the
+inspector reports simulation ready/rejected counts plus a per-item Simulation
+Bridge PASS/FAIL detail. This is still V1.x Semantic Middleware. It does not
+call Isaac Sim APIs, ROS2, MoveIt, UR5, RTDE, TF, depth projection, robot
+motion, URScript, joint angles, trajectories, `moveit_goal`,
+`execution_command`, or `tcp_pose_world`.
+
 In the `python3 teto_V1.py` launcher, single image recognition and batch image
 recognition also show prompt helper keywords. You can type a built-in prompt
 type, a shortcut keyword, or a free-form prompt. Useful shortcuts include:

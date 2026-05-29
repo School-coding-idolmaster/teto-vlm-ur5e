@@ -75,7 +75,7 @@ def startup_animation():
    ██║   ███████╗   ██║   ╚██████╔╝
    ╚═╝   ╚══════╝   ╚═╝    ╚═════╝
 
-              TETO V1.8.1
+              TETO V1.9.0
            -- Test Launcher --
 """
     print(RED + title + RESET)
@@ -88,7 +88,7 @@ def _clean_path(value: str) -> str:
 
 def print_menu():
     print("=" * 40)
-    print("              TETO V1.8.1")
+    print("              TETO V1.9.0")
     print("             Test Launcher")
     print("=" * 40)
     print("1. Convert images")
@@ -96,6 +96,9 @@ def print_menu():
     print("3. Just chat with TETO")
     print("4. Check environment")
     print("5. Quit")
+    print()
+    print("Semantic pipeline:")
+    print("Planner Eligibility -> Projector Eligibility -> Execution Readiness -> Simulation Bridge")
 
 
 def print_convert_menu():

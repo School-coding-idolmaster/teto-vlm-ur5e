@@ -12,13 +12,15 @@ from src.output_paths import (
 from src.json_validator import attach_robot_task_json_fields
 from src.prompt_utils import get_prompt
 from src.robot_task_inspector import write_scene_and_replay_indexes, write_smoke_report
+from src.execution_readiness_contract import evaluate_execution_readiness
+from src.simulation_bridge_contract import evaluate_simulation_bridge_eligibility
 from src.vlm_infer import VLMInferencer
 
 
 SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 DEFAULT_OUTPUT_ROOT = BATCH_RECOGNITION_ROOT
 ROBOT_TASK_PROMPT_TYPE = "robot_task_json"
-CURRENT_TETO_VERSION = "TETO V1.8.1"
+CURRENT_TETO_VERSION = "TETO V1.9.0"
 
 
 def _normalize_path(path) -> Path:
@@ -53,6 +55,17 @@ def _append_index(index_path: Path, summary: Dict[str, object]) -> None:
         "failed": summary["failed"],
     }
     append_results_index(index_item, index_path)
+
+
+def _attach_simulation_bridge_result(prompt_type: str, item: Dict[str, object]) -> None:
+    if prompt_type != ROBOT_TASK_PROMPT_TYPE:
+        return
+    normalized = item.get("normalized_json")
+    readiness = evaluate_execution_readiness(normalized if isinstance(normalized, dict) else None)
+    item["simulation_bridge_result"] = evaluate_simulation_bridge_eligibility(
+        normalized if isinstance(normalized, dict) else None,
+        readiness,
+    )
 
 
 def run_batch_recognition(
@@ -133,6 +146,7 @@ def run_batch_recognition(
                 result = inferencer.infer(image_path, prompt)
                 item["response"] = result.get("response", "")
                 attach_robot_task_json_fields(prompt_type, item)
+                _attach_simulation_bridge_result(prompt_type, item)
                 success += 1
             except Exception as exc:
                 failed += 1
@@ -140,6 +154,7 @@ def run_batch_recognition(
                 item["error"] = str(exc)
                 error_lines.append(f"{image_path}\t{exc}")
                 attach_robot_task_json_fields(prompt_type, item)
+                _attach_simulation_bridge_result(prompt_type, item)
 
             results_file.write(json.dumps(item, ensure_ascii=False) + "\n")
 
