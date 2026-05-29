@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+from src.execution_readiness_contract import evaluate_execution_readiness
 from src.output_paths import ROBOT_TASK_JSON_ROOT
 from src.planner_gateway_contract import evaluate_replay_record_for_planner
 from src.projector_contract import evaluate_projector_eligibility
@@ -296,6 +297,38 @@ def summarize_projector_replay_records(run_dir: Path | str, records: Iterable[Di
     return summary
 
 
+def summarize_execution_readiness_replay_records(run_dir: Path | str, records: Iterable[Dict[str, Any]]) -> Dict[str, int]:
+    loaded = load_replay_index(run_dir)
+    if not loaded.get("ok"):
+        return _empty_execution_readiness_summary()
+
+    results = _load_replay_results(loaded["results_path"])
+    if not results.get("ok"):
+        return _empty_execution_readiness_summary()
+
+    result_records = results["records"]
+    summary = _empty_execution_readiness_summary()
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        result_index = record.get("result_record_index")
+        if not isinstance(result_index, int) or result_index < 0 or result_index >= len(result_records):
+            continue
+        readiness = evaluate_execution_readiness(result_records[result_index])
+        if readiness.get("ready") is True:
+            summary["execution_ready_count"] += 1
+        else:
+            summary["execution_rejected_count"] += 1
+        status = readiness.get("status")
+        if status == "planner_rejected":
+            summary["execution_planner_rejected_count"] += 1
+        elif status == "projector_rejected":
+            summary["execution_projector_rejected_count"] += 1
+        elif status == "dry_run_ready":
+            summary["execution_dry_run_ready_count"] += 1
+    return summary
+
+
 def get_replay_record_detail(run_dir: Path | str, replay_record_index: int) -> Dict[str, Any]:
     loaded = load_replay_index(run_dir)
     if not loaded.get("ok"):
@@ -353,6 +386,7 @@ def get_replay_record_detail(run_dir: Path | str, replay_record_index: int) -> D
         "audit": _replay_audit_summary(result_record),
         "planner": evaluate_replay_record_for_planner(replay_record, result_record),
         "projector": evaluate_projector_eligibility(result_record),
+        "execution_readiness": evaluate_execution_readiness(result_record),
     }
 
 
@@ -466,6 +500,11 @@ def format_replay_stats(
             f"  projector_eligible: {stats.get('projector_eligible_count', 0)}",
             f"  projector_rejected: {stats.get('projector_rejected_count', 0)}",
             f"  projector_ready: {stats.get('projector_ready_count', 0)}",
+            f"  execution_ready: {stats.get('execution_ready_count', 0)}",
+            f"  execution_rejected: {stats.get('execution_rejected_count', 0)}",
+            f"  execution_planner_rejected: {stats.get('execution_planner_rejected_count', 0)}",
+            f"  execution_projector_rejected: {stats.get('execution_projector_rejected_count', 0)}",
+            f"  execution_dry_run_ready: {stats.get('execution_dry_run_ready_count', 0)}",
         ]
     )
     lines.extend(format_active_filter_lines(active_filters))
@@ -529,6 +568,7 @@ def format_replay_detail(detail: Dict[str, Any]) -> str:
     ]
     lines.extend(_format_planner_detail_lines(detail.get("planner", {})))
     lines.extend(_format_projector_detail_lines(detail.get("projector", {})))
+    lines.extend(_format_execution_readiness_detail_lines(detail.get("execution_readiness", {})))
     lines.extend(
         [
             "",
@@ -608,6 +648,38 @@ def _format_planner_detail_lines(planner: Dict[str, Any]) -> List[str]:
             f"    allow_robot_motion: {_format_value(policy.get('allow_robot_motion', False))}",
         ]
     )
+    return lines
+
+
+def _format_execution_readiness_detail_lines(readiness: Dict[str, Any]) -> List[str]:
+    if not readiness:
+        return [
+            "",
+            "Execution Readiness",
+            "  status: planner_rejected",
+            "  ready: false",
+            "  planner_eligible: false",
+            "  projector_eligible: false",
+            "  allow_robot_motion: false",
+            "  blocking_reasons:",
+            "    E_MISSING_EXECUTION_READINESS",
+            "  warnings:",
+            "    none",
+        ]
+
+    lines = [
+        "",
+        "Execution Readiness",
+        f"  status: {readiness.get('status', 'planner_rejected')}",
+        f"  ready: {_format_value(readiness.get('ready', False))}",
+        f"  planner_eligible: {_format_value(readiness.get('planner_eligible', False))}",
+        f"  projector_eligible: {_format_value(readiness.get('projector_eligible', False))}",
+        f"  allow_robot_motion: {_format_value(readiness.get('allow_robot_motion', False))}",
+        "  blocking_reasons:",
+    ]
+    _append_indented_values(lines, readiness.get("blocking_reasons", []), indent="    ")
+    lines.append("  warnings:")
+    _append_indented_values(lines, readiness.get("warnings", []), indent="    ")
     return lines
 
 
@@ -1032,6 +1104,16 @@ def _empty_projector_summary() -> Dict[str, int]:
         "projector_eligible_count": 0,
         "projector_rejected_count": 0,
         "projector_ready_count": 0,
+    }
+
+
+def _empty_execution_readiness_summary() -> Dict[str, int]:
+    return {
+        "execution_ready_count": 0,
+        "execution_rejected_count": 0,
+        "execution_planner_rejected_count": 0,
+        "execution_projector_rejected_count": 0,
+        "execution_dry_run_ready_count": 0,
     }
 
 

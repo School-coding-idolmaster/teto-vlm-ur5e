@@ -12,6 +12,7 @@ from src.robot_task_inspector import (
     format_replay_stats,
     get_replay_record_detail,
     load_replay_index,
+    summarize_execution_readiness_replay_records,
     summarize_projector_replay_records,
     summarize_replay_records,
     write_scene_and_replay_indexes,
@@ -99,6 +100,26 @@ def _make_replay_run(tmp_path: Path) -> Path:
                 "pre_normalization_errors": [],
                 "post_normalization_errors": [],
             },
+            {
+                "image_path": "/tmp/fuzzy_box.jpg",
+                "parse_status": "success",
+                "validation_status": "passed",
+                "normalized_json": {
+                    "schema_version": "teto_robot_task.v1",
+                    "scene": {"scene_version": "run_20260529_150000_item_004", "status": "valid"},
+                    "target": {"label": "box", "target_id": "obj_002", "bbox_xyxy": [20, 30, 120, 150]},
+                    "geometry_2d": {
+                        "pixel_center": [70, 90],
+                        "image_width": 100,
+                        "image_height": 80,
+                        "confidence": 0.25,
+                    },
+                    "manipulation_assessment": {"candidate": True, "difficulty": "medium"},
+                    "error": {"code": "OK"},
+                },
+                "pre_normalization_errors": [],
+                "post_normalization_errors": [],
+            },
         ],
     )
     write_scene_and_replay_indexes(run_dir)
@@ -111,14 +132,14 @@ def test_semantic_replay_stats_counts_positive_and_hard_negative(tmp_path):
 
     stats = summarize_replay_records(loaded["records"])
 
-    assert stats["total_count"] == 3
-    assert stats["positive_replay_sample_count"] == 1
+    assert stats["total_count"] == 4
+    assert stats["positive_replay_sample_count"] == 2
     assert stats["hard_negative_sample_count"] == 2
-    assert stats["grounded_count"] == 1
+    assert stats["grounded_count"] == 2
     assert stats["ungrounded_count"] == 2
-    assert stats["candidate_count"] == 1
+    assert stats["candidate_count"] == 2
     assert stats["non_candidate_count"] == 2
-    assert stats["error_codes"] == {"E_NO_TARGET": 1, "E_UNSAFE": 1, "OK": 1}
+    assert stats["error_codes"] == {"E_NO_TARGET": 1, "E_UNSAFE": 1, "OK": 2}
 
 
 def test_semantic_replay_stats_counts_projector_eligibility(tmp_path):
@@ -128,7 +149,7 @@ def test_semantic_replay_stats_counts_projector_eligibility(tmp_path):
     stats = summarize_projector_replay_records(run_dir, loaded["records"])
 
     assert stats["projector_eligible_count"] == 1
-    assert stats["projector_rejected_count"] == 2
+    assert stats["projector_rejected_count"] == 3
     assert stats["projector_ready_count"] == 1
 
 
@@ -141,8 +162,36 @@ def test_semantic_replay_stats_displays_projector_summary(tmp_path):
     text = format_replay_stats(stats)
 
     assert "projector_eligible: 1" in text
-    assert "projector_rejected: 2" in text
+    assert "projector_rejected: 3" in text
     assert "projector_ready: 1" in text
+
+
+def test_semantic_replay_stats_counts_execution_readiness(tmp_path):
+    run_dir = _make_replay_run(tmp_path)
+    loaded = load_replay_index(run_dir)
+
+    stats = summarize_execution_readiness_replay_records(run_dir, loaded["records"])
+
+    assert stats["execution_ready_count"] == 1
+    assert stats["execution_rejected_count"] == 3
+    assert stats["execution_planner_rejected_count"] == 2
+    assert stats["execution_projector_rejected_count"] == 1
+    assert stats["execution_dry_run_ready_count"] == 1
+
+
+def test_semantic_replay_stats_displays_execution_summary(tmp_path):
+    run_dir = _make_replay_run(tmp_path)
+    loaded = load_replay_index(run_dir)
+    stats = summarize_replay_records(loaded["records"])
+    stats.update(summarize_execution_readiness_replay_records(run_dir, loaded["records"]))
+
+    text = format_replay_stats(stats)
+
+    assert "execution_ready: 1" in text
+    assert "execution_rejected: 3" in text
+    assert "execution_planner_rejected: 2" in text
+    assert "execution_projector_rejected: 1" in text
+    assert "execution_dry_run_ready: 1" in text
 
 
 def test_semantic_replay_stats_displays_run_sources(tmp_path):
@@ -182,9 +231,10 @@ def test_semantic_replay_filters_positive_samples(tmp_path):
 
     selected = filter_replay_records(records, positive=True)
 
-    assert len(selected) == 1
-    assert selected[0]["positive_replay_sample"] is True
+    assert len(selected) == 2
+    assert all(record["positive_replay_sample"] is True for record in selected)
     assert selected[0]["target_label"] == "camera"
+    assert selected[1]["target_label"] == "box"
 
 
 def test_semantic_replay_list_limit_limits_display_only(tmp_path):
@@ -348,6 +398,80 @@ def test_semantic_replay_show_projector_allow_robot_motion_always_false(tmp_path
 
     assert eligible_detail["projector"]["allow_robot_motion"] is False
     assert rejected_detail["projector"]["allow_robot_motion"] is False
+
+
+def test_semantic_replay_show_displays_execution_readiness_dry_run_ready(tmp_path):
+    run_dir = _make_replay_run(tmp_path)
+
+    text = format_replay_detail(get_replay_record_detail(run_dir, 0))
+
+    assert "Execution Readiness" in text
+    assert "status: dry_run_ready" in text
+    assert "ready: true" in text
+    assert "planner_eligible: true" in text
+    assert "projector_eligible: true" in text
+    assert "allow_robot_motion: false" in text
+
+
+def test_semantic_replay_show_displays_execution_readiness_planner_rejected(tmp_path):
+    run_dir = _make_replay_run(tmp_path)
+
+    text = format_replay_detail(get_replay_record_detail(run_dir, 1))
+
+    assert "Execution Readiness" in text
+    assert "status: planner_rejected" in text
+    assert "ready: false" in text
+    assert "planner_eligible: false" in text
+    assert "projector_eligible: false" in text
+    assert "E_NO_TARGET" in text
+    assert "allow_robot_motion: false" in text
+
+
+def test_semantic_replay_show_displays_execution_readiness_projector_rejected(tmp_path):
+    run_dir = _make_replay_run(tmp_path)
+
+    text = format_replay_detail(get_replay_record_detail(run_dir, 3))
+
+    assert "Execution Readiness" in text
+    assert "status: projector_rejected" in text
+    assert "ready: false" in text
+    assert "planner_eligible: true" in text
+    assert "projector_eligible: false" in text
+    assert "E_LOW_GEOMETRY_CONFIDENCE" in text
+    assert "allow_robot_motion: false" in text
+
+
+def test_semantic_replay_show_execution_readiness_blocking_reasons(tmp_path):
+    run_dir = _make_replay_run(tmp_path)
+
+    text = format_replay_detail(get_replay_record_detail(run_dir, 1))
+
+    assert "blocking_reasons:" in text
+    assert "E_NO_TARGET" in text
+    assert "E_NOT_CANDIDATE" in text
+    assert "E_NOT_GROUNDED" in text
+
+
+def test_semantic_replay_show_execution_readiness_does_not_break_planner_or_projector_display(tmp_path):
+    run_dir = _make_replay_run(tmp_path)
+
+    text = format_replay_detail(get_replay_record_detail(run_dir, 0))
+
+    assert "Planner gateway eligibility" in text
+    assert "Projector Eligibility" in text
+    assert "Execution Readiness" in text
+    assert text.index("Projector Eligibility") < text.index("Execution Readiness")
+    assert text.index("Execution Readiness") < text.index("Audit raw fields")
+
+
+def test_semantic_replay_show_execution_readiness_allow_robot_motion_false(tmp_path):
+    run_dir = _make_replay_run(tmp_path)
+
+    ready_detail = get_replay_record_detail(run_dir, 0)
+    rejected_detail = get_replay_record_detail(run_dir, 3)
+
+    assert ready_detail["execution_readiness"]["allow_robot_motion"] is False
+    assert rejected_detail["execution_readiness"]["allow_robot_motion"] is False
 
 
 def test_semantic_replay_show_uses_normalized_fields_for_planner_eligibility(tmp_path):

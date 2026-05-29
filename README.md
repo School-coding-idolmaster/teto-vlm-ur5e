@@ -558,6 +558,26 @@ motion, compute TF, project depth, compute world coordinates, generate
 `tcp_pose_world`, generate joint angles, generate trajectories, generate
 URScript, or execute a robot.
 
+## TETO V1.8.1 execution readiness replay display
+
+`scripts/semantic_replay.py --show N` now displays Execution Readiness after
+Planner Gateway Eligibility and Projector Eligibility. The replay detail view
+shows `dry_run_ready`, `planner_rejected`, or `projector_rejected`, plus ready
+state, planner/projector eligibility flags, blocking reasons, warnings, and
+`allow_robot_motion=false`.
+
+Replay statistics now include execution readiness counts:
+
+- `execution_ready`
+- `execution_rejected`
+- `execution_planner_rejected`
+- `execution_projector_rejected`
+- `execution_dry_run_ready`
+
+This is replay visibility only. It does not add ROS2, MoveIt, Isaac Sim, UR5,
+RTDE, TF, depth projection, world coordinates, robot motion, URScript, joint
+angles, trajectories, or `tcp_pose_world`.
+
 In the `python3 teto_V1.py` launcher, single image recognition and batch image
 recognition also show prompt helper keywords. You can type a built-in prompt
 type, a shortcut keyword, or a free-form prompt. Useful shortcuts include:
