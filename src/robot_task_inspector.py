@@ -6,6 +6,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from src.output_paths import ROBOT_TASK_JSON_ROOT
 from src.planner_gateway_contract import evaluate_replay_record_for_planner
+from src.projector_contract import evaluate_projector_eligibility
 
 
 UNKNOWN = "unknown"
@@ -268,6 +269,33 @@ def summarize_replay_records(records: Iterable[Dict[str, Any]]) -> Dict[str, Any
     }
 
 
+def summarize_projector_replay_records(run_dir: Path | str, records: Iterable[Dict[str, Any]]) -> Dict[str, int]:
+    loaded = load_replay_index(run_dir)
+    if not loaded.get("ok"):
+        return _empty_projector_summary()
+
+    results = _load_replay_results(loaded["results_path"])
+    if not results.get("ok"):
+        return _empty_projector_summary()
+
+    result_records = results["records"]
+    summary = _empty_projector_summary()
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        result_index = record.get("result_record_index")
+        if not isinstance(result_index, int) or result_index < 0 or result_index >= len(result_records):
+            continue
+        projector = evaluate_projector_eligibility(result_records[result_index])
+        if projector.get("eligible") is True:
+            summary["projector_eligible_count"] += 1
+        else:
+            summary["projector_rejected_count"] += 1
+        if projector.get("projector_status") == "ready":
+            summary["projector_ready_count"] += 1
+    return summary
+
+
 def get_replay_record_detail(run_dir: Path | str, replay_record_index: int) -> Dict[str, Any]:
     loaded = load_replay_index(run_dir)
     if not loaded.get("ok"):
@@ -324,6 +352,7 @@ def get_replay_record_detail(run_dir: Path | str, replay_record_index: int) -> D
         "normalized_summary": _normalized_replay_summary(result_record),
         "audit": _replay_audit_summary(result_record),
         "planner": evaluate_replay_record_for_planner(replay_record, result_record),
+        "projector": evaluate_projector_eligibility(result_record),
     }
 
 
@@ -434,6 +463,9 @@ def format_replay_stats(
             f"  ungrounded: {stats.get('ungrounded_count', 0)}",
             f"  candidate: {stats.get('candidate_count', 0)}",
             f"  non_candidate: {stats.get('non_candidate_count', 0)}",
+            f"  projector_eligible: {stats.get('projector_eligible_count', 0)}",
+            f"  projector_rejected: {stats.get('projector_rejected_count', 0)}",
+            f"  projector_ready: {stats.get('projector_ready_count', 0)}",
         ]
     )
     lines.extend(format_active_filter_lines(active_filters))
@@ -494,14 +526,19 @@ def format_replay_detail(detail: Dict[str, Any]) -> str:
         f"  bbox_xyxy: {_format_value(target.get('bbox_xyxy'))}",
         f"  pixel_center: {_format_value(geometry.get('pixel_center'))}",
         f"  grounded: {_format_replay_value(replay_record.get('grounded', False))}",
-        "",
-        "Audit raw fields",
-        f"  raw_bbox_xyxy: {_format_value(audit.get('raw_bbox_xyxy'))}",
-        f"  raw_pixel_center: {_format_value(audit.get('raw_pixel_center'))}",
-        f"  pre_normalization_errors: {audit.get('pre_normalization_errors', [])}",
-        f"  post_normalization_errors: {audit.get('post_normalization_errors', [])}",
     ]
     lines.extend(_format_planner_detail_lines(detail.get("planner", {})))
+    lines.extend(_format_projector_detail_lines(detail.get("projector", {})))
+    lines.extend(
+        [
+            "",
+            "Audit raw fields",
+            f"  raw_bbox_xyxy: {_format_value(audit.get('raw_bbox_xyxy'))}",
+            f"  raw_pixel_center: {_format_value(audit.get('raw_pixel_center'))}",
+            f"  pre_normalization_errors: {audit.get('pre_normalization_errors', [])}",
+            f"  post_normalization_errors: {audit.get('post_normalization_errors', [])}",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -571,6 +608,40 @@ def _format_planner_detail_lines(planner: Dict[str, Any]) -> List[str]:
             f"    allow_robot_motion: {_format_value(policy.get('allow_robot_motion', False))}",
         ]
     )
+    return lines
+
+
+def _format_projector_detail_lines(projector: Dict[str, Any]) -> List[str]:
+    if not projector:
+        return [
+            "",
+            "Projector Eligibility",
+            "  status: rejected",
+            "  eligible: false",
+            "  projector_confidence: 0.0",
+            "  allow_robot_motion: false",
+            "  missing_runtime_inputs:",
+            "    none",
+            "  errors:",
+            "    E_MISSING_PROJECTOR_RESULT",
+            "  warnings:",
+            "    none",
+        ]
+
+    lines = [
+        "",
+        "Projector Eligibility",
+        f"  status: {projector.get('projector_status', 'rejected')}",
+        f"  eligible: {_format_value(projector.get('eligible', False))}",
+        f"  projector_confidence: {projector.get('projector_confidence', 0.0)}",
+        f"  allow_robot_motion: {_format_value(projector.get('allow_robot_motion', False))}",
+        "  missing_runtime_inputs:",
+    ]
+    _append_indented_values(lines, projector.get("missing_runtime_inputs", []), indent="    ")
+    lines.append("  errors:")
+    _append_indented_values(lines, projector.get("errors", []), indent="    ")
+    lines.append("  warnings:")
+    _append_indented_values(lines, projector.get("warnings", []), indent="    ")
     return lines
 
 
@@ -954,6 +1025,14 @@ def _append_count_lines(lines: List[str], counts: Dict[str, Any]) -> None:
         return
     for key, count in counts.items():
         lines.append(f"    {key}: {count}")
+
+
+def _empty_projector_summary() -> Dict[str, int]:
+    return {
+        "projector_eligible_count": 0,
+        "projector_rejected_count": 0,
+        "projector_ready_count": 0,
+    }
 
 
 def _append_indented_values(lines: List[str], values: Any, indent: str = "  ") -> None:

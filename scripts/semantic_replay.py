@@ -16,6 +16,7 @@ from src.robot_task_inspector import (
     format_replay_stats,
     get_replay_record_detail,
     load_replay_index,
+    summarize_projector_replay_records,
     summarize_replay_records,
 )
 
@@ -77,6 +78,7 @@ def main() -> int:
     should_list = args.list or not has_action
     if should_stats:
         selected_stats = summarize_replay_records(selected)
+        selected_stats.update(summarize_projector_replay_records(args.run_dir, selected))
         selected_stats["total_count"] = len(loaded["records"])
         source = {
             "run_dir": loaded["run_dir"],

@@ -521,6 +521,24 @@ V1.7.0 remains semantic middleware plus geometry contract preparation. It does
 not call Qwen, rerun models, change prompts, connect to ROS2 / MoveIt / UR5,
 or send robot control commands.
 
+## TETO V1.7.1 projector eligibility replay display
+
+`scripts/semantic_replay.py --show N` now displays projector eligibility beside
+planner eligibility for the selected replay sample. The detail view reports
+projector status, eligibility, projector confidence, runtime inputs still
+missing, errors, warnings, and `allow_robot_motion=false`.
+
+Replay statistics also include projector counts:
+
+- `projector_eligible`
+- `projector_rejected`
+- `projector_ready`
+
+This is visibility only. It does not perform depth projection, camera
+intrinsics computation, TF computation, world coordinate solving,
+`tcp_pose_world` generation, joint angle generation, trajectory generation,
+URScript generation, or robot motion.
+
 In the `python3 teto_V1.py` launcher, single image recognition and batch image
 recognition also show prompt helper keywords. You can type a built-in prompt
 type, a shortcut keyword, or a free-form prompt. Useful shortcuts include:

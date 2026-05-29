@@ -12,6 +12,7 @@ from src.robot_task_inspector import (
     format_replay_stats,
     get_replay_record_detail,
     load_replay_index,
+    summarize_projector_replay_records,
     summarize_replay_records,
     write_scene_and_replay_indexes,
 )
@@ -118,6 +119,30 @@ def test_semantic_replay_stats_counts_positive_and_hard_negative(tmp_path):
     assert stats["candidate_count"] == 1
     assert stats["non_candidate_count"] == 2
     assert stats["error_codes"] == {"E_NO_TARGET": 1, "E_UNSAFE": 1, "OK": 1}
+
+
+def test_semantic_replay_stats_counts_projector_eligibility(tmp_path):
+    run_dir = _make_replay_run(tmp_path)
+    loaded = load_replay_index(run_dir)
+
+    stats = summarize_projector_replay_records(run_dir, loaded["records"])
+
+    assert stats["projector_eligible_count"] == 1
+    assert stats["projector_rejected_count"] == 2
+    assert stats["projector_ready_count"] == 1
+
+
+def test_semantic_replay_stats_displays_projector_summary(tmp_path):
+    run_dir = _make_replay_run(tmp_path)
+    loaded = load_replay_index(run_dir)
+    stats = summarize_replay_records(loaded["records"])
+    stats.update(summarize_projector_replay_records(run_dir, loaded["records"]))
+
+    text = format_replay_stats(stats)
+
+    assert "projector_eligible: 1" in text
+    assert "projector_rejected: 2" in text
+    assert "projector_ready: 1" in text
 
 
 def test_semantic_replay_stats_displays_run_sources(tmp_path):
@@ -236,6 +261,46 @@ def test_semantic_replay_show_displays_planner_eligibility_for_rejected_record(t
     assert "allow_robot_motion: false" in text
 
 
+def test_semantic_replay_show_displays_projector_eligibility_for_eligible_record(tmp_path):
+    run_dir = _make_replay_run(tmp_path)
+
+    text = format_replay_detail(get_replay_record_detail(run_dir, 0))
+
+    assert "Projector Eligibility" in text
+    assert "status: ready" in text
+    assert "eligible: true" in text
+    assert "projector_confidence: 0.0" in text
+    assert "allow_robot_motion: false" in text
+    assert "depth_sample" in text
+    assert "camera_info" in text
+    assert "tf_tree" in text
+
+
+def test_semantic_replay_show_displays_projector_eligibility_for_rejected_record(tmp_path):
+    run_dir = _make_replay_run(tmp_path)
+
+    text = format_replay_detail(get_replay_record_detail(run_dir, 1))
+
+    assert "Projector Eligibility" in text
+    assert "status: rejected" in text
+    assert "eligible: false" in text
+    assert "E_NOT_CANDIDATE" in text
+    assert "E_NOT_GROUNDED" in text
+    assert "E_MISSING_PIXEL_CENTER" in text
+    assert "E_MISSING_BBOX" in text
+    assert "allow_robot_motion: false" in text
+
+
+def test_semantic_replay_show_projector_status_formatting(tmp_path):
+    run_dir = _make_replay_run(tmp_path)
+
+    eligible_text = format_replay_detail(get_replay_record_detail(run_dir, 0))
+    rejected_text = format_replay_detail(get_replay_record_detail(run_dir, 2))
+
+    assert "status: ready" in eligible_text
+    assert "status: rejected" in rejected_text
+
+
 def test_semantic_replay_show_displays_planner_input_for_eligible_record(tmp_path):
     run_dir = _make_replay_run(tmp_path)
 
@@ -261,6 +326,28 @@ def test_semantic_replay_show_planner_section_does_not_include_control_fields(tm
     assert "joint_angles" not in text
     assert "trajectory" not in text
     assert "tcp_pose_world" not in text
+
+
+def test_semantic_replay_show_projector_section_does_not_break_planner_display(tmp_path):
+    run_dir = _make_replay_run(tmp_path)
+
+    text = format_replay_detail(get_replay_record_detail(run_dir, 0))
+
+    assert "Planner gateway eligibility" in text
+    assert "Planner input skeleton" in text
+    assert "Projector Eligibility" in text
+    assert text.index("Planner gateway eligibility") < text.index("Projector Eligibility")
+    assert text.index("Projector Eligibility") < text.index("Audit raw fields")
+
+
+def test_semantic_replay_show_projector_allow_robot_motion_always_false(tmp_path):
+    run_dir = _make_replay_run(tmp_path)
+
+    eligible_detail = get_replay_record_detail(run_dir, 0)
+    rejected_detail = get_replay_record_detail(run_dir, 1)
+
+    assert eligible_detail["projector"]["allow_robot_motion"] is False
+    assert rejected_detail["projector"]["allow_robot_motion"] is False
 
 
 def test_semantic_replay_show_uses_normalized_fields_for_planner_eligibility(tmp_path):
