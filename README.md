@@ -539,6 +539,25 @@ intrinsics computation, TF computation, world coordinate solving,
 `tcp_pose_world` generation, joint angle generation, trajectory generation,
 URScript generation, or robot motion.
 
+## TETO V1.8.0 execution readiness contract
+
+`src/execution_readiness_contract.py` combines planner gateway eligibility and
+projector eligibility into a dry-run execution readiness contract. It answers
+whether one normalized semantic result is simultaneously planner-eligible and
+projector-eligible, and reports `planner_rejected`, `projector_rejected`, or
+`dry_run_ready`.
+
+The contract aggregates planner and projector blocking reasons while keeping
+`allow_robot_motion=false` for every status. `build_execution_readiness_input`
+creates a dry-run summary with scene, target, 2D grounding, contract versions,
+missing runtime inputs, and execution policy.
+
+V1.8.0 is the first merge point for planner and projector layers, but it is
+still Semantic Middleware. It does not create MoveIt requests, simulate robot
+motion, compute TF, project depth, compute world coordinates, generate
+`tcp_pose_world`, generate joint angles, generate trajectories, generate
+URScript, or execute a robot.
+
 In the `python3 teto_V1.py` launcher, single image recognition and batch image
 recognition also show prompt helper keywords. You can type a built-in prompt
 type, a shortcut keyword, or a free-form prompt. Useful shortcuts include:

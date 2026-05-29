@@ -75,7 +75,7 @@ def startup_animation():
    ██║   ███████╗   ██║   ╚██████╔╝
    ╚═╝   ╚══════╝   ╚═╝    ╚═════╝
 
-              TETO V1.7.1
+              TETO V1.8.0
            -- Test Launcher --
 """
     print(RED + title + RESET)
@@ -88,7 +88,7 @@ def _clean_path(value: str) -> str:
 
 def print_menu():
     print("=" * 40)
-    print("              TETO V1.7.1")
+    print("              TETO V1.8.0")
     print("             Test Launcher")
     print("=" * 40)
     print("1. Convert images")
