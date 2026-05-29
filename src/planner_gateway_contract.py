@@ -197,6 +197,8 @@ def _extract_normalized_json(record_or_normalized_json: Dict[str, Any] | None) -
         return normalized
     if "schema_version" in record_or_normalized_json:
         return record_or_normalized_json
+    if any(key in record_or_normalized_json for key in ("scene", "target", "geometry_2d", "error")):
+        return record_or_normalized_json
     return None
 
 

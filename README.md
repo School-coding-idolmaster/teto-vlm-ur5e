@@ -473,6 +473,25 @@ connect to ROS2 / MoveIt / UR5, call Qwen, rerun VLM inference, change prompts,
 generate URScript, generate joint angles, generate trajectories, or send robot
 control commands.
 
+## TETO V1.6.1 semantic replay planner eligibility display
+
+`scripts/semantic_replay.py --show N` now includes a planner gateway
+eligibility section for the selected replay sample. Reviewers can see whether a
+sample is eligible for a future `planner_gateway`, inspect rejection reasons
+for rejected samples, and confirm that the planner contract remains dry-run
+only.
+
+Eligible samples show a planner input skeleton summary with contract version,
+task ID, scene version, intent, target ID, target label, normalized 2D grounding
+fields, missing runtime inputs, and execution policy. Rejected samples show
+`planner_input: null` along with the eligibility reasons and required missing
+fields.
+
+The planner display always reports `dry_run_only=true` and
+`allow_robot_motion=false`. It does not add 2D to 3D projection, ROS2, MoveIt,
+UR5, URScript, joint angles, trajectories, `tcp_pose_world`, or any robot
+control command. TETO remains semantic middleware.
+
 In the `python3 teto_V1.py` launcher, single image recognition and batch image
 recognition also show prompt helper keywords. You can type a built-in prompt
 type, a shortcut keyword, or a free-form prompt. Useful shortcuts include:

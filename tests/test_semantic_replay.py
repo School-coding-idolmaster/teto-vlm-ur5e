@@ -39,6 +39,7 @@ def _make_replay_run(tmp_path: Path) -> Path:
                     "geometry_2d": {"pixel_center": [6, 12]},
                 },
                 "normalized_json": {
+                    "schema_version": "teto_robot_task.v1",
                     "scene": {"scene_version": "run_20260529_150000_item_001", "status": "valid"},
                     "target": {"label": "camera", "target_id": "obj_001", "bbox_xyxy": [1, 2, 11, 22]},
                     "geometry_2d": {
@@ -62,6 +63,7 @@ def _make_replay_run(tmp_path: Path) -> Path:
                     "geometry_2d": {"pixel_center": [5, 5]},
                 },
                 "normalized_json": {
+                    "schema_version": "teto_robot_task.v1",
                     "scene": {"scene_version": "run_20260529_150000_item_002", "status": "valid"},
                     "target": {"label": "unknown", "target_id": "unknown", "bbox_xyxy": None},
                     "geometry_2d": {
@@ -81,6 +83,7 @@ def _make_replay_run(tmp_path: Path) -> Path:
                 "parse_status": "success",
                 "validation_status": "warning",
                 "normalized_json": {
+                    "schema_version": "teto_robot_task.v1",
                     "scene": {"scene_version": "run_20260529_150000_item_003", "status": "valid"},
                     "target": {"label": "person", "target_id": "unknown", "bbox_xyxy": None},
                     "geometry_2d": {
@@ -217,6 +220,59 @@ def test_semantic_replay_show_displays_audit_sections(tmp_path):
     assert "raw_bbox_xyxy: [0, 0, 10, 10]" in text
     assert "raw_pixel_center: [5, 5]" in text
     assert "pre_normalization_errors: ['raw target was unknown']" in text
+
+
+def test_semantic_replay_show_displays_planner_eligibility_for_rejected_record(tmp_path):
+    run_dir = _make_replay_run(tmp_path)
+
+    text = format_replay_detail(get_replay_record_detail(run_dir, 1))
+
+    assert "Planner gateway eligibility" in text
+    assert "eligible: false" in text
+    assert "status: rejected" in text
+    assert "E_NO_TARGET" in text
+    assert "E_NOT_CANDIDATE" in text
+    assert "planner_input: null" in text
+    assert "allow_robot_motion: false" in text
+
+
+def test_semantic_replay_show_displays_planner_input_for_eligible_record(tmp_path):
+    run_dir = _make_replay_run(tmp_path)
+
+    text = format_replay_detail(get_replay_record_detail(run_dir, 0))
+
+    assert "Planner gateway eligibility" in text
+    assert "eligible: true" in text
+    assert "Planner input skeleton" in text
+    assert "contract_version: teto_planner_gateway_input.v1" in text
+    assert "intent.name: hover_to_object" in text
+    assert "target.target_id: obj_001" in text
+    assert "target.label: camera" in text
+    assert "dry_run_only: true" in text
+    assert "allow_robot_motion: false" in text
+
+
+def test_semantic_replay_show_planner_section_does_not_include_control_fields(tmp_path):
+    run_dir = _make_replay_run(tmp_path)
+
+    text = format_replay_detail(get_replay_record_detail(run_dir, 0))
+
+    assert "URScript" not in text
+    assert "joint_angles" not in text
+    assert "trajectory" not in text
+    assert "tcp_pose_world" not in text
+
+
+def test_semantic_replay_show_uses_normalized_fields_for_planner_eligibility(tmp_path):
+    run_dir = _make_replay_run(tmp_path)
+
+    text = format_replay_detail(get_replay_record_detail(run_dir, 1))
+
+    assert "raw_bbox_xyxy: [0, 0, 10, 10]" in text
+    assert "raw_pixel_center: [5, 5]" in text
+    assert "eligible: false" in text
+    assert "E_MISSING_BBOX" in text
+    assert "E_MISSING_PIXEL_CENTER" in text
 
 
 def test_semantic_replay_export_subset_writes_jsonl(tmp_path):

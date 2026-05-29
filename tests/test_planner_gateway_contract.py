@@ -163,6 +163,21 @@ def test_replay_record_planner_eligibility_uses_normalized_fields_only():
     assert result["planner_input"] is None
 
 
+def test_evaluate_replay_record_for_planner_returns_planner_input_for_eligible_record():
+    replay_record = {
+        "scene_version": "run_planner_item_001",
+        "grounded": True,
+    }
+    result_record = {"normalized_json": _valid_normalized_json()}
+
+    result = evaluate_replay_record_for_planner(replay_record, result_record)
+
+    assert result["eligible"] is True
+    assert result["planner_input"]["contract_version"] == CONTRACT_VERSION
+    assert result["planner_input"]["execution_policy"]["dry_run_only"] is True
+    assert result["planner_input"]["execution_policy"]["allow_robot_motion"] is False
+
+
 def test_planner_gateway_input_lists_missing_runtime_inputs():
     planner_input = build_planner_gateway_input(_valid_normalized_json())
 

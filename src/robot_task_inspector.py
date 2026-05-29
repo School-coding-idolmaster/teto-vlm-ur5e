@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from src.output_paths import ROBOT_TASK_JSON_ROOT
+from src.planner_gateway_contract import evaluate_replay_record_for_planner
 
 
 UNKNOWN = "unknown"
@@ -322,6 +323,7 @@ def get_replay_record_detail(run_dir: Path | str, replay_record_index: int) -> D
         "result_record": result_record,
         "normalized_summary": _normalized_replay_summary(result_record),
         "audit": _replay_audit_summary(result_record),
+        "planner": evaluate_replay_record_for_planner(replay_record, result_record),
     }
 
 
@@ -499,7 +501,77 @@ def format_replay_detail(detail: Dict[str, Any]) -> str:
         f"  pre_normalization_errors: {audit.get('pre_normalization_errors', [])}",
         f"  post_normalization_errors: {audit.get('post_normalization_errors', [])}",
     ]
+    lines.extend(_format_planner_detail_lines(detail.get("planner", {})))
     return "\n".join(lines)
+
+
+def _format_planner_detail_lines(planner: Dict[str, Any]) -> List[str]:
+    if not planner:
+        return [
+            "",
+            "Planner gateway eligibility",
+            "  eligible: false",
+            "  status: rejected",
+            "  reasons:",
+            "    E_MISSING_NORMALIZED_JSON",
+            "  warnings:",
+            "    none",
+            "  required_missing_fields:",
+            "    normalized_json",
+            "  contract_version: teto_planner_gateway_input.v1",
+            "  dry_run_only: true",
+            "  allow_robot_motion: false",
+            "  planner_input: null",
+        ]
+
+    lines = [
+        "",
+        "Planner gateway eligibility",
+        f"  eligible: {_format_value(planner.get('eligible', False))}",
+        f"  status: {planner.get('status', 'rejected')}",
+        "  reasons:",
+    ]
+    _append_indented_values(lines, planner.get("reasons", []), indent="    ")
+    lines.append("  warnings:")
+    _append_indented_values(lines, planner.get("warnings", []), indent="    ")
+    lines.append("  required_missing_fields:")
+    _append_indented_values(lines, planner.get("required_missing_fields", []), indent="    ")
+    lines.append(f"  contract_version: {planner.get('contract_version', 'teto_planner_gateway_input.v1')}")
+
+    planner_input = planner.get("planner_input")
+    policy = planner_input.get("execution_policy", {}) if isinstance(planner_input, dict) else {}
+    lines.append(f"  dry_run_only: {_format_value(policy.get('dry_run_only', True))}")
+    lines.append(f"  allow_robot_motion: {_format_value(policy.get('allow_robot_motion', False))}")
+    if not isinstance(planner_input, dict):
+        lines.append("  planner_input: null")
+        return lines
+
+    intent = planner_input.get("intent", {})
+    target = planner_input.get("target", {})
+    lines.extend(
+        [
+            "",
+            "Planner input skeleton",
+            f"  contract_version: {planner_input.get('contract_version', '')}",
+            f"  task_id: {planner_input.get('task_id', '')}",
+            f"  scene_version: {planner_input.get('scene_version', '')}",
+            f"  intent.name: {intent.get('name', '') if isinstance(intent, dict) else ''}",
+            f"  target.target_id: {target.get('target_id', '') if isinstance(target, dict) else ''}",
+            f"  target.label: {target.get('label', '') if isinstance(target, dict) else ''}",
+            f"  target.pixel_center: {_format_value(target.get('pixel_center') if isinstance(target, dict) else None)}",
+            f"  target.bbox_xyxy: {_format_value(target.get('bbox_xyxy') if isinstance(target, dict) else None)}",
+            "  missing_runtime_inputs:",
+        ]
+    )
+    _append_indented_values(lines, planner_input.get("missing_runtime_inputs", []), indent="    ")
+    lines.extend(
+        [
+            "  execution_policy:",
+            f"    dry_run_only: {_format_value(policy.get('dry_run_only', True))}",
+            f"    allow_robot_motion: {_format_value(policy.get('allow_robot_motion', False))}",
+        ]
+    )
+    return lines
 
 
 def summarize_scene_index(path: Path | str) -> tuple[Dict[str, Any], Dict[str, Any] | None]:
@@ -882,6 +954,16 @@ def _append_count_lines(lines: List[str], counts: Dict[str, Any]) -> None:
         return
     for key, count in counts.items():
         lines.append(f"    {key}: {count}")
+
+
+def _append_indented_values(lines: List[str], values: Any, indent: str = "  ") -> None:
+    if not values:
+        lines.append(f"{indent}none")
+        return
+    if not isinstance(values, list):
+        values = [values]
+    for value in values:
+        lines.append(f"{indent}{value}")
 
 
 def _consistency_result(warnings: List[str], errors: List[str]) -> Dict[str, Any]:
