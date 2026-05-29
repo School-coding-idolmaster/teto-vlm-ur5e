@@ -492,6 +492,35 @@ The planner display always reports `dry_run_only=true` and
 UR5, URScript, joint angles, trajectories, `tcp_pose_world`, or any robot
 control command. TETO remains semantic middleware.
 
+## TETO V1.7.0 2D to 3D projector contract preparation
+
+`src/projector_contract.py` defines a dry-run projector contract for deciding
+whether normalized 2D semantic geometry is ready for a future 2D to 3D
+projector. It checks candidate status, normalized grounding, `bbox_xyxy`,
+`pixel_center`, and geometry confidence, then returns a stable
+`teto_projector.v1` result with projector status, missing runtime inputs,
+warnings, errors, and `allow_robot_motion=false`.
+
+This release does not implement real projection. `camera_point_m` and
+`world_point_m` remain `None`, and projector confidence remains `0.0` until a
+future runtime supplies depth, camera info, camera frame, camera extrinsics,
+and TF data:
+
+- `depth_sample`
+- `camera_info`
+- `camera_frame`
+- `camera_extrinsics`
+- `tf_tree`
+
+`build_projector_input` creates only a dry-run input skeleton containing the
+normalized pixel center, bbox, image size, and empty runtime placeholders. It
+does not compute depth, camera intrinsics, transforms, world coordinates,
+`tcp_pose_world`, joint angles, trajectories, URScript, or robot motion.
+
+V1.7.0 remains semantic middleware plus geometry contract preparation. It does
+not call Qwen, rerun models, change prompts, connect to ROS2 / MoveIt / UR5,
+or send robot control commands.
+
 In the `python3 teto_V1.py` launcher, single image recognition and batch image
 recognition also show prompt helper keywords. You can type a built-in prompt
 type, a shortcut keyword, or a free-form prompt. Useful shortcuts include:
