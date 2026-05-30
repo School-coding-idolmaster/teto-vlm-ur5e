@@ -12,9 +12,10 @@ from src.simulation_runtime import DEFAULT_SIMULATION_TASK, run_first_simulation
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run TETO V2.0.0 First Simulation Execution.")
+    parser = argparse.ArgumentParser(description="Run TETO V2.0.1 World to Cube simulation execution.")
     parser.add_argument("--dry-run", action="store_true", help="Do not import Isaac; produce a test execution report.")
     parser.add_argument("--no-isaac", action="store_true", help="Pure Python test mode without Isaac imports.")
+    parser.add_argument("--spawn-cube", action="store_true", help="Spawn a visible cube in the Isaac World.")
     parser.add_argument("--task-json", help="Path to a simulation_task JSON file.")
     parser.add_argument("--steps", type=int, default=5, help="Number of simulation steps to run.")
     parser.add_argument("--gui", action="store_true", help="Run Isaac with GUI instead of headless mode.")
@@ -31,6 +32,7 @@ def main() -> int:
         no_isaac=args.no_isaac,
         steps=args.steps,
         headless=not args.gui,
+        spawn_cube=args.spawn_cube,
         output_dir=args.output_dir,
         write_report=True,
     )
@@ -41,13 +43,17 @@ def main() -> int:
 
 def print_summary(result: dict, report_path: Path) -> None:
     print("=" * 50)
-    print("TETO V2.0.0 FIRST SIMULATION EXECUTION")
+    print("TETO V2.0.1 WORLD TO CUBE SIMULATION")
     print("=" * 50)
     print(f"Status: {result['status']}")
     print(f"Mode: {result['mode']}")
     print(f"World reset: {result['world_reset']}")
     print(f"Steps: {result['steps_completed']}/{result['steps_requested']}")
     print(f"allow_robot_motion: {result['allow_robot_motion']}")
+    print(f"cube_spawned: {result.get('cube_spawned')}")
+    print(f"cube_prim_path: {result.get('cube_prim_path')}")
+    print(f"cube_position: {result.get('cube_position')}")
+    print(f"cube_size: {result.get('cube_size')}")
     print(f"Report: {report_path}")
     if result.get("blocking_reasons"):
         print(f"Blocking reasons: {', '.join(result['blocking_reasons'])}")

@@ -19,7 +19,7 @@ This project currently focuses on:
 - Follow-up question mode for repeated free-form prompts on one image
 - Demo result saving
 - `robot_task_json` result inspector / replay viewer for saved JSONL runs
-- First Simulation Execution through Isaac Runtime
+- World-to-cube Simulation Execution through Isaac Runtime
 - Placeholder dataset and annotation utilities
 - Placeholder robot interface
 
@@ -665,6 +665,32 @@ If Isaac Sim is available, run the real runtime manually:
 ```bash
 python3 scripts/run_first_simulation_execution.py
 ```
+
+## TETO V2.0.1 World to Cube
+
+TETO V2.0.1 extends the same runtime boundary with the smallest observable
+scene object step: `World -> cube -> simulation steps ->
+simulation_execution_result`.
+
+Use `--spawn-cube` to request the cube path explicitly while keeping the
+V2.0.0 no-object command path available:
+
+```bash
+python3 scripts/run_first_simulation_execution.py --dry-run --steps 3 --spawn-cube
+```
+
+Dry-run and no-Isaac modes still avoid Isaac imports, but when `--spawn-cube`
+is set they simulate a successful cube spawn in the report. Real Isaac mode
+creates a visible cube near the world origin with safe defaults:
+
+- `cube_prim_path=/World/TETO_Cube`
+- `cube_position=[0.0, 0.0, 0.5]`
+- `cube_size=0.2`
+
+The report keeps the V2.0.0 fields and adds `simulation_object_spawned`,
+`object_type`, `cube_prim_path`, `cube_position`, `cube_size`, and
+`cube_spawned`. Cube creation failures are converted into a FAIL report with
+`error.code=E_CUBE_SPAWN_FAILED`.
 
 Demo commands accept common image formats directly. TETO automatically
 creates a cached RGB JPEG under `data/processed/auto/`, with EXIF orientation

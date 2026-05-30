@@ -8,8 +8,11 @@ from typing import Any, Dict
 
 
 REPORT_VERSION = "teto_simulation_execution.v1"
-CURRENT_TETO_VERSION = "TETO V2.0.0"
+CURRENT_TETO_VERSION = "TETO V2.0.1"
 DEFAULT_STEPS = 5
+DEFAULT_CUBE_PRIM_PATH = "/World/TETO_Cube"
+DEFAULT_CUBE_POSITION = [0.0, 0.0, 0.5]
+DEFAULT_CUBE_SIZE = 0.2
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SIMULATION_RUNS_ROOT = PROJECT_ROOT / "outputs" / "simulation_runs"
 DEFAULT_SIMULATION_TASK = {
@@ -31,6 +34,7 @@ def build_simulation_execution_result(
     world_reset: bool = False,
     error_code: str = "OK",
     error_message: str = "",
+    cube_metadata: Dict[str, Any] | None = None,
     started_at: str | None = None,
     finished_at: str | None = None,
 ) -> Dict[str, Any]:
@@ -38,7 +42,7 @@ def build_simulation_execution_result(
     if status != "PASS":
         blocking_reasons.append(error_code if error_code != "OK" else "E_SIMULATION_EXECUTION_FAILED")
 
-    return {
+    result = {
         "report_version": REPORT_VERSION,
         "teto_version": CURRENT_TETO_VERSION,
         "status": status,
@@ -60,6 +64,8 @@ def build_simulation_execution_result(
         "started_at": started_at,
         "finished_at": finished_at,
     }
+    result.update(cube_metadata or _cube_report_fields(cube_spawned=False))
+    return result
 
 
 def run_first_simulation_execution(
@@ -69,6 +75,10 @@ def run_first_simulation_execution(
     no_isaac: bool = False,
     steps: int = DEFAULT_STEPS,
     headless: bool = True,
+    spawn_cube: bool = False,
+    cube_prim_path: str = DEFAULT_CUBE_PRIM_PATH,
+    cube_position: list[float] | tuple[float, float, float] = tuple(DEFAULT_CUBE_POSITION),
+    cube_size: float = DEFAULT_CUBE_SIZE,
     output_dir: str | Path | None = None,
     write_report: bool = False,
 ) -> Dict[str, Any]:
@@ -82,6 +92,12 @@ def run_first_simulation_execution(
                 status="FAIL",
                 mode=_mode_name(dry_run=dry_run, no_isaac=no_isaac),
                 steps_requested=steps,
+                cube_metadata=_cube_report_fields(
+                    cube_spawned=False,
+                    prim_path=cube_prim_path if spawn_cube else None,
+                    position=cube_position if spawn_cube else None,
+                    size=cube_size if spawn_cube else None,
+                ),
                 error_code="E_INVALID_STEPS",
                 error_message="steps must be a positive integer",
                 started_at=started_at,
@@ -99,6 +115,12 @@ def run_first_simulation_execution(
                 status="FAIL",
                 mode=_mode_name(dry_run=dry_run, no_isaac=no_isaac),
                 steps_requested=steps,
+                cube_metadata=_cube_report_fields(
+                    cube_spawned=False,
+                    prim_path=cube_prim_path if spawn_cube else None,
+                    position=cube_position if spawn_cube else None,
+                    size=cube_size if spawn_cube else None,
+                ),
                 error_code="E_INVALID_SIMULATION_TASK",
                 error_message=f"missing simulation task fields: {', '.join(missing_fields)}",
                 started_at=started_at,
@@ -117,6 +139,12 @@ def run_first_simulation_execution(
                 steps_requested=steps,
                 steps_completed=steps,
                 world_reset=True,
+                cube_metadata=_cube_report_fields(
+                    cube_spawned=spawn_cube,
+                    prim_path=cube_prim_path if spawn_cube else None,
+                    position=cube_position if spawn_cube else None,
+                    size=cube_size if spawn_cube else None,
+                ),
                 started_at=started_at,
                 finished_at=_timestamp(),
             ),
@@ -124,53 +152,18 @@ def run_first_simulation_execution(
             write_report=write_report,
         )
 
-    simulation_app = None
-    try:
-        from isaacsim import SimulationApp
-
-        simulation_app = SimulationApp({"headless": headless})
-
-        from omni.isaac.core import World
-
-        world = World()
-        world.reset()
-        steps_completed = 0
-        for _ in range(steps):
-            world.step(render=not headless)
-            steps_completed += 1
-
-        return _finalize_result(
-            build_simulation_execution_result(
-                simulation_task=task,
-                status="PASS",
-                mode="isaac",
-                steps_requested=steps,
-                steps_completed=steps_completed,
-                world_reset=True,
-                started_at=started_at,
-                finished_at=_timestamp(),
-            ),
-            output_dir=output_dir,
-            write_report=write_report,
-        )
-    except Exception as exc:
-        return _finalize_result(
-            build_simulation_execution_result(
-                simulation_task=task,
-                status="FAIL",
-                mode="isaac",
-                steps_requested=steps,
-                error_code="E_ISAAC_RUNTIME_FAILED",
-                error_message=str(exc),
-                started_at=started_at,
-                finished_at=_timestamp(),
-            ),
-            output_dir=output_dir,
-            write_report=write_report,
-        )
-    finally:
-        if simulation_app is not None:
-            simulation_app.close()
+    return _run_true_isaac_runtime(
+        simulation_task=task,
+        steps=steps,
+        headless=headless,
+        spawn_cube=spawn_cube,
+        cube_prim_path=cube_prim_path,
+        cube_position=cube_position,
+        cube_size=cube_size,
+        started_at=started_at,
+        output_dir=output_dir,
+        write_report=write_report,
+    )
 
 
 def write_simulation_execution_result(
@@ -196,6 +189,217 @@ def _finalize_result(
     if write_report:
         write_simulation_execution_result(result, output_dir)
     return result
+
+
+def _run_true_isaac_runtime(
+    *,
+    simulation_task: Dict[str, Any],
+    steps: int,
+    headless: bool,
+    spawn_cube: bool,
+    cube_prim_path: str,
+    cube_position: list[float] | tuple[float, float, float],
+    cube_size: float,
+    started_at: str,
+    output_dir: str | Path | None,
+    write_report: bool,
+) -> Dict[str, Any]:
+    try:
+        from isaacsim import SimulationApp
+    except Exception as exc:
+        return _finalize_result(
+            build_simulation_execution_result(
+                simulation_task=simulation_task,
+                status="FAIL",
+                mode="isaac",
+                steps_requested=steps,
+                cube_metadata=_cube_report_fields(
+                    cube_spawned=False,
+                    prim_path=cube_prim_path if spawn_cube else None,
+                    position=cube_position if spawn_cube else None,
+                    size=cube_size if spawn_cube else None,
+                ),
+                error_code="E_ISAAC_RUNTIME_FAILED",
+                error_message=str(exc),
+                started_at=started_at,
+                finished_at=_timestamp(),
+            ),
+            output_dir=output_dir,
+            write_report=write_report,
+        )
+
+    return _execute_isaac_world(
+        simulation_task=simulation_task,
+        simulation_app_cls=SimulationApp,
+        world_cls=None,
+        steps=steps,
+        headless=headless,
+        spawn_cube=spawn_cube,
+        cube_prim_path=cube_prim_path,
+        cube_position=cube_position,
+        cube_size=cube_size,
+        started_at=started_at,
+        output_dir=output_dir,
+        write_report=write_report,
+    )
+
+
+def _execute_isaac_world(
+    *,
+    simulation_task: Dict[str, Any],
+    simulation_app_cls,
+    world_cls,
+    steps: int,
+    headless: bool,
+    spawn_cube: bool,
+    cube_prim_path: str,
+    cube_position: list[float] | tuple[float, float, float],
+    cube_size: float,
+    started_at: str,
+    output_dir: str | Path | None,
+    write_report: bool,
+    cube_spawner=None,
+) -> Dict[str, Any]:
+    simulation_app = None
+    cube_spawner = cube_spawner or _spawn_cube_in_world
+    cube_metadata = _cube_report_fields(cube_spawned=False)
+    world_reset = False
+    try:
+        simulation_app = simulation_app_cls({"headless": headless})
+        if world_cls is None:
+            world_cls = _load_isaac_world_class()
+        world = world_cls()
+        world.reset()
+        world_reset = True
+
+        if spawn_cube:
+            try:
+                cube_metadata = cube_spawner(
+                    world,
+                    prim_path=cube_prim_path,
+                    position=cube_position,
+                    size=cube_size,
+                )
+            except Exception as exc:
+                cube_metadata = _cube_report_fields(
+                    cube_spawned=False,
+                    prim_path=cube_prim_path,
+                    position=cube_position,
+                    size=cube_size,
+                )
+                return _finalize_result(
+                    build_simulation_execution_result(
+                        simulation_task=simulation_task,
+                        status="FAIL",
+                        mode="isaac",
+                        steps_requested=steps,
+                        world_reset=world_reset,
+                        cube_metadata=cube_metadata,
+                        error_code="E_CUBE_SPAWN_FAILED",
+                        error_message=str(exc),
+                        started_at=started_at,
+                        finished_at=_timestamp(),
+                    ),
+                    output_dir=output_dir,
+                    write_report=write_report,
+                )
+
+        steps_completed = 0
+        for _ in range(steps):
+            world.step(render=not headless)
+            steps_completed += 1
+
+        return _finalize_result(
+            build_simulation_execution_result(
+                simulation_task=simulation_task,
+                status="PASS",
+                mode="isaac",
+                steps_requested=steps,
+                steps_completed=steps_completed,
+                world_reset=world_reset,
+                cube_metadata=cube_metadata,
+                started_at=started_at,
+                finished_at=_timestamp(),
+            ),
+            output_dir=output_dir,
+            write_report=write_report,
+        )
+    except Exception as exc:
+        return _finalize_result(
+            build_simulation_execution_result(
+                simulation_task=simulation_task,
+                status="FAIL",
+                mode="isaac",
+                steps_requested=steps,
+                world_reset=world_reset,
+                cube_metadata=cube_metadata,
+                error_code="E_ISAAC_RUNTIME_FAILED",
+                error_message=str(exc),
+                started_at=started_at,
+                finished_at=_timestamp(),
+            ),
+            output_dir=output_dir,
+            write_report=write_report,
+        )
+    finally:
+        if simulation_app is not None:
+            simulation_app.close()
+
+
+def _load_isaac_world_class():
+    try:
+        from isaacsim.core.api import World
+    except ImportError:
+        from omni.isaac.core import World
+    return World
+
+
+def _spawn_cube_in_world(
+    world,
+    *,
+    prim_path: str,
+    position: list[float] | tuple[float, float, float],
+    size: float,
+) -> Dict[str, Any]:
+    try:
+        from isaacsim.core.api.objects import VisualCuboid
+    except ImportError:
+        from omni.isaac.core.objects import VisualCuboid
+
+    cube = VisualCuboid(
+        prim_path=prim_path,
+        name="teto_cube",
+        position=list(position),
+        size=size,
+    )
+    if hasattr(world, "scene") and hasattr(world.scene, "add"):
+        world.scene.add(cube)
+    return _cube_report_fields(
+        cube_spawned=True,
+        prim_path=prim_path,
+        position=position,
+        size=size,
+    )
+
+
+def _cube_report_fields(
+    *,
+    cube_spawned: bool,
+    prim_path: str | None = None,
+    position: list[float] | tuple[float, float, float] | None = None,
+    size: float | None = None,
+) -> Dict[str, Any]:
+    normalized_position = [float(value) for value in position] if position is not None else None
+    normalized_size = float(size) if size is not None else None
+    object_type = "cube" if cube_spawned or prim_path or position is not None or size is not None else None
+    return {
+        "simulation_object_spawned": cube_spawned,
+        "object_type": object_type,
+        "cube_prim_path": prim_path,
+        "cube_position": normalized_position,
+        "cube_size": normalized_size,
+        "cube_spawned": cube_spawned,
+    }
 
 
 def _create_run_dir() -> Path:
