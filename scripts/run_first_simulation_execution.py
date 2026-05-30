@@ -11,9 +11,6 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.simulation_runtime import DEFAULT_SIMULATION_TASK, run_first_simulation_execution
 
 
-SIMULATION_RUNS_ROOT = PROJECT_ROOT / "outputs" / "simulation_runs"
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run TETO V2.0.0 First Simulation Execution.")
     parser.add_argument("--dry-run", action="store_true", help="Do not import Isaac; produce a test execution report.")
@@ -34,8 +31,10 @@ def main() -> int:
         no_isaac=args.no_isaac,
         steps=args.steps,
         headless=not args.gui,
+        output_dir=args.output_dir,
+        write_report=True,
     )
-    report_path = _write_report(result, args.output_dir)
+    report_path = Path(str(result["report_path"]))
     print_summary(result, report_path)
     return 0 if result.get("ok") else 1
 
@@ -69,31 +68,6 @@ def _load_simulation_task(task_json: str | None) -> dict:
     if isinstance(data, dict):
         return data
     raise ValueError("simulation task JSON must contain an object")
-
-
-def _write_report(result: dict, output_dir: str | None) -> Path:
-    run_dir = Path(output_dir).expanduser() if output_dir else _create_run_dir()
-    run_dir.mkdir(parents=True, exist_ok=True)
-    report_path = run_dir / "simulation_execution_result.json"
-    with report_path.open("w", encoding="utf-8") as report_file:
-        json.dump(result, report_file, ensure_ascii=False, indent=2)
-        report_file.write("\n")
-    return report_path
-
-
-def _create_run_dir() -> Path:
-    from datetime import datetime
-    import time
-
-    SIMULATION_RUNS_ROOT.mkdir(parents=True, exist_ok=True)
-    while True:
-        run_name = datetime.now().strftime("run_%Y%m%d_%H%M%S")
-        run_dir = SIMULATION_RUNS_ROOT / run_name
-        try:
-            run_dir.mkdir()
-            return run_dir
-        except FileExistsError:
-            time.sleep(0.05)
 
 
 if __name__ == "__main__":

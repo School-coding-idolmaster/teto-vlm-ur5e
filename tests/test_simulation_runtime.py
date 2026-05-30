@@ -1,8 +1,11 @@
+import json
+
 from src.simulation_runtime import (
     CURRENT_TETO_VERSION,
     REPORT_VERSION,
     build_simulation_execution_result,
     run_first_simulation_execution,
+    write_simulation_execution_result,
 )
 
 
@@ -84,3 +87,40 @@ def test_invalid_task_returns_failure_report():
     assert result["error"]["code"] == "E_INVALID_SIMULATION_TASK"
     assert "target_world_point" in result["error"]["message"]
     assert result["allow_robot_motion"] is False
+
+
+def test_write_simulation_execution_result_adds_report_path(tmp_path):
+    result = build_simulation_execution_result(
+        simulation_task=VALID_TASK,
+        status="PASS",
+        mode="dry_run",
+        steps_requested=1,
+        steps_completed=1,
+        world_reset=True,
+    )
+
+    report_path = write_simulation_execution_result(result, tmp_path)
+
+    assert report_path == tmp_path / "simulation_execution_result.json"
+    assert result["report_path"] == str(report_path)
+    saved = json.loads(report_path.read_text(encoding="utf-8"))
+    assert saved["status"] == "PASS"
+    assert saved["report_path"] == str(report_path)
+
+
+def test_dry_run_can_write_report_from_runtime(tmp_path):
+    result = run_first_simulation_execution(
+        VALID_TASK,
+        dry_run=True,
+        steps=3,
+        output_dir=tmp_path,
+        write_report=True,
+    )
+
+    report_path = tmp_path / "simulation_execution_result.json"
+    assert result["status"] == "PASS"
+    assert result["report_path"] == str(report_path)
+    assert report_path.exists()
+    saved = json.loads(report_path.read_text(encoding="utf-8"))
+    assert saved["steps_completed"] == 3
+    assert saved["allow_robot_motion"] is False
