@@ -19,7 +19,7 @@ This project currently focuses on:
 - Follow-up question mode for repeated free-form prompts on one image
 - Demo result saving
 - `robot_task_json` result inspector / replay viewer for saved JSONL runs
-- Simulation object spawn and pose update smoke tests through Isaac Runtime
+- Simulation object execution reports and evidence exports through Isaac Runtime
 - Placeholder dataset and annotation utilities
 - Placeholder robot interface
 
@@ -730,6 +730,48 @@ Move failures use `error.code=E_SIM_OBJECT_MOVE_FAILED`.
 This remains a minimal pose update test only. It does not save screenshots or
 video, connect ROS2, MoveIt, UR5, RTDE, or URScript, generate joint angles,
 generate `tcp_pose_world`, or control a real robot.
+
+## TETO V2.0.3 Evidence Export Pipeline
+
+TETO V2.0.3 adds a generic execution evidence export pipeline for simulation
+runs. It does not capture screenshots or video yet; it creates structured
+text and manifest artifacts alongside each `simulation_execution_result.json`.
+
+Each report-writing simulation run now writes these files in the same run
+directory under `outputs/simulation_runs/run_YYYYMMDD_HHMMSS/`:
+
+- `summary.md`
+- `demo_command.txt`
+- `pose_delta.md`
+- `evidence_manifest.json`
+
+`summary.md` is the human-readable run summary. It records the TETO version,
+run ID, timestamp, mode, status, `error.code`, reset state, step counts,
+`allow_robot_motion`, generic simulation object pose fields, and report path.
+
+`demo_command.txt` records the CLI command when available. If a run is started
+from Python rather than the CLI, it still records mode, step count, move-object
+status, and object type.
+
+`pose_delta.md` focuses on the object pose update:
+
+- `initial_position`
+- `target_position`
+- `final_position`
+- `displacement`
+- `moved`
+
+`evidence_manifest.json` is program-readable and uses
+`schema_version=teto_evidence_manifest.v1`. It links the report and evidence
+files and reserves null placeholders for future capture artifacts:
+
+- `screenshot_before_path: null`
+- `screenshot_after_path: null`
+- `video_path: null`
+
+The exporter reads `simulation_object_*` fields first and uses `cube_*` fields
+only as a compatibility fallback. This keeps V2.0.3 as a generic simulation
+object evidence pipeline rather than a cube-specific feature.
 
 Demo commands accept common image formats directly. TETO automatically
 creates a cached RGB JPEG under `data/processed/auto/`, with EXIF orientation

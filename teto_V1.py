@@ -75,7 +75,7 @@ def startup_animation():
    ██║   ███████╗   ██║   ╚██████╔╝
    ╚═╝   ╚══════╝   ╚═╝    ╚═════╝
 
-              TETO V2.0.2
+              TETO V2.0.3
            -- Test Launcher --
 """
     print(RED + title + RESET)
@@ -88,7 +88,7 @@ def _clean_path(value: str) -> str:
 
 def print_menu():
     print("=" * 40)
-    print("              TETO V2.0.2")
+    print("              TETO V2.0.3")
     print("             Test Launcher")
     print("=" * 40)
     print("1. Convert images")
@@ -501,7 +501,7 @@ def handle_check_environment():
 
 def handle_first_simulation_execution():
     script_path = PROJECT_ROOT / "scripts" / "run_first_simulation_execution.py"
-    print("Running TETO V2.0.2 simulation object pose update in dry-run mode.")
+    print("Running TETO V2.0.3 simulation evidence export in dry-run mode.")
     print(f"For real Isaac runtime, run: {sys.executable} {script_path} --move-object")
     completed = subprocess.run(
         [sys.executable, str(script_path), "--dry-run", "--move-object"],

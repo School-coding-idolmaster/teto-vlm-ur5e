@@ -7,9 +7,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
 
+from src.evidence_exporter import export_simulation_evidence
+
 
 REPORT_VERSION = "teto_simulation_execution.v1"
-CURRENT_TETO_VERSION = "TETO V2.0.2"
+CURRENT_TETO_VERSION = "TETO V2.0.3"
 DEFAULT_STEPS = 5
 DEFAULT_SIMULATION_OBJECT_TYPE = "cube"
 DEFAULT_CUBE_PRIM_PATH = "/World/TETO_Cube"
@@ -97,6 +99,7 @@ def run_first_simulation_execution(
     object_spec: SimulationObjectSpec | None = None,
     output_dir: str | Path | None = None,
     write_report: bool = False,
+    demo_command: str | None = None,
 ) -> Dict[str, Any]:
     task = simulation_task or dict(DEFAULT_SIMULATION_TASK)
     started_at = _timestamp()
@@ -129,6 +132,7 @@ def run_first_simulation_execution(
             ),
             output_dir=output_dir,
             write_report=write_report,
+            demo_command=demo_command,
         )
 
     missing_fields = _missing_task_fields(task)
@@ -151,6 +155,7 @@ def run_first_simulation_execution(
             ),
             output_dir=output_dir,
             write_report=write_report,
+            demo_command=demo_command,
         )
 
     if dry_run or no_isaac:
@@ -174,6 +179,7 @@ def run_first_simulation_execution(
             ),
             output_dir=output_dir,
             write_report=write_report,
+            demo_command=demo_command,
         )
 
     return _run_true_isaac_runtime(
@@ -186,12 +192,15 @@ def run_first_simulation_execution(
         started_at=started_at,
         output_dir=output_dir,
         write_report=write_report,
+        demo_command=demo_command,
     )
 
 
 def write_simulation_execution_result(
     result: Dict[str, Any],
     output_dir: str | Path | None = None,
+    *,
+    demo_command: str | None = None,
 ) -> Path:
     run_dir = Path(output_dir).expanduser() if output_dir else _create_run_dir()
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -200,6 +209,7 @@ def write_simulation_execution_result(
     with report_path.open("w", encoding="utf-8") as report_file:
         json.dump(result, report_file, ensure_ascii=False, indent=2)
         report_file.write("\n")
+    export_simulation_evidence(result, run_dir, demo_command=demo_command)
     return report_path
 
 
@@ -208,9 +218,10 @@ def _finalize_result(
     *,
     output_dir: str | Path | None,
     write_report: bool,
+    demo_command: str | None = None,
 ) -> Dict[str, Any]:
     if write_report:
-        write_simulation_execution_result(result, output_dir)
+        write_simulation_execution_result(result, output_dir, demo_command=demo_command)
     return result
 
 
@@ -225,6 +236,7 @@ def _run_true_isaac_runtime(
     started_at: str,
     output_dir: str | Path | None,
     write_report: bool,
+    demo_command: str | None = None,
 ) -> Dict[str, Any]:
     try:
         from isaacsim import SimulationApp
@@ -247,6 +259,7 @@ def _run_true_isaac_runtime(
             ),
             output_dir=output_dir,
             write_report=write_report,
+            demo_command=demo_command,
         )
 
     return _execute_isaac_world(
@@ -261,6 +274,7 @@ def _run_true_isaac_runtime(
         started_at=started_at,
         output_dir=output_dir,
         write_report=write_report,
+        demo_command=demo_command,
     )
 
 
@@ -277,6 +291,7 @@ def _execute_isaac_world(
     started_at: str,
     output_dir: str | Path | None,
     write_report: bool,
+    demo_command: str | None = None,
     object_spawner=None,
     object_pose_updater=None,
 ) -> Dict[str, Any]:
@@ -321,6 +336,7 @@ def _execute_isaac_world(
                     ),
                     output_dir=output_dir,
                     write_report=write_report,
+                    demo_command=demo_command,
                 )
 
         if move_object:
@@ -353,6 +369,7 @@ def _execute_isaac_world(
                     ),
                     output_dir=output_dir,
                     write_report=write_report,
+                    demo_command=demo_command,
                 )
 
         steps_completed = 0
@@ -374,6 +391,7 @@ def _execute_isaac_world(
             ),
             output_dir=output_dir,
             write_report=write_report,
+            demo_command=demo_command,
         )
     except Exception as exc:
         return _finalize_result(
@@ -391,6 +409,7 @@ def _execute_isaac_world(
             ),
             output_dir=output_dir,
             write_report=write_report,
+            demo_command=demo_command,
         )
     finally:
         if simulation_app is not None:
