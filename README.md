@@ -1,6 +1,6 @@
-# TETO V1 VLM Pipeline
+# TETO V2 VLM Pipeline
 
-TETO V1 VLM Pipeline is a lightweight Python project skeleton for learning,
+TETO V2 VLM Pipeline is a lightweight Python project skeleton for learning,
 showing, and extending a Vision-Language Model pipeline. It is not a formal
 training framework yet.
 
@@ -19,8 +19,9 @@ This project currently focuses on:
 - Follow-up question mode for repeated free-form prompts on one image
 - Demo result saving
 - `robot_task_json` result inspector / replay viewer for saved JSONL runs
+- First Simulation Execution through Isaac Runtime
 - Placeholder dataset and annotation utilities
-- Placeholder robot/simulation interface
+- Placeholder robot interface
 
 Future work can connect Qwen2.5-VL, LLaVA, InternVL, Isaac Sim, ROS2, MoveIt2,
 UR5 controllers, or other local robotics and VLM components.
@@ -618,6 +619,52 @@ type, a shortcut keyword, or a free-form prompt. Useful shortcuts include:
 - `manipulation` or `grasp`: `manipulation_spatial_analysis`
 - `candidate`: `manipulation_candidate`
 - `robot_json` or `task_json`: `robot_task_json`
+
+## TETO V2.0.0 First Simulation Execution
+
+TETO V2.0.0 starts the V2 line with the smallest runtime execution step:
+`SimulationApp -> World -> world.reset -> simulation_task -> simulation steps
+-> simulation_execution_result`.
+
+`src/simulation_runtime.py` provides the runtime boundary:
+
+- `build_simulation_execution_result`
+- `run_first_simulation_execution`
+
+The command-line entry point is:
+
+```bash
+python3 scripts/run_first_simulation_execution.py --dry-run
+```
+
+Dry-run and no-Isaac modes do not import Isaac Sim and are intended for normal
+pytest and CI-style checks. The real Isaac runtime path delays Isaac imports
+until execution time, then uses:
+
+- `from isaacsim import SimulationApp`
+- `World()`
+- `world.reset()`
+- a small number of `world.step(...)` calls
+
+Each run writes:
+
+```text
+outputs/simulation_runs/run_YYYYMMDD_HHMMSS/simulation_execution_result.json
+```
+
+The execution report includes status, mode, consumed `simulation_task`, reset
+state, step counts, blocking reasons, error details, and
+`allow_robot_motion=false`.
+
+This is First Simulation Execution only. It does not connect to ROS2, MoveIt,
+UR5, RTDE, real robot controllers, TF, depth projection, URScript, joint
+angles, trajectories, `tcp_pose_world`, `moveit_goal`, or real robot motion.
+
+If Isaac Sim is available, run the real runtime manually:
+
+```bash
+python3 scripts/run_first_simulation_execution.py
+```
 
 Demo commands accept common image formats directly. TETO automatically
 creates a cached RGB JPEG under `data/processed/auto/`, with EXIF orientation

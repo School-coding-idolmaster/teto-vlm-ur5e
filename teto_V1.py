@@ -75,7 +75,7 @@ def startup_animation():
    ██║   ███████╗   ██║   ╚██████╔╝
    ╚═╝   ╚══════╝   ╚═╝    ╚═════╝
 
-              TETO V1.9.0
+              TETO V2.0.0
            -- Test Launcher --
 """
     print(RED + title + RESET)
@@ -88,14 +88,15 @@ def _clean_path(value: str) -> str:
 
 def print_menu():
     print("=" * 40)
-    print("              TETO V1.9.0")
+    print("              TETO V2.0.0")
     print("             Test Launcher")
     print("=" * 40)
     print("1. Convert images")
     print("2. Run the demo")
     print("3. Just chat with TETO")
     print("4. Check environment")
-    print("5. Quit")
+    print("5. Run first simulation execution")
+    print("6. Quit")
     print()
     print("Semantic pipeline:")
     print("Planner Eligibility -> Projector Eligibility -> Execution Readiness -> Simulation Bridge")
@@ -498,6 +499,19 @@ def handle_check_environment():
         print("Environment check did not complete successfully.")
 
 
+def handle_first_simulation_execution():
+    script_path = PROJECT_ROOT / "scripts" / "run_first_simulation_execution.py"
+    print("Running TETO V2.0.0 First Simulation Execution in dry-run mode.")
+    print(f"For real Isaac runtime, run: {sys.executable} {script_path}")
+    completed = subprocess.run(
+        [sys.executable, str(script_path), "--dry-run"],
+        cwd=PROJECT_ROOT,
+        check=False,
+    )
+    if completed.returncode != 0:
+        print("First simulation execution did not complete successfully.")
+
+
 def main():
     startup_animation()
 
@@ -515,10 +529,12 @@ def main():
         elif choice == "4":
             handle_check_environment()
         elif choice == "5":
+            handle_first_simulation_execution()
+        elif choice == "6":
             print("Bye.")
             break
         else:
-            print("Invalid option. Please choose 1, 2, 3, 4, or 5.")
+            print("Invalid option. Please choose 1, 2, 3, 4, 5, or 6.")
 
 
 if __name__ == "__main__":
