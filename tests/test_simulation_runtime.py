@@ -7,7 +7,10 @@ from src.simulation_runtime import (
     DEFAULT_CUBE_PRIM_PATH,
     DEFAULT_CUBE_SIZE,
     DEFAULT_CUBE_TARGET_POSITION,
+    DEFAULT_ROBOT_PRIM_PATH,
+    DEFAULT_ROBOT_TYPE,
     REPORT_VERSION,
+    RobotAssetSpec,
     SimulationObjectSpec,
     _execute_isaac_world,
     build_simulation_execution_result,
@@ -47,6 +50,10 @@ def test_build_success_report_fields():
     assert result["simulation_object_spawned"] is False
     assert result["simulation_object_moved"] is False
     assert result["cube_moved"] is False
+    assert result["robot_asset_check_requested"] is False
+    assert result["robot_asset_load_requested"] is False
+    assert result["robot_asset_available"] is False
+    assert result["robot_asset_loaded"] is False
     assert result["blocking_reasons"] == []
     assert result["error"]["code"] == "OK"
 
@@ -140,6 +147,105 @@ def test_cli_move_object_and_move_cube_alias_parse_to_same_flow():
     assert move_object_args.move_cube is False
     assert move_cube_args.move_object is False
     assert move_cube_args.move_cube is True
+
+
+def test_cli_robot_asset_arguments_parse():
+    parser = build_parser()
+
+    args = parser.parse_args(
+        [
+            "--dry-run",
+            "--steps",
+            "1",
+            "--check-robot-asset",
+            "--robot-type",
+            "ur5",
+            "--robot-prim-path",
+            "/World/TestRobot",
+            "--robot-asset-path",
+            "/tmp/missing.usd",
+        ]
+    )
+
+    assert args.check_robot_asset is True
+    assert args.load_robot_asset is False
+    assert args.robot_type == "ur5"
+    assert args.robot_prim_path == "/World/TestRobot"
+    assert args.robot_asset_path == "/tmp/missing.usd"
+
+
+def test_dry_run_robot_asset_check_passes_with_unavailable_default():
+    result = run_first_simulation_execution(VALID_TASK, dry_run=True, steps=1, check_robot_asset=True)
+
+    assert result["status"] == "PASS"
+    assert result["ok"] is True
+    assert result["error"]["code"] == "OK"
+    assert result["world_reset"] is True
+    assert result["steps_completed"] == 1
+    assert result["robot_asset_check_requested"] is True
+    assert result["robot_asset_load_requested"] is False
+    assert result["robot_type"] == DEFAULT_ROBOT_TYPE
+    assert result["robot_prim_path"] == DEFAULT_ROBOT_PRIM_PATH
+    assert result["robot_asset_path"] is None
+    assert result["robot_asset_source"] == "dry_run"
+    assert result["robot_asset_available"] is False
+    assert result["robot_asset_loaded"] is False
+    assert result["robot_prim_exists"] is False
+    assert result["robot_asset_status"] == "UNAVAILABLE"
+    assert result["robot_asset_blocking_reason"] == "E_ROBOT_ASSET_UNAVAILABLE"
+    assert result["blocking_reasons"] == []
+
+
+def test_explicit_invalid_robot_asset_load_fails_without_isaac():
+    result = run_first_simulation_execution(
+        VALID_TASK,
+        dry_run=True,
+        steps=1,
+        load_robot_asset=True,
+        robot_asset_path="/tmp/teto_missing_robot_asset.usd",
+    )
+
+    assert result["status"] == "FAIL"
+    assert result["ok"] is False
+    assert result["error"]["code"] == "E_ROBOT_ASSET_LOAD_FAILED"
+    assert result["robot_asset_check_requested"] is True
+    assert result["robot_asset_load_requested"] is True
+    assert result["robot_asset_available"] is False
+    assert result["robot_asset_loaded"] is False
+    assert result["robot_prim_exists"] is False
+    assert result["robot_asset_status"] == "LOAD_FAILED"
+    assert result["robot_asset_blocking_reason"] == "E_ROBOT_ASSET_UNAVAILABLE"
+
+
+def test_robot_asset_report_fields_are_complete(tmp_path):
+    result = run_first_simulation_execution(
+        VALID_TASK,
+        dry_run=True,
+        steps=1,
+        check_robot_asset=True,
+        output_dir=tmp_path,
+        write_report=True,
+    )
+
+    saved = json.loads((tmp_path / "simulation_execution_result.json").read_text(encoding="utf-8"))
+    for key in (
+        "robot_asset_check_requested",
+        "robot_asset_load_requested",
+        "robot_type",
+        "robot_prim_path",
+        "robot_asset_path",
+        "robot_asset_source",
+        "robot_asset_available",
+        "robot_asset_loaded",
+        "robot_prim_exists",
+        "robot_asset_status",
+        "robot_asset_blocking_reason",
+    ):
+        assert key in result
+        assert key in saved
+    assert saved["robot_asset_available"] is False
+    assert saved["robot_asset_loaded"] is False
+    assert saved["robot_asset_status"] == "UNAVAILABLE"
 
 
 def test_dry_run_move_object_report_does_not_require_isaac():
@@ -425,3 +531,54 @@ def test_move_cube_failure_returns_fail_report_without_crashing(tmp_path):
     assert result["error"]["code"] == "E_SIM_OBJECT_MOVE_FAILED"
     assert "pose update failed" in result["error"]["message"]
     assert (tmp_path / "simulation_execution_result.json").exists()
+
+
+def test_true_runtime_robot_asset_check_unavailable_passes_without_loading(tmp_path):
+    class FakeSimulationApp:
+        def __init__(self, config):
+            self.config = config
+
+        def close(self):
+            self.closed = True
+
+    class FakeWorld:
+        def reset(self):
+            self.reset_called = True
+
+        def step(self, render=False):
+            self.step_called = True
+
+    def unexpected_loader(world, *, robot_asset_spec):
+        raise AssertionError("check mode without a local asset must not load")
+
+    result = _execute_isaac_world(
+        simulation_task=VALID_TASK,
+        simulation_app_cls=FakeSimulationApp,
+        world_cls=FakeWorld,
+        steps=1,
+        headless=True,
+        spawn_object=False,
+        move_object=False,
+        object_spec=SimulationObjectSpec(
+            object_type="cube",
+            prim_path=DEFAULT_CUBE_PRIM_PATH,
+            initial_position=tuple(DEFAULT_CUBE_POSITION),
+            target_position=tuple(DEFAULT_CUBE_TARGET_POSITION),
+            size=DEFAULT_CUBE_SIZE,
+        ),
+        started_at="2026-05-31 00:00:00",
+        output_dir=tmp_path,
+        write_report=True,
+        check_robot_asset=True,
+        robot_asset_spec=RobotAssetSpec(),
+        robot_asset_loader=unexpected_loader,
+    )
+
+    assert result["status"] == "PASS"
+    assert result["error"]["code"] == "OK"
+    assert result["world_reset"] is True
+    assert result["steps_completed"] == 1
+    assert result["robot_asset_available"] is False
+    assert result["robot_asset_loaded"] is False
+    assert result["robot_asset_status"] == "UNAVAILABLE"
+    assert result["robot_asset_blocking_reason"] == "E_ROBOT_ASSET_UNAVAILABLE"

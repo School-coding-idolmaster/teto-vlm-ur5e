@@ -11,13 +11,15 @@ from src.evidence_exporter import export_simulation_evidence
 
 
 REPORT_VERSION = "teto_simulation_execution.v1"
-CURRENT_TETO_VERSION = "TETO V2.0.3"
+CURRENT_TETO_VERSION = "TETO V2.1.0"
 DEFAULT_STEPS = 5
 DEFAULT_SIMULATION_OBJECT_TYPE = "cube"
 DEFAULT_CUBE_PRIM_PATH = "/World/TETO_Cube"
 DEFAULT_CUBE_POSITION = [0.0, 0.0, 0.5]
 DEFAULT_CUBE_TARGET_POSITION = [0.3, 0.0, 0.5]
 DEFAULT_CUBE_SIZE = 0.2
+DEFAULT_ROBOT_TYPE = "ur5"
+DEFAULT_ROBOT_PRIM_PATH = "/World/TETO_Robot"
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SIMULATION_RUNS_ROOT = PROJECT_ROOT / "outputs" / "simulation_runs"
 DEFAULT_SIMULATION_TASK = {
@@ -38,6 +40,16 @@ class SimulationObjectSpec:
     size: float | None = None
 
 
+@dataclass(frozen=True)
+class RobotAssetSpec:
+    robot_type: str = DEFAULT_ROBOT_TYPE
+    robot_prim_path: str = DEFAULT_ROBOT_PRIM_PATH
+    robot_asset_path: str | None = None
+    asset_source: str = "unavailable"
+    expected_asset_kind: str = "usd/usda/usdc"
+    allow_network_asset: bool = False
+
+
 def build_simulation_execution_result(
     *,
     simulation_task: Dict[str, Any] | None = None,
@@ -49,6 +61,7 @@ def build_simulation_execution_result(
     error_code: str = "OK",
     error_message: str = "",
     object_metadata: Dict[str, Any] | None = None,
+    robot_asset_metadata: Dict[str, Any] | None = None,
     started_at: str | None = None,
     finished_at: str | None = None,
 ) -> Dict[str, Any]:
@@ -79,6 +92,7 @@ def build_simulation_execution_result(
         "finished_at": finished_at,
     }
     result.update(object_metadata or _simulation_object_report_fields())
+    result.update(robot_asset_metadata or _robot_asset_report_fields())
     return result
 
 
@@ -97,6 +111,12 @@ def run_first_simulation_execution(
     cube_target_position: list[float] | tuple[float, float, float] = tuple(DEFAULT_CUBE_TARGET_POSITION),
     cube_size: float = DEFAULT_CUBE_SIZE,
     object_spec: SimulationObjectSpec | None = None,
+    check_robot_asset: bool = False,
+    load_robot_asset: bool = False,
+    robot_type: str = DEFAULT_ROBOT_TYPE,
+    robot_prim_path: str = DEFAULT_ROBOT_PRIM_PATH,
+    robot_asset_path: str | None = None,
+    robot_asset_spec: RobotAssetSpec | None = None,
     output_dir: str | Path | None = None,
     write_report: bool = False,
     demo_command: str | None = None,
@@ -112,6 +132,12 @@ def run_first_simulation_execution(
         target_position=_position_tuple(cube_target_position),
         size=cube_size,
     )
+    effective_check_robot_asset = check_robot_asset or load_robot_asset
+    effective_robot_asset_spec = robot_asset_spec or RobotAssetSpec(
+        robot_type=robot_type,
+        robot_prim_path=robot_prim_path,
+        robot_asset_path=robot_asset_path,
+    )
 
     if steps <= 0:
         return _finalize_result(
@@ -124,6 +150,11 @@ def run_first_simulation_execution(
                     spec=simulation_object_spec if effective_spawn_cube else None,
                     spawned=False,
                     move_requested=effective_move_object,
+                ),
+                robot_asset_metadata=_robot_asset_report_fields(
+                    spec=effective_robot_asset_spec if effective_check_robot_asset else None,
+                    check_requested=effective_check_robot_asset,
+                    load_requested=load_robot_asset,
                 ),
                 error_code="E_INVALID_STEPS",
                 error_message="steps must be a positive integer",
@@ -148,6 +179,11 @@ def run_first_simulation_execution(
                     spawned=False,
                     move_requested=effective_move_object,
                 ),
+                robot_asset_metadata=_robot_asset_report_fields(
+                    spec=effective_robot_asset_spec if effective_check_robot_asset else None,
+                    check_requested=effective_check_robot_asset,
+                    load_requested=load_robot_asset,
+                ),
                 error_code="E_INVALID_SIMULATION_TASK",
                 error_message=f"missing simulation task fields: {', '.join(missing_fields)}",
                 started_at=started_at,
@@ -159,6 +195,50 @@ def run_first_simulation_execution(
         )
 
     if dry_run or no_isaac:
+        robot_asset_metadata = (
+            evaluate_robot_asset_availability(
+                effective_robot_asset_spec,
+                check_requested=effective_check_robot_asset,
+                load_requested=load_robot_asset,
+                dry_run=True,
+            )
+            if effective_check_robot_asset
+            else _robot_asset_report_fields()
+        )
+        if load_robot_asset and not robot_asset_metadata["robot_asset_available"]:
+            return _finalize_result(
+                build_simulation_execution_result(
+                    simulation_task=task,
+                    status="FAIL",
+                    mode=_mode_name(dry_run=dry_run, no_isaac=no_isaac),
+                    steps_requested=steps,
+                    world_reset=True,
+                    object_metadata=_simulation_object_report_fields(
+                        spec=simulation_object_spec if effective_spawn_cube else None,
+                        spawned=effective_spawn_cube,
+                        move_requested=effective_move_object,
+                        moved=effective_move_object,
+                        final_position=simulation_object_spec.target_position if effective_move_object else None,
+                    ),
+                    robot_asset_metadata=_robot_asset_report_fields(
+                        spec=effective_robot_asset_spec,
+                        check_requested=effective_check_robot_asset,
+                        load_requested=True,
+                        available=False,
+                        loaded=False,
+                        prim_exists=False,
+                        status="LOAD_FAILED",
+                        blocking_reason="E_ROBOT_ASSET_UNAVAILABLE",
+                    ),
+                    error_code="E_ROBOT_ASSET_LOAD_FAILED",
+                    error_message="robot asset path is unavailable",
+                    started_at=started_at,
+                    finished_at=_timestamp(),
+                ),
+                output_dir=output_dir,
+                write_report=write_report,
+                demo_command=demo_command,
+            )
         return _finalize_result(
             build_simulation_execution_result(
                 simulation_task=task,
@@ -174,6 +254,7 @@ def run_first_simulation_execution(
                     moved=effective_move_object,
                     final_position=simulation_object_spec.target_position if effective_move_object else None,
                 ),
+                robot_asset_metadata=robot_asset_metadata,
                 started_at=started_at,
                 finished_at=_timestamp(),
             ),
@@ -189,6 +270,9 @@ def run_first_simulation_execution(
         spawn_object=effective_spawn_cube,
         move_object=effective_move_object,
         object_spec=simulation_object_spec,
+        check_robot_asset=effective_check_robot_asset,
+        load_robot_asset=load_robot_asset,
+        robot_asset_spec=effective_robot_asset_spec,
         started_at=started_at,
         output_dir=output_dir,
         write_report=write_report,
@@ -233,6 +317,9 @@ def _run_true_isaac_runtime(
     spawn_object: bool,
     move_object: bool,
     object_spec: SimulationObjectSpec,
+    check_robot_asset: bool,
+    load_robot_asset: bool,
+    robot_asset_spec: RobotAssetSpec,
     started_at: str,
     output_dir: str | Path | None,
     write_report: bool,
@@ -251,6 +338,11 @@ def _run_true_isaac_runtime(
                     spec=object_spec if spawn_object else None,
                     spawned=False,
                     move_requested=move_object,
+                ),
+                robot_asset_metadata=_robot_asset_report_fields(
+                    spec=robot_asset_spec if check_robot_asset else None,
+                    check_requested=check_robot_asset,
+                    load_requested=load_robot_asset,
                 ),
                 error_code="E_ISAAC_RUNTIME_FAILED",
                 error_message=str(exc),
@@ -271,6 +363,9 @@ def _run_true_isaac_runtime(
         spawn_object=spawn_object,
         move_object=move_object,
         object_spec=object_spec,
+        check_robot_asset=check_robot_asset,
+        load_robot_asset=load_robot_asset,
+        robot_asset_spec=robot_asset_spec,
         started_at=started_at,
         output_dir=output_dir,
         write_report=write_report,
@@ -291,15 +386,28 @@ def _execute_isaac_world(
     started_at: str,
     output_dir: str | Path | None,
     write_report: bool,
+    check_robot_asset: bool = False,
+    load_robot_asset: bool = False,
+    robot_asset_spec: RobotAssetSpec | None = None,
     demo_command: str | None = None,
     object_spawner=None,
     object_pose_updater=None,
+    robot_asset_loader=None,
+    robot_prim_verifier=None,
 ) -> Dict[str, Any]:
     simulation_app = None
     object_spawner = object_spawner or spawn_simulation_object
     object_pose_updater = object_pose_updater or update_simulation_object_pose
     object_handle = None
     object_metadata = _simulation_object_report_fields()
+    robot_asset_spec = robot_asset_spec or RobotAssetSpec()
+    robot_asset_metadata = _robot_asset_report_fields(
+        spec=robot_asset_spec if check_robot_asset else None,
+        check_requested=check_robot_asset,
+        load_requested=load_robot_asset,
+    )
+    robot_asset_loader = robot_asset_loader or load_robot_asset_into_stage
+    robot_prim_verifier = robot_prim_verifier or verify_robot_prim_exists
     world_reset = False
     try:
         simulation_app = simulation_app_cls({"headless": headless})
@@ -308,6 +416,105 @@ def _execute_isaac_world(
         world = world_cls()
         world.reset()
         world_reset = True
+
+        if check_robot_asset or load_robot_asset:
+            robot_asset_metadata = evaluate_robot_asset_availability(
+                robot_asset_spec,
+                check_requested=check_robot_asset,
+                load_requested=load_robot_asset,
+                dry_run=False,
+            )
+            if load_robot_asset:
+                if not robot_asset_metadata["robot_asset_available"]:
+                    robot_asset_metadata = _robot_asset_report_fields(
+                        spec=robot_asset_spec,
+                        check_requested=check_robot_asset,
+                        load_requested=True,
+                        available=False,
+                        loaded=False,
+                        prim_exists=False,
+                        status="LOAD_FAILED",
+                        blocking_reason="E_ROBOT_ASSET_UNAVAILABLE",
+                    )
+                    return _finalize_result(
+                        build_simulation_execution_result(
+                            simulation_task=simulation_task,
+                            status="FAIL",
+                            mode="isaac",
+                            steps_requested=steps,
+                            world_reset=world_reset,
+                            object_metadata=object_metadata,
+                            robot_asset_metadata=robot_asset_metadata,
+                            error_code="E_ROBOT_ASSET_LOAD_FAILED",
+                            error_message="robot asset path is unavailable",
+                            started_at=started_at,
+                            finished_at=_timestamp(),
+                        ),
+                        output_dir=output_dir,
+                        write_report=write_report,
+                        demo_command=demo_command,
+                    )
+                try:
+                    robot_asset_loader(world, robot_asset_spec=robot_asset_spec)
+                    prim_exists = robot_prim_verifier(world, robot_asset_spec=robot_asset_spec)
+                    robot_asset_metadata = _robot_asset_report_fields(
+                        spec=robot_asset_spec,
+                        check_requested=check_robot_asset,
+                        load_requested=True,
+                        available=True,
+                        loaded=prim_exists,
+                        prim_exists=prim_exists,
+                        status="LOADED" if prim_exists else "LOAD_FAILED",
+                        blocking_reason=None if prim_exists else "E_ROBOT_PRIM_NOT_FOUND",
+                    )
+                    if not prim_exists:
+                        return _finalize_result(
+                            build_simulation_execution_result(
+                                simulation_task=simulation_task,
+                                status="FAIL",
+                                mode="isaac",
+                                steps_requested=steps,
+                                world_reset=world_reset,
+                                object_metadata=object_metadata,
+                                robot_asset_metadata=robot_asset_metadata,
+                                error_code="E_ROBOT_ASSET_LOAD_FAILED",
+                                error_message="robot prim was not found after loading asset",
+                                started_at=started_at,
+                                finished_at=_timestamp(),
+                            ),
+                            output_dir=output_dir,
+                            write_report=write_report,
+                            demo_command=demo_command,
+                        )
+                except Exception as exc:
+                    robot_asset_metadata = _robot_asset_report_fields(
+                        spec=robot_asset_spec,
+                        check_requested=check_robot_asset,
+                        load_requested=True,
+                        available=robot_asset_metadata["robot_asset_available"],
+                        loaded=False,
+                        prim_exists=False,
+                        status="LOAD_FAILED",
+                        blocking_reason="E_ROBOT_ASSET_LOAD_FAILED",
+                    )
+                    return _finalize_result(
+                        build_simulation_execution_result(
+                            simulation_task=simulation_task,
+                            status="FAIL",
+                            mode="isaac",
+                            steps_requested=steps,
+                            world_reset=world_reset,
+                            object_metadata=object_metadata,
+                            robot_asset_metadata=robot_asset_metadata,
+                            error_code="E_ROBOT_ASSET_LOAD_FAILED",
+                            error_message=str(exc),
+                            started_at=started_at,
+                            finished_at=_timestamp(),
+                        ),
+                        output_dir=output_dir,
+                        write_report=write_report,
+                        demo_command=demo_command,
+                    )
 
         if spawn_object:
             try:
@@ -329,6 +536,7 @@ def _execute_isaac_world(
                         steps_requested=steps,
                         world_reset=world_reset,
                         object_metadata=object_metadata,
+                        robot_asset_metadata=robot_asset_metadata,
                         error_code="E_CUBE_SPAWN_FAILED",
                         error_message=str(exc),
                         started_at=started_at,
@@ -362,6 +570,7 @@ def _execute_isaac_world(
                         steps_requested=steps,
                         world_reset=world_reset,
                         object_metadata=object_metadata,
+                        robot_asset_metadata=robot_asset_metadata,
                         error_code="E_SIM_OBJECT_MOVE_FAILED",
                         error_message=str(exc),
                         started_at=started_at,
@@ -386,6 +595,7 @@ def _execute_isaac_world(
                 steps_completed=steps_completed,
                 world_reset=world_reset,
                 object_metadata=object_metadata,
+                robot_asset_metadata=robot_asset_metadata,
                 started_at=started_at,
                 finished_at=_timestamp(),
             ),
@@ -402,6 +612,7 @@ def _execute_isaac_world(
                 steps_requested=steps,
                 world_reset=world_reset,
                 object_metadata=object_metadata,
+                robot_asset_metadata=robot_asset_metadata,
                 error_code="E_ISAAC_RUNTIME_FAILED",
                 error_message=str(exc),
                 started_at=started_at,
@@ -472,6 +683,101 @@ def update_simulation_object_pose(
     )
 
 
+def resolve_robot_asset_path(robot_asset_spec: RobotAssetSpec) -> Path | None:
+    if not robot_asset_spec.robot_asset_path:
+        return None
+    if _is_network_asset_path(robot_asset_spec.robot_asset_path):
+        return None
+    return Path(robot_asset_spec.robot_asset_path).expanduser()
+
+
+def evaluate_robot_asset_availability(
+    robot_asset_spec: RobotAssetSpec,
+    *,
+    check_requested: bool,
+    load_requested: bool,
+    dry_run: bool = False,
+) -> Dict[str, Any]:
+    if not check_requested and not load_requested:
+        return _robot_asset_report_fields()
+
+    asset_path = robot_asset_spec.robot_asset_path
+    if not asset_path:
+        return _robot_asset_report_fields(
+            spec=robot_asset_spec,
+            check_requested=check_requested,
+            load_requested=load_requested,
+            available=False,
+            loaded=False,
+            prim_exists=False,
+            status="UNAVAILABLE",
+            blocking_reason="E_ROBOT_ASSET_UNAVAILABLE",
+            asset_source="dry_run" if dry_run else "unavailable",
+        )
+
+    if _is_network_asset_path(asset_path):
+        return _robot_asset_report_fields(
+            spec=robot_asset_spec,
+            check_requested=check_requested,
+            load_requested=load_requested,
+            available=False,
+            loaded=False,
+            prim_exists=False,
+            status="UNAVAILABLE",
+            blocking_reason="E_ROBOT_ASSET_UNAVAILABLE",
+            asset_source="remote",
+        )
+
+    resolved_path = resolve_robot_asset_path(robot_asset_spec)
+    is_available = bool(
+        resolved_path
+        and resolved_path.is_file()
+        and resolved_path.suffix.lower() in {".usd", ".usda", ".usdc"}
+    )
+    simulated_loaded = bool(dry_run and load_requested and is_available)
+    return _robot_asset_report_fields(
+        spec=robot_asset_spec,
+        check_requested=check_requested,
+        load_requested=load_requested,
+        available=is_available,
+        loaded=simulated_loaded,
+        prim_exists=simulated_loaded,
+        status="LOADED" if simulated_loaded else ("AVAILABLE" if is_available else "UNAVAILABLE"),
+        blocking_reason=None if is_available else "E_ROBOT_ASSET_UNAVAILABLE",
+        asset_source="local" if is_available else ("dry_run" if dry_run else "unavailable"),
+    )
+
+
+def load_robot_asset_into_stage(world, *, robot_asset_spec: RobotAssetSpec) -> None:
+    resolved_path = resolve_robot_asset_path(robot_asset_spec)
+    if resolved_path is None or not resolved_path.is_file():
+        raise FileNotFoundError(robot_asset_spec.robot_asset_path or "robot asset path is not set")
+    if resolved_path.suffix.lower() not in {".usd", ".usda", ".usdc"}:
+        raise ValueError(f"unsupported robot asset kind: {resolved_path.suffix}")
+
+    try:
+        from isaacsim.core.utils.stage import add_reference_to_stage
+    except ImportError:
+        from omni.isaac.core.utils.stage import add_reference_to_stage
+
+    add_reference_to_stage(usd_path=str(resolved_path), prim_path=robot_asset_spec.robot_prim_path)
+
+
+def verify_robot_prim_exists(world, *, robot_asset_spec: RobotAssetSpec) -> bool:
+    stage = getattr(world, "stage", None)
+    if stage is None:
+        try:
+            import omni.usd
+
+            stage = omni.usd.get_context().get_stage()
+        except Exception:
+            stage = None
+    if stage is None or not hasattr(stage, "GetPrimAtPath"):
+        return False
+    prim = stage.GetPrimAtPath(robot_asset_spec.robot_prim_path)
+    return bool(prim and hasattr(prim, "IsValid") and prim.IsValid())
+
+
 def _simulation_object_report_fields(
     *,
     spec: SimulationObjectSpec | None = None,
@@ -512,6 +818,34 @@ def _simulation_object_report_fields(
     }
 
 
+def _robot_asset_report_fields(
+    *,
+    spec: RobotAssetSpec | None = None,
+    check_requested: bool = False,
+    load_requested: bool = False,
+    available: bool = False,
+    loaded: bool = False,
+    prim_exists: bool = False,
+    status: str | None = None,
+    blocking_reason: str | None = None,
+    asset_source: str | None = None,
+) -> Dict[str, Any]:
+    resolved_status = status or ("NOT_REQUESTED" if not check_requested and not load_requested else "UNAVAILABLE")
+    return {
+        "robot_asset_check_requested": check_requested,
+        "robot_asset_load_requested": load_requested,
+        "robot_type": spec.robot_type if spec else None,
+        "robot_prim_path": spec.robot_prim_path if spec else None,
+        "robot_asset_path": spec.robot_asset_path if spec else None,
+        "robot_asset_source": asset_source or (spec.asset_source if spec else None),
+        "robot_asset_available": available,
+        "robot_asset_loaded": loaded,
+        "robot_prim_exists": prim_exists,
+        "robot_asset_status": resolved_status,
+        "robot_asset_blocking_reason": blocking_reason,
+    }
+
+
 def _position_tuple(position: list[float] | tuple[float, float, float]) -> tuple[float, float, float]:
     values = [float(value) for value in position]
     if len(values) != 3:
@@ -547,6 +881,11 @@ def _mode_name(*, dry_run: bool, no_isaac: bool) -> str:
     if no_isaac:
         return "no_isaac"
     return "isaac"
+
+
+def _is_network_asset_path(asset_path: str) -> bool:
+    lowered = asset_path.lower()
+    return lowered.startswith(("http://", "https://", "omniverse://", "ov://"))
 
 
 def _missing_task_fields(task: Dict[str, Any]) -> list[str]:

@@ -23,6 +23,7 @@ def export_simulation_evidence(
     manifest_path = output_dir / "evidence_manifest.json"
 
     object_info = _simulation_object_info(result)
+    robot_asset_info = _robot_asset_info(result)
     run_id = output_dir.name
     created_at = result.get("finished_at") or result.get("started_at")
     report_path = result.get("report_path")
@@ -31,6 +32,7 @@ def export_simulation_evidence(
         _build_summary_markdown(
             result,
             object_info=object_info,
+            robot_asset_info=robot_asset_info,
             run_id=run_id,
             created_at=created_at,
             report_path=report_path,
@@ -57,6 +59,7 @@ def export_simulation_evidence(
         "summary_path": str(summary_path),
         "demo_command_path": str(demo_command_path),
         "pose_delta_path": str(pose_delta_path),
+        "robot_asset": robot_asset_info,
         "screenshot_before_path": None,
         "screenshot_after_path": None,
         "video_path": None,
@@ -91,10 +94,27 @@ def _simulation_object_info(result: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _robot_asset_info(result: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "check_requested": result.get("robot_asset_check_requested"),
+        "load_requested": result.get("robot_asset_load_requested"),
+        "robot_type": result.get("robot_type"),
+        "robot_prim_path": result.get("robot_prim_path"),
+        "robot_asset_path": result.get("robot_asset_path"),
+        "robot_asset_source": result.get("robot_asset_source"),
+        "robot_asset_available": result.get("robot_asset_available"),
+        "robot_asset_loaded": result.get("robot_asset_loaded"),
+        "robot_prim_exists": result.get("robot_prim_exists"),
+        "robot_asset_status": result.get("robot_asset_status"),
+        "robot_asset_blocking_reason": result.get("robot_asset_blocking_reason"),
+    }
+
+
 def _build_summary_markdown(
     result: Dict[str, Any],
     *,
     object_info: Dict[str, Any],
+    robot_asset_info: Dict[str, Any],
     run_id: str,
     created_at: str | None,
     report_path: str | None,
@@ -121,6 +141,20 @@ def _build_summary_markdown(
             f"- displacement: {_format_value(object_info.get('displacement'))}",
             f"- report path: {_format_value(report_path)}",
             "",
+            "## Robot Asset",
+            "",
+            f"- check requested: {_format_value(robot_asset_info.get('check_requested'))}",
+            f"- load requested: {_format_value(robot_asset_info.get('load_requested'))}",
+            f"- robot_type: {_format_value(robot_asset_info.get('robot_type'))}",
+            f"- robot prim path: {_format_value(robot_asset_info.get('robot_prim_path'))}",
+            f"- robot asset path: {_format_value(robot_asset_info.get('robot_asset_path'))}",
+            f"- robot asset source: {_format_value(robot_asset_info.get('robot_asset_source'))}",
+            f"- robot asset available: {_format_value(robot_asset_info.get('robot_asset_available'))}",
+            f"- robot asset loaded: {_format_value(robot_asset_info.get('robot_asset_loaded'))}",
+            f"- robot prim exists: {_format_value(robot_asset_info.get('robot_prim_exists'))}",
+            f"- robot asset status: {_format_value(robot_asset_info.get('robot_asset_status'))}",
+            f"- robot asset blocking reason: {_format_value(robot_asset_info.get('robot_asset_blocking_reason'))}",
+            "",
         ]
     )
 
@@ -138,6 +172,10 @@ def _build_demo_command_text(result: Dict[str, Any], *, demo_command: str | None
         f"steps_requested={_format_value(result.get('steps_requested'))}",
         f"move_object={_format_value(result.get('simulation_object_move_requested'))}",
         f"object_type={_format_value(result.get('simulation_object_type') or result.get('object_type'))}",
+        f"check_robot_asset={_format_value(result.get('robot_asset_check_requested'))}",
+        f"load_robot_asset={_format_value(result.get('robot_asset_load_requested'))}",
+        f"robot_type={_format_value(result.get('robot_type'))}",
+        f"robot_asset_path={_format_value(result.get('robot_asset_path'))}",
     ]
     return "\n".join(lines) + "\n"
 

@@ -13,7 +13,7 @@ from src.simulation_runtime import DEFAULT_SIMULATION_TASK, run_first_simulation
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run TETO V2.0.3 simulation evidence export pipeline.")
+    parser = argparse.ArgumentParser(description="Run TETO V2.1.0 robot asset availability smoke test.")
     parser.add_argument("--dry-run", action="store_true", help="Do not import Isaac; produce a test execution report.")
     parser.add_argument("--no-isaac", action="store_true", help="Pure Python test mode without Isaac imports.")
     parser.add_argument("--spawn-cube", action="store_true", help="Spawn a visible cube in the Isaac World.")
@@ -31,6 +31,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--steps", type=int, default=5, help="Number of simulation steps to run.")
     parser.add_argument("--gui", action="store_true", help="Run Isaac with GUI instead of headless mode.")
     parser.add_argument("--output-dir", help="Directory where simulation_execution_result.json is written.")
+    parser.add_argument(
+        "--check-robot-asset",
+        action="store_true",
+        help="Check robot asset availability without requiring a successful load.",
+    )
+    parser.add_argument(
+        "--load-robot-asset",
+        action="store_true",
+        help="Load the specified local robot asset and verify the robot prim exists.",
+    )
+    parser.add_argument("--robot-asset-path", help="Local USD/USDA/USDC robot asset path to check or load.")
+    parser.add_argument("--robot-type", default="ur5", help="Robot type label for report metadata.")
+    parser.add_argument("--robot-prim-path", default="/World/TETO_Robot", help="Prim path for a loaded robot asset.")
     return parser
 
 
@@ -46,6 +59,11 @@ def main() -> int:
         spawn_cube=args.spawn_cube,
         move_object=args.move_object,
         move_cube=args.move_cube,
+        check_robot_asset=args.check_robot_asset,
+        load_robot_asset=args.load_robot_asset,
+        robot_type=args.robot_type,
+        robot_prim_path=args.robot_prim_path,
+        robot_asset_path=args.robot_asset_path,
         output_dir=args.output_dir,
         write_report=True,
         demo_command=shlex.join([sys.executable, *sys.argv]),
@@ -57,7 +75,7 @@ def main() -> int:
 
 def print_summary(result: dict, report_path: Path) -> None:
     print("=" * 50)
-    print("TETO V2.0.3 SIMULATION EVIDENCE EXPORT")
+    print("TETO V2.1.0 ROBOT ASSET AVAILABILITY")
     print("=" * 50)
     print(f"Status: {result['status']}")
     print(f"Mode: {result['mode']}")
@@ -73,6 +91,17 @@ def print_summary(result: dict, report_path: Path) -> None:
     print(f"cube_target_position: {result.get('cube_target_position')}")
     print(f"cube_final_position: {result.get('cube_final_position')}")
     print(f"cube_displacement: {result.get('cube_displacement')}")
+    print(f"robot_asset_check_requested: {result.get('robot_asset_check_requested')}")
+    print(f"robot_asset_load_requested: {result.get('robot_asset_load_requested')}")
+    print(f"robot_type: {result.get('robot_type')}")
+    print(f"robot_prim_path: {result.get('robot_prim_path')}")
+    print(f"robot_asset_path: {result.get('robot_asset_path')}")
+    print(f"robot_asset_source: {result.get('robot_asset_source')}")
+    print(f"robot_asset_available: {result.get('robot_asset_available')}")
+    print(f"robot_asset_loaded: {result.get('robot_asset_loaded')}")
+    print(f"robot_prim_exists: {result.get('robot_prim_exists')}")
+    print(f"robot_asset_status: {result.get('robot_asset_status')}")
+    print(f"robot_asset_blocking_reason: {result.get('robot_asset_blocking_reason')}")
     print(f"Report: {report_path}")
     if result.get("blocking_reasons"):
         print(f"Blocking reasons: {', '.join(result['blocking_reasons'])}")

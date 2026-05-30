@@ -773,6 +773,55 @@ The exporter reads `simulation_object_*` fields first and uses `cube_*` fields
 only as a compatibility fallback. This keeps V2.0.3 as a generic simulation
 object evidence pipeline rather than a cube-specific feature.
 
+## TETO V2.1.0 Robot Asset Loader Contract
+
+TETO V2.1.0 adds a robot asset loader contract and availability smoke test.
+This is not a UR5 control release and it does not require a UR5 USD to exist.
+The current local Isaac Sim installation can create `SimulationApp` and
+`World`, but the built-in Isaac asset root points to a remote S3/Nucleus path
+and this project does not depend on network assets for tests or acceptance.
+
+Use `--check-robot-asset` for the default diagnostic path:
+
+```bash
+python3 scripts/run_first_simulation_execution.py --dry-run --steps 1 --check-robot-asset
+```
+
+When no local robot asset path is provided, the run is still a successful
+diagnostic and writes report/evidence with:
+
+- `status=PASS`
+- `error.code=OK`
+- `robot_asset_available=false`
+- `robot_asset_loaded=false`
+- `robot_asset_status=UNAVAILABLE`
+- `robot_asset_blocking_reason=E_ROBOT_ASSET_UNAVAILABLE`
+
+The generic robot asset contract records:
+
+- `robot_asset_check_requested`
+- `robot_asset_load_requested`
+- `robot_type`
+- `robot_prim_path`
+- `robot_asset_path`
+- `robot_asset_source`
+- `robot_asset_available`
+- `robot_asset_loaded`
+- `robot_prim_exists`
+- `robot_asset_status`
+- `robot_asset_blocking_reason`
+
+Use `--load-robot-asset --robot-asset-path <local.usd>` only when a local
+USD/USDA/USDC asset exists and should be referenced into the Isaac stage. In
+load mode, an invalid or missing path is a FAIL report. In check mode, missing
+local assets are a PASS diagnostic. Evidence summaries and manifests include a
+robot asset section, while screenshot and video paths remain null placeholders.
+
+This remains asset preparation only. It does not download assets, depend on
+network/Nucleus, connect ROS2, MoveIt, UR5 hardware, RTDE, or URScript,
+generate joint angles, generate `tcp_pose_world`, read or write robot joint
+state, capture screenshots or video, or control a robot.
+
 Demo commands accept common image formats directly. TETO automatically
 creates a cached RGB JPEG under `data/processed/auto/`, with EXIF orientation
 applied, long edge resized, animated images reduced to the first frame, and
