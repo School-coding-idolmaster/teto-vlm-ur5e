@@ -12,10 +12,20 @@ from src.simulation_runtime import DEFAULT_SIMULATION_TASK, run_first_simulation
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run TETO V2.0.1 World to Cube simulation execution.")
+    parser = argparse.ArgumentParser(description="Run TETO V2.0.2 simulation object pose update smoke test.")
     parser.add_argument("--dry-run", action="store_true", help="Do not import Isaac; produce a test execution report.")
     parser.add_argument("--no-isaac", action="store_true", help="Pure Python test mode without Isaac imports.")
     parser.add_argument("--spawn-cube", action="store_true", help="Spawn a visible cube in the Isaac World.")
+    parser.add_argument(
+        "--move-object",
+        action="store_true",
+        help="Run the default simulation object pose update smoke test.",
+    )
+    parser.add_argument(
+        "--move-cube",
+        action="store_true",
+        help="Alias for --move-object using the default cube fixture.",
+    )
     parser.add_argument("--task-json", help="Path to a simulation_task JSON file.")
     parser.add_argument("--steps", type=int, default=5, help="Number of simulation steps to run.")
     parser.add_argument("--gui", action="store_true", help="Run Isaac with GUI instead of headless mode.")
@@ -33,6 +43,8 @@ def main() -> int:
         steps=args.steps,
         headless=not args.gui,
         spawn_cube=args.spawn_cube,
+        move_object=args.move_object,
+        move_cube=args.move_cube,
         output_dir=args.output_dir,
         write_report=True,
     )
@@ -43,7 +55,7 @@ def main() -> int:
 
 def print_summary(result: dict, report_path: Path) -> None:
     print("=" * 50)
-    print("TETO V2.0.1 WORLD TO CUBE SIMULATION")
+    print("TETO V2.0.2 SIMULATION OBJECT POSE UPDATE")
     print("=" * 50)
     print(f"Status: {result['status']}")
     print(f"Mode: {result['mode']}")
@@ -54,6 +66,11 @@ def print_summary(result: dict, report_path: Path) -> None:
     print(f"cube_prim_path: {result.get('cube_prim_path')}")
     print(f"cube_position: {result.get('cube_position')}")
     print(f"cube_size: {result.get('cube_size')}")
+    print(f"cube_moved: {result.get('cube_moved')}")
+    print(f"cube_initial_position: {result.get('cube_initial_position')}")
+    print(f"cube_target_position: {result.get('cube_target_position')}")
+    print(f"cube_final_position: {result.get('cube_final_position')}")
+    print(f"cube_displacement: {result.get('cube_displacement')}")
     print(f"Report: {report_path}")
     if result.get("blocking_reasons"):
         print(f"Blocking reasons: {', '.join(result['blocking_reasons'])}")

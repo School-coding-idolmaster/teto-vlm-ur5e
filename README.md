@@ -19,7 +19,7 @@ This project currently focuses on:
 - Follow-up question mode for repeated free-form prompts on one image
 - Demo result saving
 - `robot_task_json` result inspector / replay viewer for saved JSONL runs
-- World-to-cube Simulation Execution through Isaac Runtime
+- Simulation object spawn and pose update smoke tests through Isaac Runtime
 - Placeholder dataset and annotation utilities
 - Placeholder robot interface
 
@@ -691,6 +691,45 @@ The report keeps the V2.0.0 fields and adds `simulation_object_spawned`,
 `object_type`, `cube_prim_path`, `cube_position`, `cube_size`, and
 `cube_spawned`. Cube creation failures are converted into a FAIL report with
 `error.code=E_CUBE_SPAWN_FAILED`.
+
+## TETO V2.0.2 Simulation Object Pose Update
+
+TETO V2.0.2 keeps cube as the default Isaac test fixture, but the runtime
+boundary is now phrased as a simulation object pose update smoke test:
+`World -> simulation object -> update pose -> simulation steps ->
+simulation_execution_result`.
+
+Use `--move-object` for the default simulation object pose update smoke test.
+This option implies the default fixture spawn step because a pose update needs
+an object handle:
+
+```bash
+python3 scripts/run_first_simulation_execution.py --dry-run --steps 3 --move-object
+```
+
+`--move-cube` remains as a backward-compatible alias for the same generic
+pose update path.
+
+The default fixture is:
+
+- `object_type=cube`
+- `prim_path=/World/TETO_Cube`
+- `initial_position=[0.0, 0.0, 0.5]`
+- `target_position=[0.3, 0.0, 0.5]`
+- `size=0.2`
+
+Internally, the runtime uses a `SimulationObjectSpec`,
+`spawn_simulation_object`, and `update_simulation_object_pose` so later smoke
+tests can replace the cube fixture with another Isaac object without
+rewriting the execution boundary. The report keeps V2.0.1 cube compatibility
+fields and adds object movement fields including `simulation_object_moved`,
+`cube_move_requested`, `cube_moved`, `cube_initial_position`,
+`cube_target_position`, `cube_final_position`, and `cube_displacement`.
+Move failures use `error.code=E_SIM_OBJECT_MOVE_FAILED`.
+
+This remains a minimal pose update test only. It does not save screenshots or
+video, connect ROS2, MoveIt, UR5, RTDE, or URScript, generate joint angles,
+generate `tcp_pose_world`, or control a real robot.
 
 Demo commands accept common image formats directly. TETO automatically
 creates a cached RGB JPEG under `data/processed/auto/`, with EXIF orientation
