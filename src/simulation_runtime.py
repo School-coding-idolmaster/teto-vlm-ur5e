@@ -12,7 +12,7 @@ from src.robot_prim_inspector import build_robot_prim_inspection_report, inspect
 
 
 REPORT_VERSION = "teto_simulation_execution.v1"
-CURRENT_TETO_VERSION = "TETO V2.1.2"
+CURRENT_TETO_VERSION = "TETO V2.1.3"
 DEFAULT_STEPS = 5
 DEFAULT_SIMULATION_OBJECT_TYPE = "cube"
 DEFAULT_CUBE_PRIM_PATH = "/World/TETO_Cube"
@@ -96,6 +96,8 @@ def build_simulation_execution_result(
     result.update(object_metadata or _simulation_object_report_fields())
     result.update(robot_asset_metadata or _robot_asset_report_fields())
     result.update(robot_prim_inspection_metadata or _robot_prim_inspection_report_fields())
+    result.setdefault("robot_structure_report_generated", False)
+    result.setdefault("robot_structure_report_path", None)
     return result
 
 
@@ -309,7 +311,11 @@ def write_simulation_execution_result(
     run_dir = Path(output_dir).expanduser() if output_dir else _create_run_dir()
     run_dir.mkdir(parents=True, exist_ok=True)
     report_path = run_dir / "simulation_execution_result.json"
+    structure_report_path = run_dir / "robot_structure_report.md"
     result["report_path"] = str(report_path)
+    structure_report_requested = bool(result.get("robot_prim_inspection_requested"))
+    result["robot_structure_report_generated"] = structure_report_requested
+    result["robot_structure_report_path"] = str(structure_report_path) if structure_report_requested else None
     with report_path.open("w", encoding="utf-8") as report_file:
         json.dump(result, report_file, ensure_ascii=False, indent=2)
         report_file.write("\n")

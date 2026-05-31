@@ -56,6 +56,8 @@ def test_build_success_report_fields():
     assert result["robot_asset_loaded"] is False
     assert result["robot_prim_inspection_requested"] is False
     assert result["robot_prim_inspection"]["inspection_status"] == "NOT_REQUESTED"
+    assert result["robot_structure_report_generated"] is False
+    assert result["robot_structure_report_path"] is None
     assert result["blocking_reasons"] == []
     assert result["error"]["code"] == "OK"
 
@@ -215,6 +217,8 @@ def test_dry_run_robot_prim_inspection_returns_not_found_diagnostic():
     assert inspection["joint_metadata_summary"]["control_ready"] is False
     assert inspection["joint_metadata_summary"]["control_targets_generated"] is False
     assert inspection["joint_metadata_table"] == []
+    assert result["robot_structure_report_generated"] is False
+    assert result["robot_structure_report_path"] is None
     for key in (
         "total_descendant_prim_count",
         "link_like_prim_count",

@@ -822,13 +822,14 @@ network/Nucleus, connect ROS2, MoveIt, UR5 hardware, RTDE, or URScript,
 generate joint angles, generate `tcp_pose_world`, read or write robot joint
 state, capture screenshots or video, or control a robot.
 
-## TETO V2.1.2 UR5e Articulation and Joint Metadata Report Polish
+## TETO V2.1.3 UR5e Structure Report Export
 
-TETO V2.1.2 keeps the V2.1.1 read-only robot prim inspection smoke test and
-polishes the articulation / joint metadata report. It is intended to inspect
-the USD stage structure under `/World/TETO_Robot` after a robot asset has been
-loaded, then classify joint-like metadata entries so they are not mistaken for
-robot control readiness.
+TETO V2.1.3 keeps the V2.1.2 read-only robot prim inspection and joint metadata
+classification, then exports a presentation-friendly UR5e structure report. It
+is intended to inspect the USD stage structure under `/World/TETO_Robot` after
+a robot asset has been loaded, classify joint-like metadata entries, and
+summarize asset loading, prim structure, joint classification, and safety
+boundaries in a single evidence document.
 
 This is not robot control. The inspection only reads prim paths, type names,
 applied API schemas, descendant counts, link-like prims, joint-like prims,
@@ -838,7 +839,7 @@ generate joint targets, joint angles, trajectories, URScript,
 `tcp_pose_world`, ROS2 messages, MoveIt requests, RTDE commands, or real UR5
 control actions.
 
-V2.1.2 classifies joint-like metadata into:
+V2.1.3 preserves the V2.1.2 joint-like metadata classification:
 
 - UR5e arm joints: `shoulder_pan_joint`, `shoulder_lift_joint`,
   `elbow_joint`, `wrist_1_joint`, `wrist_2_joint`, `wrist_3_joint`
@@ -887,12 +888,26 @@ The structured report includes:
 - `robot_prim_inspection.joint_metadata_table`
 - `robot_prim_inspection.inspection_status`
 - `robot_prim_inspection.inspection_warnings`
+- `robot_structure_report_generated`
+- `robot_structure_report_path`
 
 Evidence export adds a `Robot Prim Inspection` section to `summary.md`, a
 `Joint Metadata Classification` table in `summary.md`, a
 `robot_prim_inspection` object in `evidence_manifest.json`, and
-`robot_prim_inspection.json` when inspection is requested. Screenshot and video
-placeholders remain null.
+`robot_prim_inspection.json` when inspection is requested. V2.1.3 also writes
+`robot_structure_report.md` in the same run directory and links it from
+`summary.md`, `simulation_execution_result.json`, and `evidence_manifest.json`.
+Screenshot and video placeholders remain null.
+
+`robot_structure_report.md` is designed for presentation evidence and includes:
+
+- basic run and asset information
+- Asset Load Summary
+- Prim Structure Summary
+- Joint Metadata Classification
+- Joint Metadata Table
+- Safety Boundary
+- Presentation Summary
 
 Demo commands accept common image formats directly. TETO automatically
 creates a cached RGB JPEG under `data/processed/auto/`, with EXIF orientation

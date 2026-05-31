@@ -29,6 +29,7 @@ def test_dry_run_execution_writes_evidence_artifacts(tmp_path):
     demo_command_path = tmp_path / "demo_command.txt"
     pose_delta_path = tmp_path / "pose_delta.md"
     manifest_path = tmp_path / "evidence_manifest.json"
+    structure_report_path = tmp_path / "robot_structure_report.md"
 
     assert report_path.exists()
     assert summary_path.exists()
@@ -37,7 +38,7 @@ def test_dry_run_execution_writes_evidence_artifacts(tmp_path):
     assert manifest_path.exists()
 
     summary = summary_path.read_text(encoding="utf-8")
-    assert "TETO version: TETO V2.1.2" in summary
+    assert "TETO version: TETO V2.1.3" in summary
     assert f"run_id: {tmp_path.name}" in summary
     assert "mode: dry_run" in summary
     assert "status: PASS" in summary
@@ -71,7 +72,7 @@ def test_dry_run_execution_writes_evidence_artifacts(tmp_path):
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["schema_version"] == EVIDENCE_MANIFEST_SCHEMA_VERSION
     assert manifest["run_id"] == tmp_path.name
-    assert manifest["teto_version"] == "TETO V2.1.2"
+    assert manifest["teto_version"] == "TETO V2.1.3"
     assert manifest["mode"] == "dry_run"
     assert manifest["status"] == "PASS"
     assert manifest["report_path"] == str(report_path)
@@ -83,10 +84,14 @@ def test_dry_run_execution_writes_evidence_artifacts(tmp_path):
     assert manifest["robot_prim_inspection"]["requested"] is False
     assert manifest["robot_prim_inspection"]["inspection_status"] == "NOT_REQUESTED"
     assert manifest["robot_prim_inspection_path"] is None
+    assert manifest["robot_structure_report_path"] is None
     assert manifest["screenshot_before_path"] is None
     assert manifest["screenshot_after_path"] is None
     assert manifest["video_path"] is None
     assert result["report_path"] == str(report_path)
+    assert result["robot_structure_report_generated"] is False
+    assert result["robot_structure_report_path"] is None
+    assert not structure_report_path.exists()
 
 
 def test_evidence_exporter_writes_robot_asset_metadata(tmp_path):
@@ -147,10 +152,13 @@ def test_evidence_exporter_writes_robot_prim_inspection_metadata(tmp_path):
     assert "inspection status: E_ROBOT_PRIM_NOT_FOUND" in summary
     assert "### Joint Metadata Classification" in summary
     assert "| Arm joints | 0 | - |" in summary
+    assert "Robot structure report:" in summary
     assert "read-only USD metadata records" in summary
 
     inspection_path = tmp_path / "robot_prim_inspection.json"
+    structure_report_path = tmp_path / "robot_structure_report.md"
     assert inspection_path.exists()
+    assert structure_report_path.exists()
     inspection = json.loads(inspection_path.read_text(encoding="utf-8"))
     assert inspection["requested"] is True
     assert inspection["robot_prim_path"] == "/World/TETO_Robot"
@@ -164,12 +172,25 @@ def test_evidence_exporter_writes_robot_prim_inspection_metadata(tmp_path):
     manifest = json.loads((tmp_path / "evidence_manifest.json").read_text(encoding="utf-8"))
     assert manifest["robot_prim_inspection"] == inspection
     assert manifest["robot_prim_inspection_path"] == str(inspection_path)
+    assert manifest["robot_structure_report_path"] == str(structure_report_path)
     assert result["robot_prim_inspection_requested"] is True
+    assert result["robot_structure_report_generated"] is True
+    assert result["robot_structure_report_path"] == str(structure_report_path)
+
+    structure_report = structure_report_path.read_text(encoding="utf-8")
+    assert "# TETO UR5e Structure Report" in structure_report
+    assert "## Asset Load Summary" in structure_report
+    assert "## Prim Structure Summary" in structure_report
+    assert "## Joint Metadata Classification" in structure_report
+    assert "## Joint Metadata Table" in structure_report
+    assert "## Safety Boundary" in structure_report
+    assert "E_ROBOT_PRIM_NOT_FOUND" in structure_report
+    assert "This report is generated from read-only USD metadata inspection" in structure_report
 
 
 def test_evidence_exporter_displays_joint_metadata_classification(tmp_path):
     result = {
-        "teto_version": "TETO V2.1.2",
+        "teto_version": "TETO V2.1.3",
         "status": "PASS",
         "mode": "isaac",
         "error": {"code": "OK", "message": ""},
@@ -259,6 +280,20 @@ def test_evidence_exporter_displays_joint_metadata_classification(tmp_path):
     manifest = json.loads(paths["evidence_manifest_path"].read_text(encoding="utf-8"))
     assert manifest["robot_prim_inspection"]["joint_metadata_summary"]["arm_joint_count"] == 6
     assert manifest["robot_prim_inspection"]["joint_metadata_table"][0]["category"] == "arm"
+    assert manifest["robot_structure_report_path"] == str(tmp_path / "robot_structure_report.md")
+
+    structure_report = (tmp_path / "robot_structure_report.md").read_text(encoding="utf-8")
+    assert "# TETO UR5e Structure Report" in structure_report
+    assert "## Asset Load Summary" in structure_report
+    assert "## Prim Structure Summary" in structure_report
+    assert "## Joint Metadata Classification" in structure_report
+    assert "## Joint Metadata Table" in structure_report
+    assert "## Safety Boundary" in structure_report
+    assert "| shoulder_pan_joint | arm | /World/TETO_Robot/joints/shoulder_pan_joint | PhysicsRevoluteJoint | True | True | False |" in structure_report
+    assert "metadata_only" in structure_report
+    assert "control_target_generated" in structure_report
+    assert "This report is generated from read-only USD metadata inspection" in structure_report
+    assert "robot asset understanding and evidence export, not robot control" in structure_report
 
 
 def test_evidence_exporter_uses_cube_fields_as_compatibility_fallback(tmp_path):
