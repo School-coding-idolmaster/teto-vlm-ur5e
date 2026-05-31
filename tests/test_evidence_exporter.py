@@ -37,7 +37,7 @@ def test_dry_run_execution_writes_evidence_artifacts(tmp_path):
     assert manifest_path.exists()
 
     summary = summary_path.read_text(encoding="utf-8")
-    assert "TETO version: TETO V2.1.1" in summary
+    assert "TETO version: TETO V2.1.2" in summary
     assert f"run_id: {tmp_path.name}" in summary
     assert "mode: dry_run" in summary
     assert "status: PASS" in summary
@@ -71,7 +71,7 @@ def test_dry_run_execution_writes_evidence_artifacts(tmp_path):
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["schema_version"] == EVIDENCE_MANIFEST_SCHEMA_VERSION
     assert manifest["run_id"] == tmp_path.name
-    assert manifest["teto_version"] == "TETO V2.1.1"
+    assert manifest["teto_version"] == "TETO V2.1.2"
     assert manifest["mode"] == "dry_run"
     assert manifest["status"] == "PASS"
     assert manifest["report_path"] == str(report_path)
@@ -145,6 +145,9 @@ def test_evidence_exporter_writes_robot_prim_inspection_metadata(tmp_path):
     assert "robot prim path: /World/TETO_Robot" in summary
     assert "robot prim exists: False" in summary
     assert "inspection status: E_ROBOT_PRIM_NOT_FOUND" in summary
+    assert "### Joint Metadata Classification" in summary
+    assert "| Arm joints | 0 | - |" in summary
+    assert "read-only USD metadata records" in summary
 
     inspection_path = tmp_path / "robot_prim_inspection.json"
     assert inspection_path.exists()
@@ -153,11 +156,109 @@ def test_evidence_exporter_writes_robot_prim_inspection_metadata(tmp_path):
     assert inspection["robot_prim_path"] == "/World/TETO_Robot"
     assert inspection["robot_prim_exists"] is False
     assert inspection["inspection_status"] == "E_ROBOT_PRIM_NOT_FOUND"
+    assert inspection["joint_metadata_summary"]["metadata_only"] is True
+    assert inspection["joint_metadata_summary"]["control_ready"] is False
+    assert inspection["joint_metadata_summary"]["control_targets_generated"] is False
+    assert inspection["joint_metadata_table"] == []
 
     manifest = json.loads((tmp_path / "evidence_manifest.json").read_text(encoding="utf-8"))
     assert manifest["robot_prim_inspection"] == inspection
     assert manifest["robot_prim_inspection_path"] == str(inspection_path)
     assert result["robot_prim_inspection_requested"] is True
+
+
+def test_evidence_exporter_displays_joint_metadata_classification(tmp_path):
+    result = {
+        "teto_version": "TETO V2.1.2",
+        "status": "PASS",
+        "mode": "isaac",
+        "error": {"code": "OK", "message": ""},
+        "world_reset": True,
+        "steps_completed": 1,
+        "steps_requested": 1,
+        "allow_robot_motion": False,
+        "finished_at": "2026-05-31 12:00:00",
+        "report_path": str(tmp_path / "simulation_execution_result.json"),
+        "robot_prim_inspection_requested": True,
+        "robot_prim_inspection": {
+            "requested": True,
+            "robot_prim_path": "/World/TETO_Robot",
+            "robot_prim_exists": True,
+            "robot_root_type_name": "Xform",
+            "total_descendant_prim_count": 45,
+            "link_like_prim_count": 26,
+            "joint_like_prim_count": 8,
+            "visual_like_prim_count": 7,
+            "collision_like_prim_count": 7,
+            "articulation_root_found": True,
+            "physics_schema_summary": [],
+            "joint_names": [],
+            "joint_prim_paths": [],
+            "possible_dof_names": [],
+            "possible_dof_count": 8,
+            "joint_metadata_summary": {
+                "possible_dof_count": 8,
+                "possible_dof_names": [
+                    "robot_gripper_joint",
+                    "shoulder_pan_joint",
+                    "shoulder_lift_joint",
+                    "elbow_joint",
+                    "wrist_1_joint",
+                    "wrist_2_joint",
+                    "wrist_3_joint",
+                    "root_joint",
+                ],
+                "arm_joint_count": 6,
+                "arm_joint_names": [
+                    "shoulder_pan_joint",
+                    "shoulder_lift_joint",
+                    "elbow_joint",
+                    "wrist_1_joint",
+                    "wrist_2_joint",
+                    "wrist_3_joint",
+                ],
+                "structural_joint_count": 1,
+                "structural_joint_names": ["root_joint"],
+                "gripper_or_tool_joint_count": 1,
+                "gripper_or_tool_joint_names": ["robot_gripper_joint"],
+                "unknown_joint_count": 0,
+                "unknown_joint_names": [],
+                "metadata_only": True,
+                "control_ready": False,
+                "control_targets_generated": False,
+            },
+            "joint_metadata_table": [
+                {
+                    "joint_name": "shoulder_pan_joint",
+                    "joint_prim_path": "/World/TETO_Robot/joints/shoulder_pan_joint",
+                    "joint_type_name": "PhysicsRevoluteJoint",
+                    "category": "arm",
+                    "is_ur5e_arm_joint": True,
+                    "metadata_only": True,
+                    "control_target_generated": False,
+                    "applied_schemas": ["PhysicsJointAPI"],
+                    "parent_path": None,
+                    "child_path": None,
+                }
+            ],
+            "inspection_status": "OK",
+            "inspection_warnings": [],
+        },
+    }
+
+    paths = export_simulation_evidence(result, tmp_path)
+
+    summary = paths["summary_path"].read_text(encoding="utf-8")
+    assert "### Joint Metadata Classification" in summary
+    assert "| Arm joints | 6 | shoulder_pan_joint, shoulder_lift_joint, elbow_joint, wrist_1_joint, wrist_2_joint, wrist_3_joint |" in summary
+    assert "| Structural joints | 1 | root_joint |" in summary
+    assert "| Gripper/tool joints | 1 | robot_gripper_joint |" in summary
+    assert "| Unknown joints | 0 | - |" in summary
+    assert "not joint targets, not joint commands" in summary
+
+    manifest = json.loads(paths["evidence_manifest_path"].read_text(encoding="utf-8"))
+    assert manifest["robot_prim_inspection"]["joint_metadata_summary"]["arm_joint_count"] == 6
+    assert manifest["robot_prim_inspection"]["joint_metadata_table"][0]["category"] == "arm"
 
 
 def test_evidence_exporter_uses_cube_fields_as_compatibility_fallback(tmp_path):

@@ -2,6 +2,7 @@ from src.robot_prim_inspector import (
     INSPECTION_STATUS_OK,
     INSPECTION_STATUS_PRIM_NOT_FOUND,
     build_robot_prim_inspection_report,
+    categorize_joint_name,
     inspect_robot_prim,
 )
 
@@ -88,7 +89,63 @@ def test_inspect_robot_prim_summarizes_read_only_structure():
     assert report["joint_names"] == ["shoulder_pan_joint"]
     assert report["joint_prim_paths"] == ["/World/TETO_Robot/shoulder_pan_joint"]
     assert report["possible_dof_count"] == 1
+    assert report["joint_metadata_summary"]["arm_joint_names"] == ["shoulder_pan_joint"]
+    assert report["joint_metadata_summary"]["metadata_only"] is True
+    assert report["joint_metadata_summary"]["control_ready"] is False
+    assert report["joint_metadata_summary"]["control_targets_generated"] is False
+    assert report["joint_metadata_table"][0]["category"] == "arm"
+    assert report["joint_metadata_table"][0]["metadata_only"] is True
+    assert report["joint_metadata_table"][0]["control_target_generated"] is False
     assert "PhysicsJointAPI" in report["physics_schema_summary"]
+
+
+def test_joint_metadata_classifies_standard_ur5e_names():
+    joint_names = [
+        "robot_gripper_joint",
+        "shoulder_pan_joint",
+        "shoulder_lift_joint",
+        "elbow_joint",
+        "wrist_1_joint",
+        "wrist_2_joint",
+        "wrist_3_joint",
+        "root_joint",
+        "custom_probe_joint",
+    ]
+    report = build_robot_prim_inspection_report(
+        requested=True,
+        robot_prim_path="/World/TETO_Robot",
+        robot_prim_exists=True,
+        joint_names=joint_names,
+        joint_prim_paths=[f"/World/TETO_Robot/joints/{name}" for name in joint_names],
+    )
+    summary = report["joint_metadata_summary"]
+
+    assert summary["possible_dof_count"] == 9
+    assert summary["arm_joint_count"] == 6
+    assert summary["arm_joint_names"] == [
+        "shoulder_pan_joint",
+        "shoulder_lift_joint",
+        "elbow_joint",
+        "wrist_1_joint",
+        "wrist_2_joint",
+        "wrist_3_joint",
+    ]
+    assert summary["structural_joint_count"] == 1
+    assert summary["structural_joint_names"] == ["root_joint"]
+    assert summary["gripper_or_tool_joint_count"] == 1
+    assert summary["gripper_or_tool_joint_names"] == ["robot_gripper_joint"]
+    assert summary["unknown_joint_count"] == 1
+    assert summary["unknown_joint_names"] == ["custom_probe_joint"]
+    assert summary["metadata_only"] is True
+    assert summary["control_ready"] is False
+    assert summary["control_targets_generated"] is False
+
+    categories = {row["joint_name"]: row["category"] for row in report["joint_metadata_table"]}
+    assert categories["shoulder_pan_joint"] == "arm"
+    assert categories["root_joint"] == "structural"
+    assert categories["robot_gripper_joint"] == "gripper_or_tool"
+    assert categories["custom_probe_joint"] == "unknown"
+    assert categorize_joint_name("custom_tool_joint") == "gripper_or_tool"
 
 
 def test_robot_prim_inspection_report_has_no_motion_control_fields():
@@ -114,4 +171,3 @@ def test_robot_prim_inspection_report_has_no_motion_control_fields():
 
     for value in report.values():
         assert "command" not in str(value).lower()
-

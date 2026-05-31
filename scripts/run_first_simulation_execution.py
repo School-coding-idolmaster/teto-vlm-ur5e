@@ -13,7 +13,7 @@ from src.simulation_runtime import DEFAULT_SIMULATION_TASK, run_first_simulation
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run TETO V2.1.1 robot prim inspection smoke test.")
+    parser = argparse.ArgumentParser(description="Run TETO V2.1.2 robot joint metadata inspection smoke test.")
     parser.add_argument("--dry-run", action="store_true", help="Do not import Isaac; produce a test execution report.")
     parser.add_argument("--no-isaac", action="store_true", help="Pure Python test mode without Isaac imports.")
     parser.add_argument("--spawn-cube", action="store_true", help="Spawn a visible cube in the Isaac World.")
@@ -81,7 +81,7 @@ def main() -> int:
 
 def print_summary(result: dict, report_path: Path) -> None:
     print("=" * 50)
-    print("TETO V2.1.1 ROBOT PRIM INSPECTION")
+    print("TETO V2.1.2 ROBOT JOINT METADATA INSPECTION")
     print("=" * 50)
     print(f"Status: {result['status']}")
     print(f"Mode: {result['mode']}")
@@ -118,6 +118,15 @@ def print_summary(result: dict, report_path: Path) -> None:
     print(f"visual_like_prim_count: {inspection.get('visual_like_prim_count')}")
     print(f"collision_like_prim_count: {inspection.get('collision_like_prim_count')}")
     print(f"articulation_root_found: {inspection.get('articulation_root_found')}")
+    joint_summary = inspection.get("joint_metadata_summary") or {}
+    print(f"arm_joint_count: {joint_summary.get('arm_joint_count')}")
+    print(f"arm_joint_names: {joint_summary.get('arm_joint_names')}")
+    print(f"structural_joint_count: {joint_summary.get('structural_joint_count')}")
+    print(f"structural_joint_names: {joint_summary.get('structural_joint_names')}")
+    print(f"gripper_or_tool_joint_count: {joint_summary.get('gripper_or_tool_joint_count')}")
+    print(f"gripper_or_tool_joint_names: {joint_summary.get('gripper_or_tool_joint_names')}")
+    print(f"unknown_joint_count: {joint_summary.get('unknown_joint_count')}")
+    print(f"unknown_joint_names: {joint_summary.get('unknown_joint_names')}")
     print(f"Report: {report_path}")
     if result.get("blocking_reasons"):
         print(f"Blocking reasons: {', '.join(result['blocking_reasons'])}")

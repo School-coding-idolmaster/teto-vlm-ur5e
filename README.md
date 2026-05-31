@@ -822,11 +822,13 @@ network/Nucleus, connect ROS2, MoveIt, UR5 hardware, RTDE, or URScript,
 generate joint angles, generate `tcp_pose_world`, read or write robot joint
 state, capture screenshots or video, or control a robot.
 
-## TETO V2.1.1 UR5e Prim Inspection
+## TETO V2.1.2 UR5e Articulation and Joint Metadata Report Polish
 
-TETO V2.1.1 adds a read-only robot prim inspection smoke test on top of the
-V2.1.0 robot asset loader contract. It is intended to inspect the USD stage
-structure under `/World/TETO_Robot` after a robot asset has been loaded.
+TETO V2.1.2 keeps the V2.1.1 read-only robot prim inspection smoke test and
+polishes the articulation / joint metadata report. It is intended to inspect
+the USD stage structure under `/World/TETO_Robot` after a robot asset has been
+loaded, then classify joint-like metadata entries so they are not mistaken for
+robot control readiness.
 
 This is not robot control. The inspection only reads prim paths, type names,
 applied API schemas, descendant counts, link-like prims, joint-like prims,
@@ -835,6 +837,18 @@ possible DOF names/counts derived from joint-like prim names. It does not
 generate joint targets, joint angles, trajectories, URScript,
 `tcp_pose_world`, ROS2 messages, MoveIt requests, RTDE commands, or real UR5
 control actions.
+
+V2.1.2 classifies joint-like metadata into:
+
+- UR5e arm joints: `shoulder_pan_joint`, `shoulder_lift_joint`,
+  `elbow_joint`, `wrist_1_joint`, `wrist_2_joint`, `wrist_3_joint`
+- structural joints: `root_joint`
+- gripper/tool joints: `robot_gripper_joint`
+- unknown joints: any future joint-like metadata name not covered above
+
+`possible_dof_count` and `possible_dof_names` are metadata candidate counts
+only. They are not joint targets, not joint commands, and do not indicate robot
+control capability.
 
 Use dry-run mode to verify the report/evidence shape without Isaac:
 
@@ -869,13 +883,16 @@ The structured report includes:
 - `robot_prim_inspection.joint_prim_paths`
 - `robot_prim_inspection.possible_dof_names`
 - `robot_prim_inspection.possible_dof_count`
+- `robot_prim_inspection.joint_metadata_summary`
+- `robot_prim_inspection.joint_metadata_table`
 - `robot_prim_inspection.inspection_status`
 - `robot_prim_inspection.inspection_warnings`
 
 Evidence export adds a `Robot Prim Inspection` section to `summary.md`, a
+`Joint Metadata Classification` table in `summary.md`, a
 `robot_prim_inspection` object in `evidence_manifest.json`, and
-`robot_prim_inspection.json` when inspection is requested. Screenshot and
-video placeholders remain null.
+`robot_prim_inspection.json` when inspection is requested. Screenshot and video
+placeholders remain null.
 
 Demo commands accept common image formats directly. TETO automatically
 creates a cached RGB JPEG under `data/processed/auto/`, with EXIF orientation

@@ -12,7 +12,7 @@ from src.robot_prim_inspector import build_robot_prim_inspection_report, inspect
 
 
 REPORT_VERSION = "teto_simulation_execution.v1"
-CURRENT_TETO_VERSION = "TETO V2.1.1"
+CURRENT_TETO_VERSION = "TETO V2.1.2"
 DEFAULT_STEPS = 5
 DEFAULT_SIMULATION_OBJECT_TYPE = "cube"
 DEFAULT_CUBE_PRIM_PATH = "/World/TETO_Cube"

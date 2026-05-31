@@ -211,6 +211,10 @@ def test_dry_run_robot_prim_inspection_returns_not_found_diagnostic():
     assert inspection["robot_prim_path"] == DEFAULT_ROBOT_PRIM_PATH
     assert inspection["robot_prim_exists"] is False
     assert inspection["inspection_status"] == "E_ROBOT_PRIM_NOT_FOUND"
+    assert inspection["joint_metadata_summary"]["metadata_only"] is True
+    assert inspection["joint_metadata_summary"]["control_ready"] is False
+    assert inspection["joint_metadata_summary"]["control_targets_generated"] is False
+    assert inspection["joint_metadata_table"] == []
     for key in (
         "total_descendant_prim_count",
         "link_like_prim_count",

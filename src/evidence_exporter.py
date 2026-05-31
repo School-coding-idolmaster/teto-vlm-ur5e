@@ -142,6 +142,8 @@ def _robot_prim_inspection_info(result: Dict[str, Any]) -> Dict[str, Any]:
         "joint_prim_paths": inspection.get("joint_prim_paths", []),
         "possible_dof_names": inspection.get("possible_dof_names", []),
         "possible_dof_count": inspection.get("possible_dof_count", 0),
+        "joint_metadata_summary": inspection.get("joint_metadata_summary", {}),
+        "joint_metadata_table": inspection.get("joint_metadata_table", []),
         "inspection_status": inspection.get("inspection_status", "NOT_REQUESTED"),
         "inspection_warnings": inspection.get("inspection_warnings", []),
     }
@@ -158,6 +160,7 @@ def _build_summary_markdown(
     report_path: str | None,
 ) -> str:
     error = result.get("error") if isinstance(result.get("error"), dict) else {}
+    joint_summary = robot_prim_inspection_info.get("joint_metadata_summary") or {}
     return "\n".join(
         [
             "# TETO Simulation Evidence Summary",
@@ -209,6 +212,29 @@ def _build_summary_markdown(
             f"- inspection status: {_format_value(robot_prim_inspection_info.get('inspection_status'))}",
             f"- inspection warnings: {_format_value(robot_prim_inspection_info.get('inspection_warnings'))}",
             "",
+            "### Joint Metadata Classification",
+            "",
+            "| Category | Count | Names |",
+            "| --- | ---: | --- |",
+            _joint_category_row("Arm joints", joint_summary.get("arm_joint_count"), joint_summary.get("arm_joint_names")),
+            _joint_category_row(
+                "Structural joints",
+                joint_summary.get("structural_joint_count"),
+                joint_summary.get("structural_joint_names"),
+            ),
+            _joint_category_row(
+                "Gripper/tool joints",
+                joint_summary.get("gripper_or_tool_joint_count"),
+                joint_summary.get("gripper_or_tool_joint_names"),
+            ),
+            _joint_category_row(
+                "Unknown joints",
+                joint_summary.get("unknown_joint_count"),
+                joint_summary.get("unknown_joint_names"),
+            ),
+            "",
+            "These entries are read-only USD metadata records. They are not joint targets, not joint commands, and do not indicate robot control capability.",
+            "",
         ]
     )
 
@@ -256,3 +282,9 @@ def _format_value(value: Any) -> str:
     if isinstance(value, (list, dict)):
         return json.dumps(value, ensure_ascii=False)
     return str(value)
+
+
+def _joint_category_row(label: str, count: Any, names: Any) -> str:
+    normalized_names = names if isinstance(names, list) else []
+    names_text = ", ".join(str(name) for name in normalized_names) if normalized_names else "-"
+    return f"| {label} | {_format_value(count if count is not None else 0)} | {names_text} |"

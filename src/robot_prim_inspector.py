@@ -7,6 +7,16 @@ INSPECTION_STATUS_NOT_REQUESTED = "NOT_REQUESTED"
 INSPECTION_STATUS_OK = "OK"
 INSPECTION_STATUS_PRIM_NOT_FOUND = "E_ROBOT_PRIM_NOT_FOUND"
 INSPECTION_STATUS_FAILED = "E_ROBOT_PRIM_INSPECTION_FAILED"
+UR5E_ARM_JOINT_NAMES = (
+    "shoulder_pan_joint",
+    "shoulder_lift_joint",
+    "elbow_joint",
+    "wrist_1_joint",
+    "wrist_2_joint",
+    "wrist_3_joint",
+)
+STRUCTURAL_JOINT_NAMES = ("root_joint",)
+GRIPPER_OR_TOOL_JOINT_NAMES = ("robot_gripper_joint",)
 
 
 def build_robot_prim_inspection_report(
@@ -24,6 +34,10 @@ def build_robot_prim_inspection_report(
     physics_schema_summary: list[str] | None = None,
     joint_names: list[str] | None = None,
     joint_prim_paths: list[str] | None = None,
+    joint_type_names: list[str | None] | None = None,
+    joint_applied_schemas: list[list[str]] | None = None,
+    joint_parent_paths: list[str | None] | None = None,
+    joint_child_paths: list[str | None] | None = None,
     possible_dof_names: list[str] | None = None,
     possible_dof_count: int | None = None,
     inspection_status: str | None = None,
@@ -38,6 +52,16 @@ def build_robot_prim_inspection_report(
             inspection_status = INSPECTION_STATUS_PRIM_NOT_FOUND
 
     normalized_joint_names = joint_names or []
+    normalized_joint_paths = joint_prim_paths or []
+    joint_metadata_table = build_joint_metadata_table(
+        joint_names=normalized_joint_names,
+        joint_prim_paths=normalized_joint_paths,
+        joint_type_names=joint_type_names,
+        joint_applied_schemas=joint_applied_schemas,
+        joint_parent_paths=joint_parent_paths,
+        joint_child_paths=joint_child_paths,
+    )
+    joint_metadata_summary = build_joint_metadata_summary(joint_metadata_table)
     normalized_dof_names = possible_dof_names if possible_dof_names is not None else normalized_joint_names
     return {
         "requested": requested,
@@ -52,12 +76,85 @@ def build_robot_prim_inspection_report(
         "articulation_root_found": articulation_root_found,
         "physics_schema_summary": sorted(set(physics_schema_summary or [])),
         "joint_names": normalized_joint_names,
-        "joint_prim_paths": joint_prim_paths or [],
+        "joint_prim_paths": normalized_joint_paths,
         "possible_dof_names": normalized_dof_names,
         "possible_dof_count": int(possible_dof_count if possible_dof_count is not None else len(normalized_dof_names)),
+        "joint_metadata_summary": joint_metadata_summary,
+        "joint_metadata_table": joint_metadata_table,
         "inspection_status": inspection_status,
         "inspection_warnings": inspection_warnings or [],
     }
+
+
+def build_joint_metadata_table(
+    *,
+    joint_names: list[str],
+    joint_prim_paths: list[str],
+    joint_type_names: list[str | None] | None = None,
+    joint_applied_schemas: list[list[str]] | None = None,
+    joint_parent_paths: list[str | None] | None = None,
+    joint_child_paths: list[str | None] | None = None,
+) -> list[Dict[str, Any]]:
+    table = []
+    for index, joint_name in enumerate(joint_names):
+        category = categorize_joint_name(joint_name)
+        table.append(
+            {
+                "joint_name": joint_name,
+                "joint_prim_path": _list_get(joint_prim_paths, index),
+                "joint_type_name": _list_get(joint_type_names or [], index),
+                "category": category,
+                "is_ur5e_arm_joint": category == "arm",
+                "metadata_only": True,
+                "control_target_generated": False,
+                "applied_schemas": _list_get(joint_applied_schemas or [], index, default=[]),
+                "parent_path": _list_get(joint_parent_paths or [], index),
+                "child_path": _list_get(joint_child_paths or [], index),
+            }
+        )
+    return table
+
+
+def build_joint_metadata_summary(joint_metadata_table: list[Dict[str, Any]]) -> Dict[str, Any]:
+    names_by_category = {
+        "arm": [],
+        "structural": [],
+        "gripper_or_tool": [],
+        "unknown": [],
+    }
+    for row in joint_metadata_table:
+        category = row.get("category") if row.get("category") in names_by_category else "unknown"
+        names_by_category[category].append(row.get("joint_name"))
+
+    possible_dof_names = [row.get("joint_name") for row in joint_metadata_table]
+    return {
+        "possible_dof_count": len(possible_dof_names),
+        "possible_dof_names": possible_dof_names,
+        "arm_joint_count": len(names_by_category["arm"]),
+        "arm_joint_names": names_by_category["arm"],
+        "structural_joint_count": len(names_by_category["structural"]),
+        "structural_joint_names": names_by_category["structural"],
+        "gripper_or_tool_joint_count": len(names_by_category["gripper_or_tool"]),
+        "gripper_or_tool_joint_names": names_by_category["gripper_or_tool"],
+        "unknown_joint_count": len(names_by_category["unknown"]),
+        "unknown_joint_names": names_by_category["unknown"],
+        "metadata_only": True,
+        "control_ready": False,
+        "control_targets_generated": False,
+    }
+
+
+def categorize_joint_name(joint_name: str) -> str:
+    if joint_name in UR5E_ARM_JOINT_NAMES:
+        return "arm"
+    if joint_name in STRUCTURAL_JOINT_NAMES:
+        return "structural"
+    if joint_name in GRIPPER_OR_TOOL_JOINT_NAMES:
+        return "gripper_or_tool"
+    lowered = joint_name.lower()
+    if "gripper" in lowered or "tool" in lowered:
+        return "gripper_or_tool"
+    return "unknown"
 
 
 def inspect_robot_prim(world=None, *, stage=None, robot_prim_path: str) -> Dict[str, Any]:
@@ -84,6 +181,7 @@ def inspect_robot_prim(world=None, *, stage=None, robot_prim_path: str) -> Dict[
         joint_prims = [prim for prim in descendants if _is_joint_like(prim)]
         joint_names = [_prim_name(prim) for prim in joint_prims]
         joint_prim_paths = [_prim_path(prim) for prim in joint_prims]
+        joint_body_paths = [_joint_body_paths(prim) for prim in joint_prims]
         physics_schemas = sorted(
             {
                 schema
@@ -107,6 +205,10 @@ def inspect_robot_prim(world=None, *, stage=None, robot_prim_path: str) -> Dict[
             physics_schema_summary=physics_schemas,
             joint_names=joint_names,
             joint_prim_paths=joint_prim_paths,
+            joint_type_names=[_type_name(prim) for prim in joint_prims],
+            joint_applied_schemas=[_applied_schemas(prim) for prim in joint_prims],
+            joint_parent_paths=[body_paths[0] for body_paths in joint_body_paths],
+            joint_child_paths=[body_paths[1] for body_paths in joint_body_paths],
             possible_dof_names=joint_names,
             possible_dof_count=len(joint_names),
             inspection_status=INSPECTION_STATUS_OK,
@@ -181,6 +283,29 @@ def _applied_schemas(prim) -> list[str]:
     if callable(get_applied_schemas):
         return [str(schema) for schema in get_applied_schemas()]
     return [str(schema) for schema in getattr(prim, "applied_schemas", [])]
+
+
+def _joint_body_paths(prim) -> tuple[str | None, str | None]:
+    return _relationship_target(prim, "physics:body0"), _relationship_target(prim, "physics:body1")
+
+
+def _relationship_target(prim, relationship_name: str) -> str | None:
+    get_relationship = getattr(prim, "GetRelationship", None)
+    if not callable(get_relationship):
+        return None
+    try:
+        relationship = get_relationship(relationship_name)
+        get_targets = getattr(relationship, "GetTargets", None)
+        if not callable(get_targets):
+            return None
+        targets = list(get_targets())
+    except Exception:
+        return None
+    return str(targets[0]) if targets else None
+
+
+def _list_get(values: list[Any], index: int, default=None):
+    return values[index] if index < len(values) else default
 
 
 def _classification_text(prim) -> str:
