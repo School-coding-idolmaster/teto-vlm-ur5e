@@ -822,6 +822,61 @@ network/Nucleus, connect ROS2, MoveIt, UR5 hardware, RTDE, or URScript,
 generate joint angles, generate `tcp_pose_world`, read or write robot joint
 state, capture screenshots or video, or control a robot.
 
+## TETO V2.1.1 UR5e Prim Inspection
+
+TETO V2.1.1 adds a read-only robot prim inspection smoke test on top of the
+V2.1.0 robot asset loader contract. It is intended to inspect the USD stage
+structure under `/World/TETO_Robot` after a robot asset has been loaded.
+
+This is not robot control. The inspection only reads prim paths, type names,
+applied API schemas, descendant counts, link-like prims, joint-like prims,
+visual-like prims, collision-like prims, articulation-root indicators, and
+possible DOF names/counts derived from joint-like prim names. It does not
+generate joint targets, joint angles, trajectories, URScript,
+`tcp_pose_world`, ROS2 messages, MoveIt requests, RTDE commands, or real UR5
+control actions.
+
+Use dry-run mode to verify the report/evidence shape without Isaac:
+
+```bash
+python3 scripts/run_first_simulation_execution.py --dry-run --steps 1 --inspect-robot-prim
+```
+
+Use true Isaac mode with a local UR5e USD to inspect the loaded prim:
+
+```bash
+PYTHONPATH=. /home/newusername/Storage/home/wu-zijian/下载/isaac-sim-standalone-5.1.0-linux-x86_64/python.sh scripts/run_first_simulation_execution.py \
+  --steps 1 \
+  --load-robot-asset \
+  --robot-asset-path /home/newusername/Storage/isaac_assets/Isaac/Robots/UniversalRobots/ur5e/ur5e.usd \
+  --inspect-robot-prim
+```
+
+The structured report includes:
+
+- `robot_prim_inspection_requested`
+- `robot_prim_inspection.robot_prim_path`
+- `robot_prim_inspection.robot_prim_exists`
+- `robot_prim_inspection.robot_root_type_name`
+- `robot_prim_inspection.total_descendant_prim_count`
+- `robot_prim_inspection.link_like_prim_count`
+- `robot_prim_inspection.joint_like_prim_count`
+- `robot_prim_inspection.visual_like_prim_count`
+- `robot_prim_inspection.collision_like_prim_count`
+- `robot_prim_inspection.articulation_root_found`
+- `robot_prim_inspection.physics_schema_summary`
+- `robot_prim_inspection.joint_names`
+- `robot_prim_inspection.joint_prim_paths`
+- `robot_prim_inspection.possible_dof_names`
+- `robot_prim_inspection.possible_dof_count`
+- `robot_prim_inspection.inspection_status`
+- `robot_prim_inspection.inspection_warnings`
+
+Evidence export adds a `Robot Prim Inspection` section to `summary.md`, a
+`robot_prim_inspection` object in `evidence_manifest.json`, and
+`robot_prim_inspection.json` when inspection is requested. Screenshot and
+video placeholders remain null.
+
 Demo commands accept common image formats directly. TETO automatically
 creates a cached RGB JPEG under `data/processed/auto/`, with EXIF orientation
 applied, long edge resized, animated images reduced to the first frame, and

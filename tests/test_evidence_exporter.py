@@ -37,7 +37,7 @@ def test_dry_run_execution_writes_evidence_artifacts(tmp_path):
     assert manifest_path.exists()
 
     summary = summary_path.read_text(encoding="utf-8")
-    assert "TETO version: TETO V2.1.0" in summary
+    assert "TETO version: TETO V2.1.1" in summary
     assert f"run_id: {tmp_path.name}" in summary
     assert "mode: dry_run" in summary
     assert "status: PASS" in summary
@@ -49,6 +49,8 @@ def test_dry_run_execution_writes_evidence_artifacts(tmp_path):
     assert "object prim path: /World/TETO_Cube" in summary
     assert "## Robot Asset" in summary
     assert "robot asset available: False" in summary
+    assert "## Robot Prim Inspection" in summary
+    assert "inspection status: NOT_REQUESTED" in summary
     assert f"report path: {report_path}" in summary
 
     demo_command = demo_command_path.read_text(encoding="utf-8")
@@ -57,6 +59,7 @@ def test_dry_run_execution_writes_evidence_artifacts(tmp_path):
     assert "steps_requested=3" in demo_command
     assert "move_object=True" in demo_command
     assert "check_robot_asset=False" in demo_command
+    assert "inspect_robot_prim=False" in demo_command
 
     pose_delta = pose_delta_path.read_text(encoding="utf-8")
     assert "initial_position: [0.0, 0.0, 0.5]" in pose_delta
@@ -68,7 +71,7 @@ def test_dry_run_execution_writes_evidence_artifacts(tmp_path):
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["schema_version"] == EVIDENCE_MANIFEST_SCHEMA_VERSION
     assert manifest["run_id"] == tmp_path.name
-    assert manifest["teto_version"] == "TETO V2.1.0"
+    assert manifest["teto_version"] == "TETO V2.1.1"
     assert manifest["mode"] == "dry_run"
     assert manifest["status"] == "PASS"
     assert manifest["report_path"] == str(report_path)
@@ -77,6 +80,9 @@ def test_dry_run_execution_writes_evidence_artifacts(tmp_path):
     assert manifest["pose_delta_path"] == str(pose_delta_path)
     assert manifest["robot_asset"]["robot_asset_available"] is False
     assert manifest["robot_asset"]["robot_asset_loaded"] is False
+    assert manifest["robot_prim_inspection"]["requested"] is False
+    assert manifest["robot_prim_inspection"]["inspection_status"] == "NOT_REQUESTED"
+    assert manifest["robot_prim_inspection_path"] is None
     assert manifest["screenshot_before_path"] is None
     assert manifest["screenshot_after_path"] is None
     assert manifest["video_path"] is None
@@ -120,6 +126,38 @@ def test_evidence_exporter_writes_robot_asset_metadata(tmp_path):
         "robot_asset_blocking_reason": "E_ROBOT_ASSET_UNAVAILABLE",
     }
     assert result["robot_asset_status"] == "UNAVAILABLE"
+
+
+def test_evidence_exporter_writes_robot_prim_inspection_metadata(tmp_path):
+    result = run_first_simulation_execution(
+        VALID_TASK,
+        dry_run=True,
+        steps=1,
+        inspect_robot_prim=True,
+        output_dir=tmp_path,
+        write_report=True,
+        demo_command="python3 scripts/run_first_simulation_execution.py --dry-run --steps 1 --inspect-robot-prim",
+    )
+
+    summary = (tmp_path / "summary.md").read_text(encoding="utf-8")
+    assert "## Robot Prim Inspection" in summary
+    assert "requested: True" in summary
+    assert "robot prim path: /World/TETO_Robot" in summary
+    assert "robot prim exists: False" in summary
+    assert "inspection status: E_ROBOT_PRIM_NOT_FOUND" in summary
+
+    inspection_path = tmp_path / "robot_prim_inspection.json"
+    assert inspection_path.exists()
+    inspection = json.loads(inspection_path.read_text(encoding="utf-8"))
+    assert inspection["requested"] is True
+    assert inspection["robot_prim_path"] == "/World/TETO_Robot"
+    assert inspection["robot_prim_exists"] is False
+    assert inspection["inspection_status"] == "E_ROBOT_PRIM_NOT_FOUND"
+
+    manifest = json.loads((tmp_path / "evidence_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["robot_prim_inspection"] == inspection
+    assert manifest["robot_prim_inspection_path"] == str(inspection_path)
+    assert result["robot_prim_inspection_requested"] is True
 
 
 def test_evidence_exporter_uses_cube_fields_as_compatibility_fallback(tmp_path):

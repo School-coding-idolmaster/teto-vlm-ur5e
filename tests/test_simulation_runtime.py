@@ -54,6 +54,8 @@ def test_build_success_report_fields():
     assert result["robot_asset_load_requested"] is False
     assert result["robot_asset_available"] is False
     assert result["robot_asset_loaded"] is False
+    assert result["robot_prim_inspection_requested"] is False
+    assert result["robot_prim_inspection"]["inspection_status"] == "NOT_REQUESTED"
     assert result["blocking_reasons"] == []
     assert result["error"]["code"] == "OK"
 
@@ -158,6 +160,7 @@ def test_cli_robot_asset_arguments_parse():
             "--steps",
             "1",
             "--check-robot-asset",
+            "--inspect-robot-prim",
             "--robot-type",
             "ur5",
             "--robot-prim-path",
@@ -168,6 +171,7 @@ def test_cli_robot_asset_arguments_parse():
     )
 
     assert args.check_robot_asset is True
+    assert args.inspect_robot_prim is True
     assert args.load_robot_asset is False
     assert args.robot_type == "ur5"
     assert args.robot_prim_path == "/World/TestRobot"
@@ -194,6 +198,46 @@ def test_dry_run_robot_asset_check_passes_with_unavailable_default():
     assert result["robot_asset_status"] == "UNAVAILABLE"
     assert result["robot_asset_blocking_reason"] == "E_ROBOT_ASSET_UNAVAILABLE"
     assert result["blocking_reasons"] == []
+
+
+def test_dry_run_robot_prim_inspection_returns_not_found_diagnostic():
+    result = run_first_simulation_execution(VALID_TASK, dry_run=True, steps=1, inspect_robot_prim=True)
+    inspection = result["robot_prim_inspection"]
+
+    assert result["status"] == "PASS"
+    assert result["error"]["code"] == "OK"
+    assert result["robot_prim_inspection_requested"] is True
+    assert inspection["requested"] is True
+    assert inspection["robot_prim_path"] == DEFAULT_ROBOT_PRIM_PATH
+    assert inspection["robot_prim_exists"] is False
+    assert inspection["inspection_status"] == "E_ROBOT_PRIM_NOT_FOUND"
+    for key in (
+        "total_descendant_prim_count",
+        "link_like_prim_count",
+        "joint_like_prim_count",
+        "visual_like_prim_count",
+        "collision_like_prim_count",
+        "possible_dof_count",
+    ):
+        assert isinstance(inspection[key], int)
+        assert inspection[key] >= 0
+
+
+def test_inspect_robot_prim_does_not_add_motion_control_fields():
+    result = run_first_simulation_execution(VALID_TASK, dry_run=True, steps=1, inspect_robot_prim=True)
+    serialized_keys = " ".join(result.keys()) + " " + " ".join(result["robot_prim_inspection"].keys())
+
+    for forbidden in (
+        "joint_target",
+        "joint_angles",
+        "tcp_pose_world",
+        "actual_TCP_pose",
+        "URScript",
+        "RTDE",
+        "MoveIt",
+        "ROS2",
+    ):
+        assert forbidden not in serialized_keys
 
 
 def test_explicit_invalid_robot_asset_load_fails_without_isaac():

@@ -21,9 +21,11 @@ def export_simulation_evidence(
     demo_command_path = output_dir / "demo_command.txt"
     pose_delta_path = output_dir / "pose_delta.md"
     manifest_path = output_dir / "evidence_manifest.json"
+    robot_prim_inspection_path = output_dir / "robot_prim_inspection.json"
 
     object_info = _simulation_object_info(result)
     robot_asset_info = _robot_asset_info(result)
+    robot_prim_inspection_info = _robot_prim_inspection_info(result)
     run_id = output_dir.name
     created_at = result.get("finished_at") or result.get("started_at")
     report_path = result.get("report_path")
@@ -33,6 +35,7 @@ def export_simulation_evidence(
             result,
             object_info=object_info,
             robot_asset_info=robot_asset_info,
+            robot_prim_inspection_info=robot_prim_inspection_info,
             run_id=run_id,
             created_at=created_at,
             report_path=report_path,
@@ -47,6 +50,10 @@ def export_simulation_evidence(
         _build_pose_delta_markdown(result, object_info=object_info),
         encoding="utf-8",
     )
+    if robot_prim_inspection_info.get("requested"):
+        with robot_prim_inspection_path.open("w", encoding="utf-8") as inspection_file:
+            json.dump(robot_prim_inspection_info, inspection_file, ensure_ascii=False, indent=2)
+            inspection_file.write("\n")
 
     manifest = {
         "schema_version": EVIDENCE_MANIFEST_SCHEMA_VERSION,
@@ -60,6 +67,10 @@ def export_simulation_evidence(
         "demo_command_path": str(demo_command_path),
         "pose_delta_path": str(pose_delta_path),
         "robot_asset": robot_asset_info,
+        "robot_prim_inspection": robot_prim_inspection_info,
+        "robot_prim_inspection_path": str(robot_prim_inspection_path)
+        if robot_prim_inspection_info.get("requested")
+        else None,
         "screenshot_before_path": None,
         "screenshot_after_path": None,
         "video_path": None,
@@ -73,6 +84,7 @@ def export_simulation_evidence(
         "demo_command_path": demo_command_path,
         "pose_delta_path": pose_delta_path,
         "evidence_manifest_path": manifest_path,
+        "robot_prim_inspection_path": robot_prim_inspection_path,
     }
 
 
@@ -110,11 +122,37 @@ def _robot_asset_info(result: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _robot_prim_inspection_info(result: Dict[str, Any]) -> Dict[str, Any]:
+    inspection = result.get("robot_prim_inspection")
+    if not isinstance(inspection, dict):
+        inspection = {}
+    return {
+        "requested": result.get("robot_prim_inspection_requested", inspection.get("requested", False)),
+        "robot_prim_path": inspection.get("robot_prim_path"),
+        "robot_prim_exists": inspection.get("robot_prim_exists", False),
+        "robot_root_type_name": inspection.get("robot_root_type_name"),
+        "total_descendant_prim_count": inspection.get("total_descendant_prim_count", 0),
+        "link_like_prim_count": inspection.get("link_like_prim_count", 0),
+        "joint_like_prim_count": inspection.get("joint_like_prim_count", 0),
+        "visual_like_prim_count": inspection.get("visual_like_prim_count", 0),
+        "collision_like_prim_count": inspection.get("collision_like_prim_count", 0),
+        "articulation_root_found": inspection.get("articulation_root_found", False),
+        "physics_schema_summary": inspection.get("physics_schema_summary", []),
+        "joint_names": inspection.get("joint_names", []),
+        "joint_prim_paths": inspection.get("joint_prim_paths", []),
+        "possible_dof_names": inspection.get("possible_dof_names", []),
+        "possible_dof_count": inspection.get("possible_dof_count", 0),
+        "inspection_status": inspection.get("inspection_status", "NOT_REQUESTED"),
+        "inspection_warnings": inspection.get("inspection_warnings", []),
+    }
+
+
 def _build_summary_markdown(
     result: Dict[str, Any],
     *,
     object_info: Dict[str, Any],
     robot_asset_info: Dict[str, Any],
+    robot_prim_inspection_info: Dict[str, Any],
     run_id: str,
     created_at: str | None,
     report_path: str | None,
@@ -155,6 +193,22 @@ def _build_summary_markdown(
             f"- robot asset status: {_format_value(robot_asset_info.get('robot_asset_status'))}",
             f"- robot asset blocking reason: {_format_value(robot_asset_info.get('robot_asset_blocking_reason'))}",
             "",
+            "## Robot Prim Inspection",
+            "",
+            f"- requested: {_format_value(robot_prim_inspection_info.get('requested'))}",
+            f"- robot prim path: {_format_value(robot_prim_inspection_info.get('robot_prim_path'))}",
+            f"- robot prim exists: {_format_value(robot_prim_inspection_info.get('robot_prim_exists'))}",
+            f"- robot root type name: {_format_value(robot_prim_inspection_info.get('robot_root_type_name'))}",
+            f"- total descendant prim count: {_format_value(robot_prim_inspection_info.get('total_descendant_prim_count'))}",
+            f"- link-like prim count: {_format_value(robot_prim_inspection_info.get('link_like_prim_count'))}",
+            f"- joint-like prim count: {_format_value(robot_prim_inspection_info.get('joint_like_prim_count'))}",
+            f"- visual-like prim count: {_format_value(robot_prim_inspection_info.get('visual_like_prim_count'))}",
+            f"- collision-like prim count: {_format_value(robot_prim_inspection_info.get('collision_like_prim_count'))}",
+            f"- articulation root found: {_format_value(robot_prim_inspection_info.get('articulation_root_found'))}",
+            f"- possible DOF count: {_format_value(robot_prim_inspection_info.get('possible_dof_count'))}",
+            f"- inspection status: {_format_value(robot_prim_inspection_info.get('inspection_status'))}",
+            f"- inspection warnings: {_format_value(robot_prim_inspection_info.get('inspection_warnings'))}",
+            "",
         ]
     )
 
@@ -176,6 +230,7 @@ def _build_demo_command_text(result: Dict[str, Any], *, demo_command: str | None
         f"load_robot_asset={_format_value(result.get('robot_asset_load_requested'))}",
         f"robot_type={_format_value(result.get('robot_type'))}",
         f"robot_asset_path={_format_value(result.get('robot_asset_path'))}",
+        f"inspect_robot_prim={_format_value(result.get('robot_prim_inspection_requested'))}",
     ]
     return "\n".join(lines) + "\n"
 

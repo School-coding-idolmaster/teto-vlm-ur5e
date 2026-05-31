@@ -8,10 +8,11 @@ from pathlib import Path
 from typing import Any, Dict
 
 from src.evidence_exporter import export_simulation_evidence
+from src.robot_prim_inspector import build_robot_prim_inspection_report, inspect_robot_prim as inspect_robot_prim_in_stage
 
 
 REPORT_VERSION = "teto_simulation_execution.v1"
-CURRENT_TETO_VERSION = "TETO V2.1.0"
+CURRENT_TETO_VERSION = "TETO V2.1.1"
 DEFAULT_STEPS = 5
 DEFAULT_SIMULATION_OBJECT_TYPE = "cube"
 DEFAULT_CUBE_PRIM_PATH = "/World/TETO_Cube"
@@ -62,6 +63,7 @@ def build_simulation_execution_result(
     error_message: str = "",
     object_metadata: Dict[str, Any] | None = None,
     robot_asset_metadata: Dict[str, Any] | None = None,
+    robot_prim_inspection_metadata: Dict[str, Any] | None = None,
     started_at: str | None = None,
     finished_at: str | None = None,
 ) -> Dict[str, Any]:
@@ -93,6 +95,7 @@ def build_simulation_execution_result(
     }
     result.update(object_metadata or _simulation_object_report_fields())
     result.update(robot_asset_metadata or _robot_asset_report_fields())
+    result.update(robot_prim_inspection_metadata or _robot_prim_inspection_report_fields())
     return result
 
 
@@ -117,6 +120,7 @@ def run_first_simulation_execution(
     robot_prim_path: str = DEFAULT_ROBOT_PRIM_PATH,
     robot_asset_path: str | None = None,
     robot_asset_spec: RobotAssetSpec | None = None,
+    inspect_robot_prim: bool = False,
     output_dir: str | Path | None = None,
     write_report: bool = False,
     demo_command: str | None = None,
@@ -156,6 +160,10 @@ def run_first_simulation_execution(
                     check_requested=effective_check_robot_asset,
                     load_requested=load_robot_asset,
                 ),
+                robot_prim_inspection_metadata=_robot_prim_inspection_report_fields(
+                    spec=effective_robot_asset_spec,
+                    requested=inspect_robot_prim,
+                ),
                 error_code="E_INVALID_STEPS",
                 error_message="steps must be a positive integer",
                 started_at=started_at,
@@ -184,6 +192,10 @@ def run_first_simulation_execution(
                     check_requested=effective_check_robot_asset,
                     load_requested=load_robot_asset,
                 ),
+                robot_prim_inspection_metadata=_robot_prim_inspection_report_fields(
+                    spec=effective_robot_asset_spec,
+                    requested=inspect_robot_prim,
+                ),
                 error_code="E_INVALID_SIMULATION_TASK",
                 error_message=f"missing simulation task fields: {', '.join(missing_fields)}",
                 started_at=started_at,
@@ -204,6 +216,11 @@ def run_first_simulation_execution(
             )
             if effective_check_robot_asset
             else _robot_asset_report_fields()
+        )
+        robot_prim_inspection_metadata = _dry_run_robot_prim_inspection_report_fields(
+            spec=effective_robot_asset_spec,
+            requested=inspect_robot_prim,
+            prim_exists=bool(robot_asset_metadata.get("robot_prim_exists")),
         )
         if load_robot_asset and not robot_asset_metadata["robot_asset_available"]:
             return _finalize_result(
@@ -230,6 +247,7 @@ def run_first_simulation_execution(
                         status="LOAD_FAILED",
                         blocking_reason="E_ROBOT_ASSET_UNAVAILABLE",
                     ),
+                    robot_prim_inspection_metadata=robot_prim_inspection_metadata,
                     error_code="E_ROBOT_ASSET_LOAD_FAILED",
                     error_message="robot asset path is unavailable",
                     started_at=started_at,
@@ -255,6 +273,7 @@ def run_first_simulation_execution(
                     final_position=simulation_object_spec.target_position if effective_move_object else None,
                 ),
                 robot_asset_metadata=robot_asset_metadata,
+                robot_prim_inspection_metadata=robot_prim_inspection_metadata,
                 started_at=started_at,
                 finished_at=_timestamp(),
             ),
@@ -273,6 +292,7 @@ def run_first_simulation_execution(
         check_robot_asset=effective_check_robot_asset,
         load_robot_asset=load_robot_asset,
         robot_asset_spec=effective_robot_asset_spec,
+        inspect_robot_prim=inspect_robot_prim,
         started_at=started_at,
         output_dir=output_dir,
         write_report=write_report,
@@ -320,6 +340,7 @@ def _run_true_isaac_runtime(
     check_robot_asset: bool,
     load_robot_asset: bool,
     robot_asset_spec: RobotAssetSpec,
+    inspect_robot_prim: bool,
     started_at: str,
     output_dir: str | Path | None,
     write_report: bool,
@@ -344,6 +365,10 @@ def _run_true_isaac_runtime(
                     check_requested=check_robot_asset,
                     load_requested=load_robot_asset,
                 ),
+                robot_prim_inspection_metadata=_robot_prim_inspection_report_fields(
+                    spec=robot_asset_spec,
+                    requested=inspect_robot_prim,
+                ),
                 error_code="E_ISAAC_RUNTIME_FAILED",
                 error_message=str(exc),
                 started_at=started_at,
@@ -366,6 +391,7 @@ def _run_true_isaac_runtime(
         check_robot_asset=check_robot_asset,
         load_robot_asset=load_robot_asset,
         robot_asset_spec=robot_asset_spec,
+        inspect_robot_prim=inspect_robot_prim,
         started_at=started_at,
         output_dir=output_dir,
         write_report=write_report,
@@ -389,11 +415,13 @@ def _execute_isaac_world(
     check_robot_asset: bool = False,
     load_robot_asset: bool = False,
     robot_asset_spec: RobotAssetSpec | None = None,
+    inspect_robot_prim: bool = False,
     demo_command: str | None = None,
     object_spawner=None,
     object_pose_updater=None,
     robot_asset_loader=None,
     robot_prim_verifier=None,
+    robot_prim_inspector=None,
 ) -> Dict[str, Any]:
     simulation_app = None
     object_spawner = object_spawner or spawn_simulation_object
@@ -408,6 +436,11 @@ def _execute_isaac_world(
     )
     robot_asset_loader = robot_asset_loader or load_robot_asset_into_stage
     robot_prim_verifier = robot_prim_verifier or verify_robot_prim_exists
+    robot_prim_inspector = robot_prim_inspector or inspect_robot_prim_in_stage
+    robot_prim_inspection_metadata = _robot_prim_inspection_report_fields(
+        spec=robot_asset_spec,
+        requested=inspect_robot_prim,
+    )
     world_reset = False
     try:
         simulation_app = simulation_app_cls({"headless": headless})
@@ -445,6 +478,7 @@ def _execute_isaac_world(
                             world_reset=world_reset,
                             object_metadata=object_metadata,
                             robot_asset_metadata=robot_asset_metadata,
+                            robot_prim_inspection_metadata=robot_prim_inspection_metadata,
                             error_code="E_ROBOT_ASSET_LOAD_FAILED",
                             error_message="robot asset path is unavailable",
                             started_at=started_at,
@@ -477,6 +511,7 @@ def _execute_isaac_world(
                                 world_reset=world_reset,
                                 object_metadata=object_metadata,
                                 robot_asset_metadata=robot_asset_metadata,
+                                robot_prim_inspection_metadata=robot_prim_inspection_metadata,
                                 error_code="E_ROBOT_ASSET_LOAD_FAILED",
                                 error_message="robot prim was not found after loading asset",
                                 started_at=started_at,
@@ -506,6 +541,7 @@ def _execute_isaac_world(
                             world_reset=world_reset,
                             object_metadata=object_metadata,
                             robot_asset_metadata=robot_asset_metadata,
+                            robot_prim_inspection_metadata=robot_prim_inspection_metadata,
                             error_code="E_ROBOT_ASSET_LOAD_FAILED",
                             error_message=str(exc),
                             started_at=started_at,
@@ -537,6 +573,7 @@ def _execute_isaac_world(
                         world_reset=world_reset,
                         object_metadata=object_metadata,
                         robot_asset_metadata=robot_asset_metadata,
+                        robot_prim_inspection_metadata=robot_prim_inspection_metadata,
                         error_code="E_CUBE_SPAWN_FAILED",
                         error_message=str(exc),
                         started_at=started_at,
@@ -571,6 +608,7 @@ def _execute_isaac_world(
                         world_reset=world_reset,
                         object_metadata=object_metadata,
                         robot_asset_metadata=robot_asset_metadata,
+                        robot_prim_inspection_metadata=robot_prim_inspection_metadata,
                         error_code="E_SIM_OBJECT_MOVE_FAILED",
                         error_message=str(exc),
                         started_at=started_at,
@@ -580,6 +618,13 @@ def _execute_isaac_world(
                     write_report=write_report,
                     demo_command=demo_command,
                 )
+
+        if inspect_robot_prim:
+            robot_prim_inspection_metadata = _robot_prim_inspection_report_fields(
+                spec=robot_asset_spec,
+                requested=True,
+                inspection=robot_prim_inspector(world, robot_prim_path=robot_asset_spec.robot_prim_path),
+            )
 
         steps_completed = 0
         for _ in range(steps):
@@ -596,6 +641,7 @@ def _execute_isaac_world(
                 world_reset=world_reset,
                 object_metadata=object_metadata,
                 robot_asset_metadata=robot_asset_metadata,
+                robot_prim_inspection_metadata=robot_prim_inspection_metadata,
                 started_at=started_at,
                 finished_at=_timestamp(),
             ),
@@ -613,6 +659,7 @@ def _execute_isaac_world(
                 world_reset=world_reset,
                 object_metadata=object_metadata,
                 robot_asset_metadata=robot_asset_metadata,
+                robot_prim_inspection_metadata=robot_prim_inspection_metadata,
                 error_code="E_ISAAC_RUNTIME_FAILED",
                 error_message=str(exc),
                 started_at=started_at,
@@ -844,6 +891,54 @@ def _robot_asset_report_fields(
         "robot_asset_status": resolved_status,
         "robot_asset_blocking_reason": blocking_reason,
     }
+
+
+def _robot_prim_inspection_report_fields(
+    *,
+    spec: RobotAssetSpec | None = None,
+    requested: bool = False,
+    inspection: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    robot_prim_path = spec.robot_prim_path if spec else None
+    normalized_inspection = inspection or build_robot_prim_inspection_report(
+        requested=requested,
+        robot_prim_path=robot_prim_path,
+    )
+    return {
+        "robot_prim_inspection_requested": requested,
+        "robot_prim_inspection": normalized_inspection,
+    }
+
+
+def _dry_run_robot_prim_inspection_report_fields(
+    *,
+    spec: RobotAssetSpec,
+    requested: bool,
+    prim_exists: bool,
+) -> Dict[str, Any]:
+    if not requested:
+        return _robot_prim_inspection_report_fields(spec=spec, requested=False)
+    if prim_exists:
+        return _robot_prim_inspection_report_fields(
+            spec=spec,
+            requested=True,
+            inspection=build_robot_prim_inspection_report(
+                requested=True,
+                robot_prim_path=spec.robot_prim_path,
+                robot_prim_exists=True,
+                robot_root_type_name="DryRunRobot",
+                inspection_warnings=["Dry-run simulated robot prim inspection; no Isaac stage was read."],
+            ),
+        )
+    return _robot_prim_inspection_report_fields(
+        spec=spec,
+        requested=True,
+        inspection=build_robot_prim_inspection_report(
+            requested=True,
+            robot_prim_path=spec.robot_prim_path,
+            robot_prim_exists=False,
+        ),
+    )
 
 
 def _position_tuple(position: list[float] | tuple[float, float, float]) -> tuple[float, float, float]:

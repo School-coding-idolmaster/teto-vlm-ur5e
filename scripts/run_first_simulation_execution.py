@@ -13,7 +13,7 @@ from src.simulation_runtime import DEFAULT_SIMULATION_TASK, run_first_simulation
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run TETO V2.1.0 robot asset availability smoke test.")
+    parser = argparse.ArgumentParser(description="Run TETO V2.1.1 robot prim inspection smoke test.")
     parser.add_argument("--dry-run", action="store_true", help="Do not import Isaac; produce a test execution report.")
     parser.add_argument("--no-isaac", action="store_true", help="Pure Python test mode without Isaac imports.")
     parser.add_argument("--spawn-cube", action="store_true", help="Spawn a visible cube in the Isaac World.")
@@ -44,6 +44,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--robot-asset-path", help="Local USD/USDA/USDC robot asset path to check or load.")
     parser.add_argument("--robot-type", default="ur5", help="Robot type label for report metadata.")
     parser.add_argument("--robot-prim-path", default="/World/TETO_Robot", help="Prim path for a loaded robot asset.")
+    parser.add_argument(
+        "--inspect-robot-prim",
+        action="store_true",
+        help="Read robot prim structure and metadata without commanding robot motion.",
+    )
     return parser
 
 
@@ -64,6 +69,7 @@ def main() -> int:
         robot_type=args.robot_type,
         robot_prim_path=args.robot_prim_path,
         robot_asset_path=args.robot_asset_path,
+        inspect_robot_prim=args.inspect_robot_prim,
         output_dir=args.output_dir,
         write_report=True,
         demo_command=shlex.join([sys.executable, *sys.argv]),
@@ -75,7 +81,7 @@ def main() -> int:
 
 def print_summary(result: dict, report_path: Path) -> None:
     print("=" * 50)
-    print("TETO V2.1.0 ROBOT ASSET AVAILABILITY")
+    print("TETO V2.1.1 ROBOT PRIM INSPECTION")
     print("=" * 50)
     print(f"Status: {result['status']}")
     print(f"Mode: {result['mode']}")
@@ -102,6 +108,16 @@ def print_summary(result: dict, report_path: Path) -> None:
     print(f"robot_prim_exists: {result.get('robot_prim_exists')}")
     print(f"robot_asset_status: {result.get('robot_asset_status')}")
     print(f"robot_asset_blocking_reason: {result.get('robot_asset_blocking_reason')}")
+    inspection = result.get("robot_prim_inspection") or {}
+    print(f"robot_prim_inspection_requested: {result.get('robot_prim_inspection_requested')}")
+    print(f"robot_prim_inspection_status: {inspection.get('inspection_status')}")
+    print(f"robot_root_type_name: {inspection.get('robot_root_type_name')}")
+    print(f"total_descendant_prim_count: {inspection.get('total_descendant_prim_count')}")
+    print(f"link_like_prim_count: {inspection.get('link_like_prim_count')}")
+    print(f"joint_like_prim_count: {inspection.get('joint_like_prim_count')}")
+    print(f"visual_like_prim_count: {inspection.get('visual_like_prim_count')}")
+    print(f"collision_like_prim_count: {inspection.get('collision_like_prim_count')}")
+    print(f"articulation_root_found: {inspection.get('articulation_root_found')}")
     print(f"Report: {report_path}")
     if result.get("blocking_reasons"):
         print(f"Blocking reasons: {', '.join(result['blocking_reasons'])}")
