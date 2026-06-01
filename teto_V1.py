@@ -75,7 +75,7 @@ def startup_animation():
    ██║   ███████╗   ██║   ╚██████╔╝
    ╚═╝   ╚══════╝   ╚═╝    ╚═════╝
 
-              TETO V2.1.3
+              TETO V2.2.0
            -- Test Launcher --
 """
     print(RED + title + RESET)
@@ -88,7 +88,7 @@ def _clean_path(value: str) -> str:
 
 def print_menu():
     print("=" * 40)
-    print("              TETO V2.1.3")
+    print("              TETO V2.2.0")
     print("             Test Launcher")
     print("=" * 40)
     print("1. Convert images")
@@ -501,10 +501,13 @@ def handle_check_environment():
 
 def handle_first_simulation_execution():
     script_path = PROJECT_ROOT / "scripts" / "run_first_simulation_execution.py"
-    print("Running TETO V2.1.3 robot structure evidence export check in dry-run mode.")
-    print(f"For real Isaac runtime, run: {sys.executable} {script_path} --check-robot-asset")
+    print("Running TETO V2.2.0 articulation readiness contract check in dry-run mode.")
+    print(
+        f"For real Isaac runtime, run: {sys.executable} {script_path} "
+        "--inspect-robot-prim --check-articulation-readiness"
+    )
     completed = subprocess.run(
-        [sys.executable, str(script_path), "--dry-run", "--check-robot-asset"],
+        [sys.executable, str(script_path), "--dry-run", "--inspect-robot-prim", "--check-articulation-readiness"],
         cwd=PROJECT_ROOT,
         check=False,
     )

@@ -58,6 +58,11 @@ def test_build_success_report_fields():
     assert result["robot_prim_inspection"]["inspection_status"] == "NOT_REQUESTED"
     assert result["robot_structure_report_generated"] is False
     assert result["robot_structure_report_path"] is None
+    assert result["articulation_readiness_requested"] is False
+    assert result["articulation_readiness"]["readiness_status"] == "NOT_REQUESTED"
+    assert result["articulation_readiness"]["control_enabled"] is False
+    assert result["articulation_readiness"]["motion_generated"] is False
+    assert result["articulation_readiness"]["command_generated"] is False
     assert result["blocking_reasons"] == []
     assert result["error"]["code"] == "OK"
 
@@ -163,6 +168,7 @@ def test_cli_robot_asset_arguments_parse():
             "1",
             "--check-robot-asset",
             "--inspect-robot-prim",
+            "--check-articulation-readiness",
             "--robot-type",
             "ur5",
             "--robot-prim-path",
@@ -174,6 +180,7 @@ def test_cli_robot_asset_arguments_parse():
 
     assert args.check_robot_asset is True
     assert args.inspect_robot_prim is True
+    assert args.check_articulation_readiness is True
     assert args.load_robot_asset is False
     assert args.robot_type == "ur5"
     assert args.robot_prim_path == "/World/TestRobot"
@@ -229,6 +236,31 @@ def test_dry_run_robot_prim_inspection_returns_not_found_diagnostic():
     ):
         assert isinstance(inspection[key], int)
         assert inspection[key] >= 0
+
+
+def test_dry_run_articulation_readiness_returns_not_ready_diagnostic():
+    result = run_first_simulation_execution(
+        VALID_TASK,
+        dry_run=True,
+        steps=1,
+        inspect_robot_prim=True,
+        check_articulation_readiness=True,
+    )
+    readiness = result["articulation_readiness"]
+
+    assert result["status"] == "PASS"
+    assert result["error"]["code"] == "OK"
+    assert result["articulation_readiness_requested"] is True
+    assert readiness["requested"] is True
+    assert readiness["readiness_status"] == "NOT_READY"
+    assert readiness["articulation_ready"] is False
+    assert readiness["control_enabled"] is False
+    assert readiness["motion_generated"] is False
+    assert readiness["command_generated"] is False
+    assert "robot_prim" in readiness["missing_requirements"]
+    assert "articulation_root" in readiness["missing_requirements"]
+    assert "six_standard_ur5e_arm_joints" in readiness["missing_requirements"]
+    assert readiness["safety_boundary"]["read_only"] is True
 
 
 def test_inspect_robot_prim_does_not_add_motion_control_fields():

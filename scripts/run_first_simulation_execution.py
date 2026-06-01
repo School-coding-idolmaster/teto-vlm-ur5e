@@ -13,7 +13,7 @@ from src.simulation_runtime import DEFAULT_SIMULATION_TASK, run_first_simulation
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run TETO V2.1.3 robot structure evidence export smoke test.")
+    parser = argparse.ArgumentParser(description="Run TETO V2.2.0 articulation readiness contract smoke test.")
     parser.add_argument("--dry-run", action="store_true", help="Do not import Isaac; produce a test execution report.")
     parser.add_argument("--no-isaac", action="store_true", help="Pure Python test mode without Isaac imports.")
     parser.add_argument("--spawn-cube", action="store_true", help="Spawn a visible cube in the Isaac World.")
@@ -49,6 +49,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Read robot prim structure and metadata without commanding robot motion.",
     )
+    parser.add_argument(
+        "--check-articulation-readiness",
+        action="store_true",
+        help="Evaluate read-only articulation readiness without enabling control or motion.",
+    )
     return parser
 
 
@@ -70,6 +75,7 @@ def main() -> int:
         robot_prim_path=args.robot_prim_path,
         robot_asset_path=args.robot_asset_path,
         inspect_robot_prim=args.inspect_robot_prim,
+        check_articulation_readiness=args.check_articulation_readiness,
         output_dir=args.output_dir,
         write_report=True,
         demo_command=shlex.join([sys.executable, *sys.argv]),
@@ -81,7 +87,7 @@ def main() -> int:
 
 def print_summary(result: dict, report_path: Path) -> None:
     print("=" * 50)
-    print("TETO V2.1.3 ROBOT STRUCTURE EVIDENCE EXPORT")
+    print("TETO V2.2.0 ARTICULATION READINESS CONTRACT")
     print("=" * 50)
     print(f"Status: {result['status']}")
     print(f"Mode: {result['mode']}")
@@ -129,6 +135,16 @@ def print_summary(result: dict, report_path: Path) -> None:
     print(f"unknown_joint_names: {joint_summary.get('unknown_joint_names')}")
     print(f"robot_structure_report_generated: {result.get('robot_structure_report_generated')}")
     print(f"robot_structure_report_path: {result.get('robot_structure_report_path')}")
+    readiness = result.get("articulation_readiness") or {}
+    print(f"articulation_readiness_requested: {result.get('articulation_readiness_requested')}")
+    print(f"readiness_status: {readiness.get('readiness_status')}")
+    print(f"articulation_ready: {readiness.get('articulation_ready')}")
+    print(f"control_enabled: {readiness.get('control_enabled')}")
+    print(f"motion_generated: {readiness.get('motion_generated')}")
+    print(f"command_generated: {readiness.get('command_generated')}")
+    print(f"missing_requirements: {readiness.get('missing_requirements')}")
+    print(f"readiness_warnings: {readiness.get('warnings')}")
+    print(f"articulation_readiness_path: {result.get('articulation_readiness_path')}")
     print(f"Report: {report_path}")
     if result.get("blocking_reasons"):
         print(f"Blocking reasons: {', '.join(result['blocking_reasons'])}")

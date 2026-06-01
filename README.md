@@ -909,6 +909,74 @@ Screenshot and video placeholders remain null.
 - Safety Boundary
 - Presentation Summary
 
+## TETO V2.2.0 Articulation Readiness Contract
+
+TETO V2.2.0 adds a read-only articulation readiness contract on top of the
+UR5e structure report. It checks whether the loaded robot prim metadata has the
+minimum structure expected before future simulation-side articulation work:
+the robot prim exists, an articulation-root indicator is present, the six
+standard UR5e arm joint names are visible, and visual/collision prims are
+present.
+
+This is still not robot control. `READY` means the USD metadata appears ready
+for later inspection or planning integration work; it does not enable control,
+does not generate motion, and does not generate commands. The report always
+keeps:
+
+- `control_enabled=false`
+- `motion_generated=false`
+- `command_generated=false`
+- `allow_robot_motion=false`
+
+Run the dry-run evidence shape check without Isaac:
+
+```bash
+python3 scripts/run_first_simulation_execution.py --dry-run --steps 1 --inspect-robot-prim --check-articulation-readiness
+```
+
+Run true Isaac with the locally cached UR5e USD:
+
+```bash
+PYTHONPATH=. /home/newusername/Storage/home/wu-zijian/下载/isaac-sim-standalone-5.1.0-linux-x86_64/python.sh scripts/run_first_simulation_execution.py \
+  --steps 1 \
+  --load-robot-asset \
+  --robot-asset-path /home/newusername/Storage/isaac_assets/Isaac/Robots/UniversalRobots/ur5e/ur5e.usd \
+  --inspect-robot-prim \
+  --check-articulation-readiness
+```
+
+The structured report adds:
+
+- `articulation_readiness_requested`
+- `articulation_readiness.readiness_status`
+- `articulation_readiness.articulation_ready`
+- `articulation_readiness.control_enabled`
+- `articulation_readiness.motion_generated`
+- `articulation_readiness.command_generated`
+- `articulation_readiness.robot_prim_path`
+- `articulation_readiness.articulation_root_found`
+- `articulation_readiness.arm_joint_count`
+- `articulation_readiness.required_arm_joint_count`
+- `articulation_readiness.arm_joint_names`
+- `articulation_readiness.missing_arm_joint_names`
+- `articulation_readiness.extra_joint_like_names`
+- `articulation_readiness.has_visual_prims`
+- `articulation_readiness.has_collision_prims`
+- `articulation_readiness.has_robot_structure_report`
+- `articulation_readiness.missing_requirements`
+- `articulation_readiness.warnings`
+- `articulation_readiness.safety_boundary`
+
+Evidence export adds an `Articulation Readiness` section to `summary.md`, an
+`articulation_readiness` object in `evidence_manifest.json`, and
+`articulation_readiness.json` when readiness is requested. If the run also
+generates `robot_structure_report.md`, that report includes an `Articulation
+Readiness` section as well. Screenshot and video placeholders remain null.
+
+V2.2.0 does not connect ROS2, MoveIt, RTDE, URScript, or a real UR5. It does
+not generate joint targets, joint angles, `tcp_pose_world`, trajectories,
+robot commands, or any simulated robot motion.
+
 Demo commands accept common image formats directly. TETO automatically
 creates a cached RGB JPEG under `data/processed/auto/`, with EXIF orientation
 applied, long edge resized, animated images reduced to the first frame, and

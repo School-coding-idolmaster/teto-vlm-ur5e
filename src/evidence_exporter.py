@@ -23,11 +23,14 @@ def export_simulation_evidence(
     manifest_path = output_dir / "evidence_manifest.json"
     robot_prim_inspection_path = output_dir / "robot_prim_inspection.json"
     robot_structure_report_path = output_dir / "robot_structure_report.md"
+    articulation_readiness_path = output_dir / "articulation_readiness.json"
 
     object_info = _simulation_object_info(result)
     robot_asset_info = _robot_asset_info(result)
     robot_prim_inspection_info = _robot_prim_inspection_info(result)
+    articulation_readiness_info = _articulation_readiness_info(result)
     structure_report_requested = bool(robot_prim_inspection_info.get("requested"))
+    readiness_requested = bool(articulation_readiness_info.get("requested"))
     run_id = output_dir.name
     created_at = result.get("finished_at") or result.get("started_at")
     report_path = result.get("report_path")
@@ -39,6 +42,7 @@ def export_simulation_evidence(
             object_info=object_info,
             robot_asset_info=robot_asset_info,
             robot_prim_inspection_info=robot_prim_inspection_info,
+            articulation_readiness_info=articulation_readiness_info,
             robot_structure_report_path=structure_report_ref,
             run_id=run_id,
             created_at=created_at,
@@ -63,11 +67,16 @@ def export_simulation_evidence(
                 result,
                 robot_asset_info=robot_asset_info,
                 robot_prim_inspection_info=robot_prim_inspection_info,
+                articulation_readiness_info=articulation_readiness_info,
                 run_id=run_id,
                 report_path=report_path,
             ),
             encoding="utf-8",
         )
+    if readiness_requested:
+        with articulation_readiness_path.open("w", encoding="utf-8") as readiness_file:
+            json.dump(articulation_readiness_info, readiness_file, ensure_ascii=False, indent=2)
+            readiness_file.write("\n")
 
     manifest = {
         "schema_version": EVIDENCE_MANIFEST_SCHEMA_VERSION,
@@ -86,6 +95,8 @@ def export_simulation_evidence(
         if robot_prim_inspection_info.get("requested")
         else None,
         "robot_structure_report_path": structure_report_ref,
+        "articulation_readiness": articulation_readiness_info,
+        "articulation_readiness_path": str(articulation_readiness_path) if readiness_requested else None,
         "screenshot_before_path": None,
         "screenshot_after_path": None,
         "video_path": None,
@@ -101,6 +112,7 @@ def export_simulation_evidence(
         "evidence_manifest_path": manifest_path,
         "robot_prim_inspection_path": robot_prim_inspection_path,
         "robot_structure_report_path": robot_structure_report_path,
+        "articulation_readiness_path": articulation_readiness_path,
     }
 
 
@@ -165,12 +177,49 @@ def _robot_prim_inspection_info(result: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _articulation_readiness_info(result: Dict[str, Any]) -> Dict[str, Any]:
+    readiness = result.get("articulation_readiness")
+    if not isinstance(readiness, dict):
+        readiness = {}
+    return {
+        "requested": result.get("articulation_readiness_requested", readiness.get("requested", False)),
+        "readiness_status": readiness.get("readiness_status", "NOT_REQUESTED"),
+        "articulation_ready": readiness.get("articulation_ready", False),
+        "control_enabled": readiness.get("control_enabled", False),
+        "motion_generated": readiness.get("motion_generated", False),
+        "command_generated": readiness.get("command_generated", False),
+        "robot_prim_path": readiness.get("robot_prim_path"),
+        "articulation_root_found": readiness.get("articulation_root_found", False),
+        "arm_joint_count": readiness.get("arm_joint_count", 0),
+        "required_arm_joint_count": readiness.get("required_arm_joint_count", 6),
+        "arm_joint_names": readiness.get("arm_joint_names", []),
+        "missing_arm_joint_names": readiness.get("missing_arm_joint_names", []),
+        "extra_joint_like_names": readiness.get("extra_joint_like_names", []),
+        "has_visual_prims": readiness.get("has_visual_prims", False),
+        "has_collision_prims": readiness.get("has_collision_prims", False),
+        "has_robot_structure_report": readiness.get("has_robot_structure_report", False),
+        "missing_requirements": readiness.get("missing_requirements", []),
+        "warnings": readiness.get("warnings", []),
+        "safety_boundary": readiness.get(
+            "safety_boundary",
+            {
+                "read_only": True,
+                "no_robot_motion": True,
+                "no_joint_targets": True,
+                "no_tcp_pose_world": True,
+                "no_ros2_moveit_rtde_urscript": True,
+            },
+        ),
+    }
+
+
 def _build_summary_markdown(
     result: Dict[str, Any],
     *,
     object_info: Dict[str, Any],
     robot_asset_info: Dict[str, Any],
     robot_prim_inspection_info: Dict[str, Any],
+    articulation_readiness_info: Dict[str, Any],
     robot_structure_report_path: str | None,
     run_id: str,
     created_at: str | None,
@@ -253,6 +302,17 @@ def _build_summary_markdown(
             "",
             "These entries are read-only USD metadata records. They are not joint targets, not joint commands, and do not indicate robot control capability.",
             "",
+            "## Articulation Readiness",
+            "",
+            f"- requested: {_format_value(articulation_readiness_info.get('requested'))}",
+            f"- readiness_status: {_format_value(articulation_readiness_info.get('readiness_status'))}",
+            f"- articulation_ready: {_format_value(articulation_readiness_info.get('articulation_ready'))}",
+            f"- control_enabled: {_format_value(articulation_readiness_info.get('control_enabled'))}",
+            f"- motion_generated: {_format_value(articulation_readiness_info.get('motion_generated'))}",
+            f"- command_generated: {_format_value(articulation_readiness_info.get('command_generated'))}",
+            f"- missing_requirements: {_format_value(articulation_readiness_info.get('missing_requirements'))}",
+            f"- warnings: {_format_value(articulation_readiness_info.get('warnings'))}",
+            "",
         ]
     )
 
@@ -262,6 +322,7 @@ def _build_robot_structure_report_markdown(
     *,
     robot_asset_info: Dict[str, Any],
     robot_prim_inspection_info: Dict[str, Any],
+    articulation_readiness_info: Dict[str, Any],
     run_id: str,
     report_path: str | None,
 ) -> str:
@@ -331,6 +392,16 @@ def _build_robot_structure_report_markdown(
             "| --- | --- | --- | --- | --- | --- | --- |",
             *[_joint_metadata_table_row(row) for row in joint_table],
             "",
+            "## Articulation Readiness",
+            "",
+            f"- readiness_status: {_format_value(articulation_readiness_info.get('readiness_status'))}",
+            f"- articulation_ready: {_format_value(articulation_readiness_info.get('articulation_ready'))}",
+            f"- control_enabled: {_format_value(articulation_readiness_info.get('control_enabled'))}",
+            f"- motion_generated: {_format_value(articulation_readiness_info.get('motion_generated'))}",
+            f"- command_generated: {_format_value(articulation_readiness_info.get('command_generated'))}",
+            f"- missing_requirements: {_format_value(articulation_readiness_info.get('missing_requirements'))}",
+            f"- warnings: {_format_value(articulation_readiness_info.get('warnings'))}",
+            "",
             "## Safety Boundary",
             "",
             "This report is generated from read-only USD metadata inspection. It does not contain robot commands, joint targets, joint angles, tcp_pose_world, URScript, MoveIt requests, RTDE commands, or real robot control.",
@@ -365,6 +436,7 @@ def _build_demo_command_text(result: Dict[str, Any], *, demo_command: str | None
         f"robot_type={_format_value(result.get('robot_type'))}",
         f"robot_asset_path={_format_value(result.get('robot_asset_path'))}",
         f"inspect_robot_prim={_format_value(result.get('robot_prim_inspection_requested'))}",
+        f"check_articulation_readiness={_format_value(result.get('articulation_readiness_requested'))}",
     ]
     return "\n".join(lines) + "\n"
 
