@@ -26,15 +26,19 @@ def export_simulation_evidence(
     articulation_readiness_path = output_dir / "articulation_readiness.json"
     articulation_state_path = output_dir / "articulation_state.json"
     articulation_state_report_path = output_dir / "articulation_state_report.md"
+    simulation_motion_precheck_path = output_dir / "simulation_motion_precheck.json"
+    simulation_motion_precheck_report_path = output_dir / "simulation_motion_precheck_report.md"
 
     object_info = _simulation_object_info(result)
     robot_asset_info = _robot_asset_info(result)
     robot_prim_inspection_info = _robot_prim_inspection_info(result)
     articulation_readiness_info = _articulation_readiness_info(result)
     articulation_state_info = _articulation_state_info(result)
+    simulation_motion_precheck_info = _simulation_motion_precheck_info(result)
     structure_report_requested = bool(robot_prim_inspection_info.get("requested"))
     readiness_requested = bool(articulation_readiness_info.get("requested"))
     state_requested = bool(articulation_state_info.get("requested"))
+    precheck_requested = bool(simulation_motion_precheck_info.get("requested"))
     run_id = output_dir.name
     created_at = result.get("finished_at") or result.get("started_at")
     report_path = result.get("report_path")
@@ -48,6 +52,7 @@ def export_simulation_evidence(
             robot_prim_inspection_info=robot_prim_inspection_info,
             articulation_readiness_info=articulation_readiness_info,
             articulation_state_info=articulation_state_info,
+            simulation_motion_precheck_info=simulation_motion_precheck_info,
             robot_structure_report_path=structure_report_ref,
             run_id=run_id,
             created_at=created_at,
@@ -74,6 +79,7 @@ def export_simulation_evidence(
                 robot_prim_inspection_info=robot_prim_inspection_info,
                 articulation_readiness_info=articulation_readiness_info,
                 articulation_state_info=articulation_state_info,
+                simulation_motion_precheck_info=simulation_motion_precheck_info,
                 run_id=run_id,
                 report_path=report_path,
             ),
@@ -90,6 +96,18 @@ def export_simulation_evidence(
         articulation_state_report_path.write_text(
             _build_articulation_state_report_markdown(
                 articulation_state_info,
+                run_id=run_id,
+                report_path=report_path,
+            ),
+            encoding="utf-8",
+        )
+    if precheck_requested:
+        with simulation_motion_precheck_path.open("w", encoding="utf-8") as precheck_file:
+            json.dump(simulation_motion_precheck_info, precheck_file, ensure_ascii=False, indent=2)
+            precheck_file.write("\n")
+        simulation_motion_precheck_report_path.write_text(
+            _build_simulation_motion_precheck_report_markdown(
+                simulation_motion_precheck_info,
                 run_id=run_id,
                 report_path=report_path,
             ),
@@ -118,6 +136,11 @@ def export_simulation_evidence(
         "articulation_state": articulation_state_info,
         "articulation_state_path": str(articulation_state_path) if state_requested else None,
         "articulation_state_report_path": str(articulation_state_report_path) if state_requested else None,
+        "simulation_motion_precheck": simulation_motion_precheck_info,
+        "simulation_motion_precheck_path": str(simulation_motion_precheck_path) if precheck_requested else None,
+        "simulation_motion_precheck_report_path": (
+            str(simulation_motion_precheck_report_path) if precheck_requested else None
+        ),
         "screenshot_before_path": None,
         "screenshot_after_path": None,
         "video_path": None,
@@ -136,6 +159,8 @@ def export_simulation_evidence(
         "articulation_readiness_path": articulation_readiness_path,
         "articulation_state_path": articulation_state_path,
         "articulation_state_report_path": articulation_state_report_path,
+        "simulation_motion_precheck_path": simulation_motion_precheck_path,
+        "simulation_motion_precheck_report_path": simulation_motion_precheck_report_path,
     }
 
 
@@ -279,6 +304,56 @@ def _articulation_state_info(result: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _simulation_motion_precheck_info(result: Dict[str, Any]) -> Dict[str, Any]:
+    precheck = result.get("simulation_motion_precheck")
+    if not isinstance(precheck, dict):
+        precheck = {}
+    return {
+        "requested": result.get("simulation_motion_precheck_requested", precheck.get("requested", False)),
+        "status": result.get("simulation_motion_precheck_status", precheck.get("status", "NOT_REQUESTED")),
+        "ready": result.get("ready_for_simulation_motion", precheck.get("ready", False)),
+        "metadata_only": precheck.get("metadata_only", True),
+        "simulation_only": precheck.get("simulation_only", True),
+        "control_enabled": precheck.get("control_enabled", False),
+        "motion_generated": precheck.get("motion_generated", False),
+        "command_generated": precheck.get("command_generated", False),
+        "joint_targets_generated": precheck.get("joint_targets_generated", False),
+        "trajectory_generated": precheck.get("trajectory_generated", False),
+        "tcp_pose_world_generated": precheck.get("tcp_pose_world_generated", False),
+        "robot_motion_executed": precheck.get("robot_motion_executed", False),
+        "real_robot_allowed": precheck.get("real_robot_allowed", False),
+        "robot_prim_path": precheck.get("robot_prim_path"),
+        "checked_requirements": precheck.get("checked_requirements", []),
+        "missing_requirements": precheck.get("missing_requirements", []),
+        "blocking_reasons": precheck.get("blocking_reasons", []),
+        "warnings": precheck.get("warnings", []),
+        "errors": precheck.get("errors", []),
+        "arm_joint_count": precheck.get("arm_joint_count", 0),
+        "observed_joint_count": precheck.get("observed_joint_count", 0),
+        "expected_arm_joint_names": precheck.get("expected_arm_joint_names", []),
+        "observed_arm_joint_names": precheck.get("observed_arm_joint_names", []),
+        "missing_arm_joint_names": precheck.get("missing_arm_joint_names", []),
+        "extra_joint_names": precheck.get("extra_joint_names", []),
+        "non_arm_extra_joints": precheck.get("non_arm_extra_joints", []),
+        "joint_limits_available": precheck.get("joint_limits_available", False),
+        "joint_positions_within_limits": precheck.get("joint_positions_within_limits", False),
+        "joint_precheck_table": precheck.get("joint_precheck_table", []),
+        "safety_boundary": precheck.get(
+            "safety_boundary",
+            {
+                "metadata_only": True,
+                "simulation_only": True,
+                "no_robot_motion": True,
+                "no_joint_targets": True,
+                "no_trajectory": True,
+                "no_tcp_pose_world": True,
+                "no_ros2_moveit_rtde_urscript": True,
+                "no_real_robot": True,
+            },
+        ),
+    }
+
+
 def _build_summary_markdown(
     result: Dict[str, Any],
     *,
@@ -287,6 +362,7 @@ def _build_summary_markdown(
     robot_prim_inspection_info: Dict[str, Any],
     articulation_readiness_info: Dict[str, Any],
     articulation_state_info: Dict[str, Any],
+    simulation_motion_precheck_info: Dict[str, Any],
     robot_structure_report_path: str | None,
     run_id: str,
     created_at: str | None,
@@ -399,6 +475,24 @@ def _build_summary_markdown(
             f"- warnings: {_format_value(articulation_state_info.get('warnings'))}",
             f"- errors: {_format_value(articulation_state_info.get('errors'))}",
             "",
+            "## Simulation Motion Precheck Summary",
+            "",
+            f"- requested: {_format_value(simulation_motion_precheck_info.get('requested'))}",
+            f"- simulation_motion_precheck_status: {_format_value(simulation_motion_precheck_info.get('status'))}",
+            f"- ready_for_simulation_motion: {_format_value(simulation_motion_precheck_info.get('ready'))}",
+            f"- metadata_only: {_format_value(simulation_motion_precheck_info.get('metadata_only'))}",
+            f"- simulation_only: {_format_value(simulation_motion_precheck_info.get('simulation_only'))}",
+            f"- control_enabled: {_format_value(simulation_motion_precheck_info.get('control_enabled'))}",
+            f"- motion_generated: {_format_value(simulation_motion_precheck_info.get('motion_generated'))}",
+            f"- command_generated: {_format_value(simulation_motion_precheck_info.get('command_generated'))}",
+            f"- joint_targets_generated: {_format_value(simulation_motion_precheck_info.get('joint_targets_generated'))}",
+            f"- trajectory_generated: {_format_value(simulation_motion_precheck_info.get('trajectory_generated'))}",
+            f"- tcp_pose_world_generated: {_format_value(simulation_motion_precheck_info.get('tcp_pose_world_generated'))}",
+            f"- robot_motion_executed: {_format_value(simulation_motion_precheck_info.get('robot_motion_executed'))}",
+            f"- blocking_reasons: {_format_value(simulation_motion_precheck_info.get('blocking_reasons'))}",
+            f"- warnings: {_format_value(simulation_motion_precheck_info.get('warnings'))}",
+            f"- errors: {_format_value(simulation_motion_precheck_info.get('errors'))}",
+            "",
         ]
     )
 
@@ -410,6 +504,7 @@ def _build_robot_structure_report_markdown(
     robot_prim_inspection_info: Dict[str, Any],
     articulation_readiness_info: Dict[str, Any],
     articulation_state_info: Dict[str, Any],
+    simulation_motion_precheck_info: Dict[str, Any],
     run_id: str,
     report_path: str | None,
 ) -> str:
@@ -505,6 +600,22 @@ def _build_robot_structure_report_markdown(
             f"- warnings: {_format_value(articulation_state_info.get('warnings'))}",
             f"- errors: {_format_value(articulation_state_info.get('errors'))}",
             "",
+            "## Simulation Motion Precheck",
+            "",
+            f"- status: {_format_value(simulation_motion_precheck_info.get('status'))}",
+            f"- ready_for_simulation_motion: {_format_value(simulation_motion_precheck_info.get('ready'))}",
+            f"- simulation_only: {_format_value(simulation_motion_precheck_info.get('simulation_only'))}",
+            f"- control_enabled: {_format_value(simulation_motion_precheck_info.get('control_enabled'))}",
+            f"- motion_generated: {_format_value(simulation_motion_precheck_info.get('motion_generated'))}",
+            f"- command_generated: {_format_value(simulation_motion_precheck_info.get('command_generated'))}",
+            f"- joint_targets_generated: {_format_value(simulation_motion_precheck_info.get('joint_targets_generated'))}",
+            f"- trajectory_generated: {_format_value(simulation_motion_precheck_info.get('trajectory_generated'))}",
+            f"- tcp_pose_world_generated: {_format_value(simulation_motion_precheck_info.get('tcp_pose_world_generated'))}",
+            f"- robot_motion_executed: {_format_value(simulation_motion_precheck_info.get('robot_motion_executed'))}",
+            f"- blocking_reasons: {_format_value(simulation_motion_precheck_info.get('blocking_reasons'))}",
+            f"- warnings: {_format_value(simulation_motion_precheck_info.get('warnings'))}",
+            f"- errors: {_format_value(simulation_motion_precheck_info.get('errors'))}",
+            "",
             "## Safety Boundary",
             "",
             "This report is generated from read-only USD metadata inspection. It does not contain robot commands, joint targets, joint angles, tcp_pose_world, URScript, MoveIt requests, RTDE commands, or real robot control.",
@@ -541,6 +652,7 @@ def _build_demo_command_text(result: Dict[str, Any], *, demo_command: str | None
         f"inspect_robot_prim={_format_value(result.get('robot_prim_inspection_requested'))}",
         f"check_articulation_readiness={_format_value(result.get('articulation_readiness_requested'))}",
         f"observe_articulation_state={_format_value(result.get('articulation_state_observation_requested'))}",
+        f"check_simulation_motion_precheck={_format_value(result.get('simulation_motion_precheck_requested'))}",
     ]
     return "\n".join(lines) + "\n"
 
@@ -601,6 +713,75 @@ def _build_articulation_state_report_markdown(
     )
 
 
+def _build_simulation_motion_precheck_report_markdown(
+    precheck: Dict[str, Any],
+    *,
+    run_id: str,
+    report_path: str | None,
+) -> str:
+    rows = precheck.get("joint_precheck_table") if isinstance(precheck.get("joint_precheck_table"), list) else []
+    return "\n".join(
+        [
+            "# TETO Simulation Motion Precheck Report",
+            "",
+            "This report is simulation-only precheck evidence. It is metadata/state/readiness only. This version does not move the robot and does not contain robot commands, joint targets, trajectories, tcp_pose_world, URScript, MoveIt requests, RTDE commands, ROS2 messages, or real robot control.",
+            "",
+            "## Basic Information",
+            "",
+            f"- run_id: {_format_value(run_id)}",
+            f"- report_path: {_format_value(report_path)}",
+            f"- simulation_motion_precheck_status: {_format_value(precheck.get('status'))}",
+            f"- ready_for_simulation_motion: {_format_value(precheck.get('ready'))}",
+            f"- metadata_only: {_format_value(precheck.get('metadata_only'))}",
+            f"- simulation_only: {_format_value(precheck.get('simulation_only'))}",
+            f"- control_enabled: {_format_value(precheck.get('control_enabled'))}",
+            f"- motion_generated: {_format_value(precheck.get('motion_generated'))}",
+            f"- command_generated: {_format_value(precheck.get('command_generated'))}",
+            f"- joint_targets_generated: {_format_value(precheck.get('joint_targets_generated'))}",
+            f"- trajectory_generated: {_format_value(precheck.get('trajectory_generated'))}",
+            f"- tcp_pose_world_generated: {_format_value(precheck.get('tcp_pose_world_generated'))}",
+            f"- robot_motion_executed: {_format_value(precheck.get('robot_motion_executed'))}",
+            f"- real_robot_allowed: {_format_value(precheck.get('real_robot_allowed'))}",
+            "",
+            "## Requirement Summary",
+            "",
+            f"- checked_requirements: {_format_value(precheck.get('checked_requirements'))}",
+            f"- missing_requirements: {_format_value(precheck.get('missing_requirements'))}",
+            f"- blocking_reasons: {_format_value(precheck.get('blocking_reasons'))}",
+            f"- warnings: {_format_value(precheck.get('warnings'))}",
+            f"- errors: {_format_value(precheck.get('errors'))}",
+            "",
+            "## Joint Summary",
+            "",
+            f"- expected_arm_joint_names: {_format_value(precheck.get('expected_arm_joint_names'))}",
+            f"- observed_arm_joint_names: {_format_value(precheck.get('observed_arm_joint_names'))}",
+            f"- missing_arm_joint_names: {_format_value(precheck.get('missing_arm_joint_names'))}",
+            f"- extra_joint_names: {_format_value(precheck.get('extra_joint_names'))}",
+            f"- non_arm_extra_joints: {_format_value(precheck.get('non_arm_extra_joints'))}",
+            f"- joint_limits_available: {_format_value(precheck.get('joint_limits_available'))}",
+            f"- joint_positions_within_limits: {_format_value(precheck.get('joint_positions_within_limits'))}",
+            "",
+            "## Joint Limit Check Table",
+            "",
+            "| Joint name | Category | Position | Velocity | Lower limit | Upper limit | Limit available | Within limit | Precheck passed | Blocking reason | metadata_only | control_target_generated |",
+            "| --- | --- | ---: | ---: | ---: | ---: | --- | --- | --- | --- | --- | --- |",
+            *[_joint_precheck_table_row(row) for row in rows],
+            "",
+            "## Safety Boundary",
+            "",
+            f"- metadata_only: {_format_value((precheck.get('safety_boundary') or {}).get('metadata_only'))}",
+            f"- simulation_only: {_format_value((precheck.get('safety_boundary') or {}).get('simulation_only'))}",
+            f"- no_robot_motion: {_format_value((precheck.get('safety_boundary') or {}).get('no_robot_motion'))}",
+            f"- no_joint_targets: {_format_value((precheck.get('safety_boundary') or {}).get('no_joint_targets'))}",
+            f"- no_trajectory: {_format_value((precheck.get('safety_boundary') or {}).get('no_trajectory'))}",
+            f"- no_tcp_pose_world: {_format_value((precheck.get('safety_boundary') or {}).get('no_tcp_pose_world'))}",
+            f"- no_ros2_moveit_rtde_urscript: {_format_value((precheck.get('safety_boundary') or {}).get('no_ros2_moveit_rtde_urscript'))}",
+            f"- no_real_robot: {_format_value((precheck.get('safety_boundary') or {}).get('no_real_robot'))}",
+            "",
+        ]
+    )
+
+
 def _build_pose_delta_markdown(result: Dict[str, Any], *, object_info: Dict[str, Any]) -> str:
     return "\n".join(
         [
@@ -652,6 +833,23 @@ def _joint_state_table_row(row: Dict[str, Any]) -> str:
         f"| {_format_value(row.get('upper_limit'))} "
         f"| {_format_value(row.get('limit_available'))} "
         f"| {_format_value(row.get('within_limit'))} "
+        f"| {_format_value(row.get('metadata_only'))} "
+        f"| {_format_value(row.get('control_target_generated'))} |"
+    )
+
+
+def _joint_precheck_table_row(row: Dict[str, Any]) -> str:
+    return (
+        f"| {_format_value(row.get('joint_name'))} "
+        f"| {_format_value(row.get('category'))} "
+        f"| {_format_value(row.get('position'))} "
+        f"| {_format_value(row.get('velocity'))} "
+        f"| {_format_value(row.get('lower_limit'))} "
+        f"| {_format_value(row.get('upper_limit'))} "
+        f"| {_format_value(row.get('limit_available'))} "
+        f"| {_format_value(row.get('within_limit'))} "
+        f"| {_format_value(row.get('precheck_passed'))} "
+        f"| {_format_value(row.get('blocking_reason'))} "
         f"| {_format_value(row.get('metadata_only'))} "
         f"| {_format_value(row.get('control_target_generated'))} |"
     )

@@ -13,7 +13,7 @@ from src.simulation_runtime import DEFAULT_SIMULATION_TASK, run_first_simulation
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run TETO V2.3.0 articulation state observation contract smoke test.")
+    parser = argparse.ArgumentParser(description="Run TETO V2.4.0 simulation-only motion precheck contract smoke test.")
     parser.add_argument("--dry-run", action="store_true", help="Do not import Isaac; produce a test execution report.")
     parser.add_argument("--no-isaac", action="store_true", help="Pure Python test mode without Isaac imports.")
     parser.add_argument("--spawn-cube", action="store_true", help="Spawn a visible cube in the Isaac World.")
@@ -59,6 +59,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Observe read-only articulation joint state metadata without generating control targets.",
     )
+    parser.add_argument(
+        "--check-simulation-motion-precheck",
+        action="store_true",
+        help="Evaluate the simulation-only robot motion precheck gate without moving the robot.",
+    )
     return parser
 
 
@@ -82,6 +87,7 @@ def main() -> int:
         inspect_robot_prim=args.inspect_robot_prim,
         check_articulation_readiness=args.check_articulation_readiness,
         observe_articulation_state=args.observe_articulation_state,
+        check_simulation_motion_precheck=args.check_simulation_motion_precheck,
         output_dir=args.output_dir,
         write_report=True,
         demo_command=shlex.join([sys.executable, *sys.argv]),
@@ -93,7 +99,7 @@ def main() -> int:
 
 def print_summary(result: dict, report_path: Path) -> None:
     print("=" * 50)
-    print("TETO V2.3.0 ARTICULATION STATE OBSERVATION CONTRACT")
+    print("TETO V2.4.0 SIMULATION-ONLY MOTION PRECHECK CONTRACT")
     print("=" * 50)
     print(f"Status: {result['status']}")
     print(f"Mode: {result['mode']}")
@@ -165,6 +171,18 @@ def print_summary(result: dict, report_path: Path) -> None:
     print(f"state_errors: {state.get('errors')}")
     print(f"articulation_state_path: {result.get('articulation_state_path')}")
     print(f"articulation_state_report_path: {result.get('articulation_state_report_path')}")
+    precheck = result.get("simulation_motion_precheck") or {}
+    print(f"simulation_motion_precheck_requested: {result.get('simulation_motion_precheck_requested')}")
+    print(f"simulation_motion_precheck_status: {result.get('simulation_motion_precheck_status')}")
+    print(f"ready_for_simulation_motion: {result.get('ready_for_simulation_motion')}")
+    print(f"trajectory_generated: {precheck.get('trajectory_generated')}")
+    print(f"tcp_pose_world_generated: {precheck.get('tcp_pose_world_generated')}")
+    print(f"robot_motion_executed: {precheck.get('robot_motion_executed')}")
+    print(f"precheck_blocking_reasons: {precheck.get('blocking_reasons')}")
+    print(f"precheck_warnings: {precheck.get('warnings')}")
+    print(f"precheck_errors: {precheck.get('errors')}")
+    print(f"simulation_motion_precheck_path: {result.get('simulation_motion_precheck_path')}")
+    print(f"simulation_motion_precheck_report_path: {result.get('simulation_motion_precheck_report_path')}")
     print(f"Report: {report_path}")
     if result.get("blocking_reasons"):
         print(f"Blocking reasons: {', '.join(result['blocking_reasons'])}")

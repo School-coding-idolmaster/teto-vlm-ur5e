@@ -20,7 +20,8 @@ This project currently focuses on:
 - Demo result saving
 - `robot_task_json` result inspector / replay viewer for saved JSONL runs
 - Simulation object execution reports and evidence exports through Isaac Runtime
-- Read-only UR5e articulation readiness and articulation state observation contracts
+- Read-only UR5e articulation readiness, articulation state observation, and
+  simulation-only motion precheck contracts
 - Placeholder dataset and annotation utilities
 - Placeholder robot interface
 
@@ -1058,6 +1059,99 @@ V2.3.0 does not connect ROS2, MoveIt, RTDE, URScript, or a real UR5. It does
 not generate joint targets, joint angles, `tcp_pose_world`, trajectories,
 robot commands, or any simulated robot motion.
 
+## TETO V2.4.0 Simulation-Only Motion Precheck Contract
+
+TETO V2.4.0 adds a simulation-only motion precheck contract after the V2.3.0
+articulation state observation layer. It is the final precheck gate before the
+planned V2.5.0 first simulation robot micro-motion stage. V2.4.0 only answers:
+if a future Isaac-only UR5e micro-motion were requested, do the current asset,
+prim, readiness, state, and joint-limit observations satisfy the prerequisites?
+
+This is still not robot control. The V2.4.0 contract is metadata/readiness/state
+assessment only. It explicitly keeps:
+
+- `metadata_only=true`
+- `simulation_only=true`
+- `control_enabled=false`
+- `motion_generated=false`
+- `command_generated=false`
+- `joint_targets_generated=false`
+- `trajectory_generated=false`
+- `tcp_pose_world_generated=false`
+- `robot_motion_executed=false`
+- `real_robot_allowed=false`
+
+Run the dry-run precheck shape without Isaac:
+
+```bash
+python3 scripts/run_first_simulation_execution.py --dry-run --steps 1 --check-simulation-motion-precheck
+```
+
+Run true Isaac with the full read-only chain:
+
+```bash
+PYTHONPATH=. /home/newusername/Storage/home/wu-zijian/下载/isaac-sim-standalone-5.1.0-linux-x86_64/python.sh scripts/run_first_simulation_execution.py \
+  --steps 1 \
+  --check-robot-asset \
+  --inspect-robot-prim \
+  --check-articulation-readiness \
+  --observe-articulation-state \
+  --check-simulation-motion-precheck
+```
+
+The structured report adds:
+
+- `simulation_motion_precheck_requested`
+- `simulation_motion_precheck_status`
+- `ready_for_simulation_motion`
+- `simulation_motion_precheck_path`
+- `simulation_motion_precheck_report_path`
+- `simulation_motion_precheck_report_generated`
+- `simulation_motion_precheck.status`
+- `simulation_motion_precheck.ready`
+- `simulation_motion_precheck.metadata_only`
+- `simulation_motion_precheck.simulation_only`
+- `simulation_motion_precheck.control_enabled`
+- `simulation_motion_precheck.motion_generated`
+- `simulation_motion_precheck.command_generated`
+- `simulation_motion_precheck.joint_targets_generated`
+- `simulation_motion_precheck.trajectory_generated`
+- `simulation_motion_precheck.tcp_pose_world_generated`
+- `simulation_motion_precheck.robot_motion_executed`
+- `simulation_motion_precheck.real_robot_allowed`
+- `simulation_motion_precheck.checked_requirements`
+- `simulation_motion_precheck.missing_requirements`
+- `simulation_motion_precheck.blocking_reasons`
+- `simulation_motion_precheck.warnings`
+- `simulation_motion_precheck.errors`
+- `simulation_motion_precheck.joint_precheck_table`
+
+The precheck validates that the UR5e asset and prim are available, articulation
+readiness is `READY`, articulation state is observable and `OK`, six standard
+UR5e arm joints exist, joint positions/velocities/limits are available, and
+each arm joint position is inside its current lower/upper limit. Non-arm extra
+joints such as `robot_gripper_joint` and `root_joint` are recorded as
+`non_arm_extra_joints` and do not block readiness.
+
+Evidence export adds a `Simulation Motion Precheck Summary` section to
+`summary.md`, a `simulation_motion_precheck` object in
+`evidence_manifest.json`, `simulation_motion_precheck.json`, and
+`simulation_motion_precheck_report.md` when precheck is requested. Screenshot
+and video placeholders remain null.
+
+Version route:
+
+- `V2.1.x` = UR5e structure understanding
+- `V2.2.0` = articulation readiness contract
+- `V2.3.0` = articulation state observation contract
+- `V2.4.0` = simulation-only motion precheck contract
+- `V2.5.0` = first simulation robot micro-motion
+
+V2.4.0 does not move the Isaac UR5e, generate joint targets, generate
+trajectories, generate `tcp_pose_world`, call ROS2, call MoveIt, call RTDE,
+generate URScript, connect a real UR5, or open any real or simulated robot
+motion control chain.
+
 Demo commands accept common image formats directly. TETO automatically
 creates a cached RGB JPEG under `data/processed/auto/`, with EXIF orientation
 applied, long edge resized, animated images reduced to the first frame, and
@@ -1260,4 +1354,9 @@ python3 -m src.cli prepare-images --input-dir data/raw --output-dir data/process
 - Add annotation formats
 - Add spatial relationship understanding tasks
 - Add simple robot action plan JSON output
-- Connect ROS2 / MoveIt2 / Isaac Sim / UR5 controller
+- V2.1.x = UR5e structure understanding
+- V2.2.0 = articulation readiness contract
+- V2.3.0 = articulation state observation contract
+- V2.4.0 = simulation-only motion precheck contract
+- V2.5.0 = first simulation robot micro-motion
+- Future ROS2 / MoveIt2 / RTDE / URScript / real UR5 controller integration remains outside the current implemented safety boundary

@@ -38,7 +38,7 @@ def test_dry_run_execution_writes_evidence_artifacts(tmp_path):
     assert manifest_path.exists()
 
     summary = summary_path.read_text(encoding="utf-8")
-    assert "TETO version: TETO V2.3.0" in summary
+    assert "TETO version: TETO V2.4.0" in summary
     assert f"run_id: {tmp_path.name}" in summary
     assert "mode: dry_run" in summary
     assert "status: PASS" in summary
@@ -77,7 +77,7 @@ def test_dry_run_execution_writes_evidence_artifacts(tmp_path):
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["schema_version"] == EVIDENCE_MANIFEST_SCHEMA_VERSION
     assert manifest["run_id"] == tmp_path.name
-    assert manifest["teto_version"] == "TETO V2.3.0"
+    assert manifest["teto_version"] == "TETO V2.4.0"
     assert manifest["mode"] == "dry_run"
     assert manifest["status"] == "PASS"
     assert manifest["report_path"] == str(report_path)
@@ -95,6 +95,10 @@ def test_dry_run_execution_writes_evidence_artifacts(tmp_path):
     assert manifest["articulation_state"]["status"] == "NOT_REQUESTED"
     assert manifest["articulation_state_path"] is None
     assert manifest["articulation_state_report_path"] is None
+    assert manifest["simulation_motion_precheck"]["requested"] is False
+    assert manifest["simulation_motion_precheck"]["status"] == "NOT_REQUESTED"
+    assert manifest["simulation_motion_precheck_path"] is None
+    assert manifest["simulation_motion_precheck_report_path"] is None
     assert manifest["robot_prim_inspection_path"] is None
     assert manifest["robot_structure_report_path"] is None
     assert manifest["screenshot_before_path"] is None
@@ -288,6 +292,61 @@ def test_evidence_exporter_writes_articulation_state_metadata(tmp_path):
     assert "control_enabled: False" in state_report
     assert "joint_targets_generated: False" in state_report
     assert "## Safety Boundary" in state_report
+
+
+def test_evidence_exporter_writes_simulation_motion_precheck_metadata(tmp_path):
+    result = run_first_simulation_execution(
+        VALID_TASK,
+        dry_run=True,
+        steps=1,
+        check_simulation_motion_precheck=True,
+        output_dir=tmp_path,
+        write_report=True,
+        demo_command=(
+            "python3 scripts/run_first_simulation_execution.py --dry-run --steps 1 "
+            "--check-simulation-motion-precheck"
+        ),
+    )
+
+    summary = (tmp_path / "summary.md").read_text(encoding="utf-8")
+    assert "## Simulation Motion Precheck Summary" in summary
+    assert "simulation_motion_precheck_status: NOT_READY" in summary
+    assert "ready_for_simulation_motion: False" in summary
+    assert "trajectory_generated: False" in summary
+    assert "tcp_pose_world_generated: False" in summary
+    assert "robot_motion_executed: False" in summary
+
+    precheck_path = tmp_path / "simulation_motion_precheck.json"
+    precheck_report_path = tmp_path / "simulation_motion_precheck_report.md"
+    assert precheck_path.exists()
+    assert precheck_report_path.exists()
+    precheck = json.loads(precheck_path.read_text(encoding="utf-8"))
+    assert precheck["requested"] is True
+    assert precheck["status"] == "NOT_READY"
+    assert precheck["ready"] is False
+    assert precheck["control_enabled"] is False
+    assert precheck["motion_generated"] is False
+    assert precheck["command_generated"] is False
+    assert precheck["joint_targets_generated"] is False
+    assert precheck["trajectory_generated"] is False
+    assert precheck["tcp_pose_world_generated"] is False
+    assert precheck["robot_motion_executed"] is False
+
+    manifest = json.loads((tmp_path / "evidence_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["simulation_motion_precheck"] == precheck
+    assert manifest["simulation_motion_precheck_path"] == str(precheck_path)
+    assert manifest["simulation_motion_precheck_report_path"] == str(precheck_report_path)
+    assert result["simulation_motion_precheck_path"] == str(precheck_path)
+    assert result["simulation_motion_precheck_report_path"] == str(precheck_report_path)
+
+    precheck_report = precheck_report_path.read_text(encoding="utf-8")
+    assert "simulation-only precheck" in precheck_report
+    assert "metadata/state/readiness only" in precheck_report
+    assert "control_enabled: False" in precheck_report
+    assert "trajectory_generated: False" in precheck_report
+    assert "tcp_pose_world_generated: False" in precheck_report
+    assert "robot_motion_executed: False" in precheck_report
+    assert "## Safety Boundary" in precheck_report
 
 
 def test_evidence_exporter_displays_joint_metadata_classification(tmp_path):

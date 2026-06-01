@@ -63,6 +63,9 @@ def test_build_success_report_fields():
     assert result["articulation_readiness"]["control_enabled"] is False
     assert result["articulation_readiness"]["motion_generated"] is False
     assert result["articulation_readiness"]["command_generated"] is False
+    assert result["simulation_motion_precheck_requested"] is False
+    assert result["simulation_motion_precheck_status"] == "NOT_REQUESTED"
+    assert result["ready_for_simulation_motion"] is False
     assert result["blocking_reasons"] == []
     assert result["error"]["code"] == "OK"
 
@@ -195,6 +198,13 @@ def test_cli_articulation_state_argument_parse():
     assert args.observe_articulation_state is True
 
 
+def test_cli_simulation_motion_precheck_argument_parse():
+    parser = build_parser()
+    args = parser.parse_args(["--check-simulation-motion-precheck"])
+
+    assert args.check_simulation_motion_precheck is True
+
+
 def test_dry_run_robot_asset_check_passes_with_unavailable_default():
     result = run_first_simulation_execution(VALID_TASK, dry_run=True, steps=1, check_robot_asset=True)
 
@@ -297,6 +307,32 @@ def test_dry_run_articulation_state_observation_returns_not_observable():
     assert state["command_generated"] is False
     assert state["joint_targets_generated"] is False
     assert state["joint_state_table"] == []
+
+
+def test_dry_run_simulation_motion_precheck_returns_not_ready():
+    result = run_first_simulation_execution(
+        VALID_TASK,
+        dry_run=True,
+        steps=1,
+        check_simulation_motion_precheck=True,
+    )
+    precheck = result["simulation_motion_precheck"]
+
+    assert result["status"] == "PASS"
+    assert result["error"]["code"] == "OK"
+    assert result["simulation_motion_precheck_requested"] is True
+    assert result["simulation_motion_precheck_status"] == "NOT_READY"
+    assert result["ready_for_simulation_motion"] is False
+    assert result["control_enabled"] is False
+    assert result["motion_generated"] is False
+    assert result["command_generated"] is False
+    assert result["joint_targets_generated"] is False
+    assert result["trajectory_generated"] is False
+    assert result["tcp_pose_world_generated"] is False
+    assert result["robot_motion_executed"] is False
+    assert "robot_prim_exists" in precheck["missing_requirements"]
+    assert "articulation_readiness_ready" in precheck["missing_requirements"]
+    assert "articulation_state_ok" in precheck["missing_requirements"]
 
 
 def test_inspect_robot_prim_does_not_add_motion_control_fields():
@@ -844,6 +880,7 @@ def test_true_like_articulation_state_observation_report(tmp_path):
         inspect_robot_prim=True,
         check_articulation_readiness=True,
         observe_articulation_state=True,
+        check_simulation_motion_precheck=True,
         robot_asset_loader=successful_loader,
         robot_prim_verifier=prim_exists,
         robot_prim_inspector=prim_inspector,
@@ -865,6 +902,12 @@ def test_true_like_articulation_state_observation_report(tmp_path):
     assert result["observed_joint_count"] == 6
     assert result["missing_arm_joint_names"] == []
     assert result["joint_limits_available"] is True
+    assert result["simulation_motion_precheck_requested"] is True
+    assert result["simulation_motion_precheck_status"] == "READY_FOR_SIMULATION_MOTION"
+    assert result["ready_for_simulation_motion"] is True
+    assert result["trajectory_generated"] is False
+    assert result["tcp_pose_world_generated"] is False
+    assert result["robot_motion_executed"] is False
     assert result["articulation_state"]["control_enabled"] is False
     assert result["articulation_state"]["motion_generated"] is False
     assert result["articulation_state"]["command_generated"] is False
