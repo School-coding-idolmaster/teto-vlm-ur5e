@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any, Dict
 
+from src.simulation_micro_motion import write_simulation_micro_motion_artifacts
+
 
 EVIDENCE_MANIFEST_SCHEMA_VERSION = "teto_evidence_manifest.v1"
 
@@ -28,6 +30,10 @@ def export_simulation_evidence(
     articulation_state_report_path = output_dir / "articulation_state_report.md"
     simulation_motion_precheck_path = output_dir / "simulation_motion_precheck.json"
     simulation_motion_precheck_report_path = output_dir / "simulation_motion_precheck_report.md"
+    simulation_motion_result_path = output_dir / "simulation_motion_result.json"
+    simulation_motion_report_path = output_dir / "simulation_motion_report.md"
+    before_articulation_state_path = output_dir / "before_articulation_state.json"
+    after_articulation_state_path = output_dir / "after_articulation_state.json"
 
     object_info = _simulation_object_info(result)
     robot_asset_info = _robot_asset_info(result)
@@ -35,10 +41,12 @@ def export_simulation_evidence(
     articulation_readiness_info = _articulation_readiness_info(result)
     articulation_state_info = _articulation_state_info(result)
     simulation_motion_precheck_info = _simulation_motion_precheck_info(result)
+    simulation_micro_motion_info = _simulation_micro_motion_info(result)
     structure_report_requested = bool(robot_prim_inspection_info.get("requested"))
     readiness_requested = bool(articulation_readiness_info.get("requested"))
     state_requested = bool(articulation_state_info.get("requested"))
     precheck_requested = bool(simulation_motion_precheck_info.get("requested"))
+    micro_motion_requested = bool(simulation_micro_motion_info.get("requested"))
     run_id = output_dir.name
     created_at = result.get("finished_at") or result.get("started_at")
     report_path = result.get("report_path")
@@ -53,6 +61,7 @@ def export_simulation_evidence(
             articulation_readiness_info=articulation_readiness_info,
             articulation_state_info=articulation_state_info,
             simulation_motion_precheck_info=simulation_motion_precheck_info,
+            simulation_micro_motion_info=simulation_micro_motion_info,
             robot_structure_report_path=structure_report_ref,
             run_id=run_id,
             created_at=created_at,
@@ -113,6 +122,8 @@ def export_simulation_evidence(
             ),
             encoding="utf-8",
         )
+    if micro_motion_requested:
+        write_simulation_micro_motion_artifacts(simulation_micro_motion_info, output_dir)
 
     manifest = {
         "schema_version": EVIDENCE_MANIFEST_SCHEMA_VERSION,
@@ -141,6 +152,11 @@ def export_simulation_evidence(
         "simulation_motion_precheck_report_path": (
             str(simulation_motion_precheck_report_path) if precheck_requested else None
         ),
+        "simulation_micro_motion": simulation_micro_motion_info,
+        "simulation_motion_result_path": str(simulation_motion_result_path) if micro_motion_requested else None,
+        "simulation_motion_report_path": str(simulation_motion_report_path) if micro_motion_requested else None,
+        "before_articulation_state_path": str(before_articulation_state_path) if micro_motion_requested else None,
+        "after_articulation_state_path": str(after_articulation_state_path) if micro_motion_requested else None,
         "screenshot_before_path": None,
         "screenshot_after_path": None,
         "video_path": None,
@@ -161,6 +177,10 @@ def export_simulation_evidence(
         "articulation_state_report_path": articulation_state_report_path,
         "simulation_motion_precheck_path": simulation_motion_precheck_path,
         "simulation_motion_precheck_report_path": simulation_motion_precheck_report_path,
+        "simulation_motion_result_path": simulation_motion_result_path,
+        "simulation_motion_report_path": simulation_motion_report_path,
+        "before_articulation_state_path": before_articulation_state_path,
+        "after_articulation_state_path": after_articulation_state_path,
     }
 
 
@@ -354,6 +374,38 @@ def _simulation_motion_precheck_info(result: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _simulation_micro_motion_info(result: Dict[str, Any]) -> Dict[str, Any]:
+    motion = result.get("motion") if isinstance(result.get("motion"), dict) else {}
+    precheck = result.get("precheck") if isinstance(result.get("precheck"), dict) else {}
+    return {
+        "requested": result.get("simulation_micro_motion_requested", False),
+        "simulation_micro_motion_status": result.get(
+            "simulation_micro_motion_status",
+            "NOT_REQUESTED",
+        ),
+        "simulation_only": result.get("simulation_only", True),
+        "real_robot_allowed": result.get("real_robot_allowed", False),
+        "real_robot_motion_executed": result.get("real_robot_motion_executed", False),
+        "robot_motion_executed": result.get("robot_motion_executed", False),
+        "control_enabled": result.get("control_enabled", False),
+        "simulation_control_enabled": result.get("simulation_control_enabled", False),
+        "motion_generated": result.get("motion_generated", False),
+        "command_generated": result.get("command_generated", False),
+        "simulation_command_generated": result.get("simulation_command_generated", False),
+        "joint_targets_generated": result.get("joint_targets_generated", False),
+        "simulation_joint_delta_generated": result.get("simulation_joint_delta_generated", False),
+        "trajectory_generated": result.get("trajectory_generated", False),
+        "tcp_pose_world_generated": result.get("tcp_pose_world_generated", False),
+        "precheck": precheck,
+        "motion": motion,
+        "before_articulation_state": result.get("before_articulation_state", {}),
+        "after_articulation_state": result.get("after_articulation_state", {}),
+        "warnings": result.get("simulation_micro_motion_warnings", []),
+        "errors": result.get("simulation_micro_motion_errors", []),
+        "blocking_reasons": result.get("simulation_micro_motion_blocking_reasons", []),
+    }
+
+
 def _build_summary_markdown(
     result: Dict[str, Any],
     *,
@@ -363,6 +415,7 @@ def _build_summary_markdown(
     articulation_readiness_info: Dict[str, Any],
     articulation_state_info: Dict[str, Any],
     simulation_motion_precheck_info: Dict[str, Any],
+    simulation_micro_motion_info: Dict[str, Any],
     robot_structure_report_path: str | None,
     run_id: str,
     created_at: str | None,
@@ -492,6 +545,23 @@ def _build_summary_markdown(
             f"- blocking_reasons: {_format_value(simulation_motion_precheck_info.get('blocking_reasons'))}",
             f"- warnings: {_format_value(simulation_motion_precheck_info.get('warnings'))}",
             f"- errors: {_format_value(simulation_motion_precheck_info.get('errors'))}",
+            "",
+            "## Simulation Micro-Motion Summary",
+            "",
+            f"- requested: {_format_value(simulation_micro_motion_info.get('requested'))}",
+            f"- simulation_micro_motion_status: {_format_value(simulation_micro_motion_info.get('simulation_micro_motion_status'))}",
+            f"- simulation_only: {_format_value(simulation_micro_motion_info.get('simulation_only'))}",
+            f"- real_robot_allowed: {_format_value(simulation_micro_motion_info.get('real_robot_allowed'))}",
+            f"- real_robot_motion_executed: {_format_value(simulation_micro_motion_info.get('real_robot_motion_executed'))}",
+            f"- robot_motion_executed: {_format_value(simulation_micro_motion_info.get('robot_motion_executed'))}",
+            f"- joint_name: {_format_value((simulation_micro_motion_info.get('motion') or {}).get('joint_name'))}",
+            f"- requested_delta_rad: {_format_value((simulation_micro_motion_info.get('motion') or {}).get('requested_delta_rad'))}",
+            f"- actual_delta_rad: {_format_value((simulation_micro_motion_info.get('motion') or {}).get('actual_delta_rad'))}",
+            f"- delta_within_tolerance: {_format_value((simulation_micro_motion_info.get('motion') or {}).get('delta_within_tolerance'))}",
+            f"- before_joint_state_path: {_format_value((simulation_micro_motion_info.get('motion') or {}).get('before_joint_state_path'))}",
+            f"- after_joint_state_path: {_format_value((simulation_micro_motion_info.get('motion') or {}).get('after_joint_state_path'))}",
+            f"- simulation_motion_result_path: {_format_value((simulation_micro_motion_info.get('motion') or {}).get('simulation_motion_result_path'))}",
+            f"- simulation_motion_report_path: {_format_value((simulation_micro_motion_info.get('motion') or {}).get('simulation_motion_report_path'))}",
             "",
         ]
     )
@@ -653,6 +723,9 @@ def _build_demo_command_text(result: Dict[str, Any], *, demo_command: str | None
         f"check_articulation_readiness={_format_value(result.get('articulation_readiness_requested'))}",
         f"observe_articulation_state={_format_value(result.get('articulation_state_observation_requested'))}",
         f"check_simulation_motion_precheck={_format_value(result.get('simulation_motion_precheck_requested'))}",
+        f"execute_simulation_micro_motion={_format_value(result.get('simulation_micro_motion_requested'))}",
+        f"micro_motion_joint={_format_value((result.get('motion') or {}).get('joint_name'))}",
+        f"micro_motion_delta_rad={_format_value((result.get('motion') or {}).get('requested_delta_rad'))}",
     ]
     return "\n".join(lines) + "\n"
 

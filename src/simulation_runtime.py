@@ -10,12 +10,28 @@ from typing import Any, Dict
 from src.articulation_readiness_contract import build_articulation_readiness_report
 from src.articulation_state_observer import build_articulation_state_report, observe_articulation_state as observe_articulation_state_in_world
 from src.evidence_exporter import export_simulation_evidence
-from src.robot_prim_inspector import build_robot_prim_inspection_report, inspect_robot_prim as inspect_robot_prim_in_stage
+from src.robot_prim_inspector import (
+    UR5E_ARM_JOINT_NAMES,
+    build_robot_prim_inspection_report,
+    inspect_robot_prim as inspect_robot_prim_in_stage,
+)
+from src.simulation_micro_motion import (
+    DEFAULT_MICRO_MOTION_DELTA_RAD,
+    DEFAULT_MICRO_MOTION_JOINT,
+    DEFAULT_MICRO_MOTION_TOLERANCE_RAD,
+    MICRO_MOTION_STATUS_BLOCKED_BY_PRECHECK,
+    MICRO_MOTION_STATUS_DRY_RUN_ONLY,
+    MICRO_MOTION_STATUS_FAILED,
+    MICRO_MOTION_STATUS_NOT_REQUESTED,
+    MICRO_MOTION_STATUS_OK,
+    SimulationMicroMotionRequest,
+    execute_simulation_micro_motion,
+)
 from src.simulation_motion_precheck import build_simulation_motion_precheck_report
 
 
 REPORT_VERSION = "teto_simulation_execution.v1"
-CURRENT_TETO_VERSION = "TETO V2.4.0"
+CURRENT_TETO_VERSION = "TETO V2.5.0"
 DEFAULT_STEPS = 5
 DEFAULT_SIMULATION_OBJECT_TYPE = "cube"
 DEFAULT_CUBE_PRIM_PATH = "/World/TETO_Cube"
@@ -73,6 +89,7 @@ def build_simulation_execution_result(
     articulation_readiness_metadata: Dict[str, Any] | None = None,
     articulation_state_metadata: Dict[str, Any] | None = None,
     simulation_motion_precheck_metadata: Dict[str, Any] | None = None,
+    simulation_micro_motion_metadata: Dict[str, Any] | None = None,
     started_at: str | None = None,
     finished_at: str | None = None,
 ) -> Dict[str, Any]:
@@ -83,6 +100,7 @@ def build_simulation_execution_result(
     result = {
         "report_version": REPORT_VERSION,
         "teto_version": CURRENT_TETO_VERSION,
+        "version": CURRENT_TETO_VERSION,
         "status": status,
         "ok": status == "PASS",
         "mode": mode,
@@ -108,6 +126,7 @@ def build_simulation_execution_result(
     result.update(articulation_readiness_metadata or _articulation_readiness_report_fields())
     result.update(articulation_state_metadata or _articulation_state_report_fields())
     result.update(simulation_motion_precheck_metadata or _simulation_motion_precheck_report_fields())
+    result.update(simulation_micro_motion_metadata or _simulation_micro_motion_report_fields())
     result.setdefault("robot_structure_report_generated", False)
     result.setdefault("robot_structure_report_path", None)
     result.setdefault("articulation_readiness_report_generated", False)
@@ -118,6 +137,10 @@ def build_simulation_execution_result(
     result.setdefault("simulation_motion_precheck_report_generated", False)
     result.setdefault("simulation_motion_precheck_path", None)
     result.setdefault("simulation_motion_precheck_report_path", None)
+    result.setdefault("simulation_motion_result_path", None)
+    result.setdefault("simulation_motion_report_path", None)
+    result.setdefault("before_joint_state_path", None)
+    result.setdefault("after_joint_state_path", None)
     return result
 
 
@@ -146,6 +169,10 @@ def run_first_simulation_execution(
     check_articulation_readiness: bool = False,
     observe_articulation_state: bool = False,
     check_simulation_motion_precheck: bool = False,
+    execute_simulation_micro_motion: bool = False,
+    micro_motion_joint: str = DEFAULT_MICRO_MOTION_JOINT,
+    micro_motion_delta_rad: float = DEFAULT_MICRO_MOTION_DELTA_RAD,
+    micro_motion_tolerance_rad: float = DEFAULT_MICRO_MOTION_TOLERANCE_RAD,
     output_dir: str | Path | None = None,
     write_report: bool = False,
     demo_command: str | None = None,
@@ -154,6 +181,15 @@ def run_first_simulation_execution(
     started_at = _timestamp()
     effective_move_object = move_object or move_cube
     effective_spawn_cube = spawn_cube or effective_move_object
+    effective_inspect_robot_prim = inspect_robot_prim or execute_simulation_micro_motion
+    effective_check_articulation_readiness = check_articulation_readiness or execute_simulation_micro_motion
+    effective_observe_articulation_state = observe_articulation_state or execute_simulation_micro_motion
+    effective_check_simulation_motion_precheck = check_simulation_motion_precheck or execute_simulation_micro_motion
+    micro_motion_request = SimulationMicroMotionRequest(
+        joint_name=micro_motion_joint,
+        requested_delta_rad=micro_motion_delta_rad,
+        tolerance_rad=micro_motion_tolerance_rad,
+    )
     simulation_object_spec = object_spec or SimulationObjectSpec(
         object_type=DEFAULT_SIMULATION_OBJECT_TYPE,
         prim_path=cube_prim_path,
@@ -165,26 +201,26 @@ def run_first_simulation_execution(
         robot_asset_path,
         dry_run=dry_run,
         no_isaac=no_isaac,
-        check_robot_asset=check_robot_asset,
+        check_robot_asset=check_robot_asset or execute_simulation_micro_motion,
         load_robot_asset=load_robot_asset,
-        inspect_robot_prim=inspect_robot_prim,
-        check_articulation_readiness=check_articulation_readiness,
-        observe_articulation_state=observe_articulation_state,
-        check_simulation_motion_precheck=check_simulation_motion_precheck,
+        inspect_robot_prim=effective_inspect_robot_prim,
+        check_articulation_readiness=effective_check_articulation_readiness,
+        observe_articulation_state=effective_observe_articulation_state,
+        check_simulation_motion_precheck=effective_check_simulation_motion_precheck,
     )
     effective_load_robot_asset = load_robot_asset or bool(
         resolved_robot_asset_path
         and not dry_run
         and not no_isaac
-        and check_robot_asset
+        and (check_robot_asset or execute_simulation_micro_motion)
         and (
-            inspect_robot_prim
-            or check_articulation_readiness
-            or observe_articulation_state
-            or check_simulation_motion_precheck
+            effective_inspect_robot_prim
+            or effective_check_articulation_readiness
+            or effective_observe_articulation_state
+            or effective_check_simulation_motion_precheck
         )
     )
-    effective_check_robot_asset = check_robot_asset or effective_load_robot_asset
+    effective_check_robot_asset = check_robot_asset or execute_simulation_micro_motion or effective_load_robot_asset
     effective_robot_asset_spec = robot_asset_spec or RobotAssetSpec(
         robot_type=robot_type,
         robot_prim_path=robot_prim_path,
@@ -210,19 +246,19 @@ def run_first_simulation_execution(
                 ),
                 robot_prim_inspection_metadata=_robot_prim_inspection_report_fields(
                     spec=effective_robot_asset_spec,
-                    requested=inspect_robot_prim,
+                    requested=effective_inspect_robot_prim,
                 ),
                 articulation_readiness_metadata=_articulation_readiness_report_fields(
                     spec=effective_robot_asset_spec,
-                    requested=check_articulation_readiness,
+                    requested=effective_check_articulation_readiness,
                 ),
                 articulation_state_metadata=_articulation_state_report_fields(
                     spec=effective_robot_asset_spec,
-                    requested=observe_articulation_state,
+                    requested=effective_observe_articulation_state,
                 ),
                 simulation_motion_precheck_metadata=_simulation_motion_precheck_report_fields(
                     spec=effective_robot_asset_spec,
-                    requested=check_simulation_motion_precheck,
+                    requested=effective_check_simulation_motion_precheck,
                 ),
                 error_code="E_INVALID_STEPS",
                 error_message="steps must be a positive integer",
@@ -254,19 +290,19 @@ def run_first_simulation_execution(
                 ),
                 robot_prim_inspection_metadata=_robot_prim_inspection_report_fields(
                     spec=effective_robot_asset_spec,
-                    requested=inspect_robot_prim,
+                    requested=effective_inspect_robot_prim,
                 ),
                 articulation_readiness_metadata=_articulation_readiness_report_fields(
                     spec=effective_robot_asset_spec,
-                    requested=check_articulation_readiness,
+                    requested=effective_check_articulation_readiness,
                 ),
                 articulation_state_metadata=_articulation_state_report_fields(
                     spec=effective_robot_asset_spec,
-                    requested=observe_articulation_state,
+                    requested=effective_observe_articulation_state,
                 ),
                 simulation_motion_precheck_metadata=_simulation_motion_precheck_report_fields(
                     spec=effective_robot_asset_spec,
-                    requested=check_simulation_motion_precheck,
+                    requested=effective_check_simulation_motion_precheck,
                 ),
                 error_code="E_INVALID_SIMULATION_TASK",
                 error_message=f"missing simulation task fields: {', '.join(missing_fields)}",
@@ -291,27 +327,35 @@ def run_first_simulation_execution(
         )
         robot_prim_inspection_metadata = _dry_run_robot_prim_inspection_report_fields(
             spec=effective_robot_asset_spec,
-            requested=inspect_robot_prim,
+            requested=effective_inspect_robot_prim,
             prim_exists=bool(robot_asset_metadata.get("robot_prim_exists")),
         )
         articulation_readiness_metadata = _articulation_readiness_report_fields(
             spec=effective_robot_asset_spec,
-            requested=check_articulation_readiness,
+            requested=effective_check_articulation_readiness,
             inspection=robot_prim_inspection_metadata.get("robot_prim_inspection"),
         )
         articulation_state_metadata = _articulation_state_report_fields(
             spec=effective_robot_asset_spec,
-            requested=observe_articulation_state,
+            requested=effective_observe_articulation_state,
             inspection=robot_prim_inspection_metadata.get("robot_prim_inspection"),
             readiness=articulation_readiness_metadata.get("articulation_readiness"),
         )
         simulation_motion_precheck_metadata = _simulation_motion_precheck_report_fields(
             spec=effective_robot_asset_spec,
-            requested=check_simulation_motion_precheck,
+            requested=effective_check_simulation_motion_precheck,
             robot_asset=robot_asset_metadata,
             inspection=robot_prim_inspection_metadata.get("robot_prim_inspection"),
             readiness=articulation_readiness_metadata.get("articulation_readiness"),
             state=articulation_state_metadata.get("articulation_state"),
+        )
+        simulation_micro_motion_metadata = _simulation_micro_motion_report_fields(
+            request=micro_motion_request,
+            requested=execute_simulation_micro_motion,
+            dry_run=True,
+            precheck=simulation_motion_precheck_metadata.get("simulation_motion_precheck"),
+            readiness=articulation_readiness_metadata.get("articulation_readiness"),
+            before_state=articulation_state_metadata.get("articulation_state"),
         )
         if effective_load_robot_asset and not robot_asset_metadata["robot_asset_available"]:
             return _finalize_result(
@@ -342,6 +386,7 @@ def run_first_simulation_execution(
                     articulation_readiness_metadata=articulation_readiness_metadata,
                     articulation_state_metadata=articulation_state_metadata,
                     simulation_motion_precheck_metadata=simulation_motion_precheck_metadata,
+                    simulation_micro_motion_metadata=simulation_micro_motion_metadata,
                     error_code="E_ROBOT_ASSET_LOAD_FAILED",
                     error_message="robot asset path is unavailable",
                     started_at=started_at,
@@ -371,6 +416,7 @@ def run_first_simulation_execution(
                 articulation_readiness_metadata=articulation_readiness_metadata,
                 articulation_state_metadata=articulation_state_metadata,
                 simulation_motion_precheck_metadata=simulation_motion_precheck_metadata,
+                simulation_micro_motion_metadata=simulation_micro_motion_metadata,
                 started_at=started_at,
                 finished_at=_timestamp(),
             ),
@@ -389,10 +435,12 @@ def run_first_simulation_execution(
         check_robot_asset=effective_check_robot_asset,
         load_robot_asset=effective_load_robot_asset,
         robot_asset_spec=effective_robot_asset_spec,
-        inspect_robot_prim=inspect_robot_prim,
-        check_articulation_readiness=check_articulation_readiness,
-        observe_articulation_state=observe_articulation_state,
-        check_simulation_motion_precheck=check_simulation_motion_precheck,
+        inspect_robot_prim=effective_inspect_robot_prim,
+        check_articulation_readiness=effective_check_articulation_readiness,
+        observe_articulation_state=effective_observe_articulation_state,
+        check_simulation_motion_precheck=effective_check_simulation_motion_precheck,
+        execute_simulation_micro_motion=execute_simulation_micro_motion,
+        micro_motion_request=micro_motion_request,
         started_at=started_at,
         output_dir=output_dir,
         write_report=write_report,
@@ -415,6 +463,10 @@ def write_simulation_execution_result(
     articulation_state_report_path = run_dir / "articulation_state_report.md"
     simulation_motion_precheck_path = run_dir / "simulation_motion_precheck.json"
     simulation_motion_precheck_report_path = run_dir / "simulation_motion_precheck_report.md"
+    simulation_motion_result_path = run_dir / "simulation_motion_result.json"
+    simulation_motion_report_path = run_dir / "simulation_motion_report.md"
+    before_articulation_state_path = run_dir / "before_articulation_state.json"
+    after_articulation_state_path = run_dir / "after_articulation_state.json"
     result["report_path"] = str(report_path)
     structure_report_requested = bool(result.get("robot_prim_inspection_requested"))
     result["robot_structure_report_generated"] = structure_report_requested
@@ -438,6 +490,24 @@ def write_simulation_execution_result(
     result["simulation_motion_precheck_report_path"] = (
         str(simulation_motion_precheck_report_path) if simulation_motion_precheck_requested else None
     )
+    simulation_micro_motion_requested = bool(result.get("simulation_micro_motion_requested"))
+    result["simulation_motion_result_path"] = (
+        str(simulation_motion_result_path) if simulation_micro_motion_requested else None
+    )
+    result["simulation_motion_report_path"] = (
+        str(simulation_motion_report_path) if simulation_micro_motion_requested else None
+    )
+    result["before_joint_state_path"] = (
+        str(before_articulation_state_path) if simulation_micro_motion_requested else None
+    )
+    result["after_joint_state_path"] = (
+        str(after_articulation_state_path) if simulation_micro_motion_requested else None
+    )
+    if isinstance(result.get("motion"), dict):
+        result["motion"]["simulation_motion_result_path"] = result["simulation_motion_result_path"]
+        result["motion"]["simulation_motion_report_path"] = result["simulation_motion_report_path"]
+        result["motion"]["before_joint_state_path"] = result["before_joint_state_path"]
+        result["motion"]["after_joint_state_path"] = result["after_joint_state_path"]
     with report_path.open("w", encoding="utf-8") as report_file:
         json.dump(result, report_file, ensure_ascii=False, indent=2)
         report_file.write("\n")
@@ -472,6 +542,8 @@ def _run_true_isaac_runtime(
     check_articulation_readiness: bool,
     observe_articulation_state: bool,
     check_simulation_motion_precheck: bool,
+    execute_simulation_micro_motion: bool,
+    micro_motion_request: SimulationMicroMotionRequest,
     started_at: str,
     output_dir: str | Path | None,
     write_report: bool,
@@ -512,6 +584,10 @@ def _run_true_isaac_runtime(
                     spec=robot_asset_spec,
                     requested=check_simulation_motion_precheck,
                 ),
+                simulation_micro_motion_metadata=_simulation_micro_motion_report_fields(
+                    request=micro_motion_request,
+                    requested=execute_simulation_micro_motion,
+                ),
                 error_code="E_ISAAC_RUNTIME_FAILED",
                 error_message=str(exc),
                 started_at=started_at,
@@ -538,6 +614,8 @@ def _run_true_isaac_runtime(
         check_articulation_readiness=check_articulation_readiness,
         observe_articulation_state=observe_articulation_state,
         check_simulation_motion_precheck=check_simulation_motion_precheck,
+        execute_simulation_micro_motion=execute_simulation_micro_motion,
+        micro_motion_request=micro_motion_request,
         started_at=started_at,
         output_dir=output_dir,
         write_report=write_report,
@@ -565,6 +643,8 @@ def _execute_isaac_world(
     check_articulation_readiness: bool = False,
     observe_articulation_state: bool = False,
     check_simulation_motion_precheck: bool = False,
+    execute_simulation_micro_motion: bool = False,
+    micro_motion_request: SimulationMicroMotionRequest | None = None,
     demo_command: str | None = None,
     object_spawner=None,
     object_pose_updater=None,
@@ -572,6 +652,7 @@ def _execute_isaac_world(
     robot_prim_verifier=None,
     robot_prim_inspector=None,
     articulation_state_observer=None,
+    simulation_micro_motion_executor=None,
 ) -> Dict[str, Any]:
     simulation_app = None
     object_spawner = object_spawner or spawn_simulation_object
@@ -610,6 +691,14 @@ def _execute_isaac_world(
         inspection=robot_prim_inspection_metadata.get("robot_prim_inspection"),
         readiness=articulation_readiness_metadata.get("articulation_readiness"),
         state=articulation_state_metadata.get("articulation_state"),
+    )
+    micro_motion_request = micro_motion_request or SimulationMicroMotionRequest()
+    simulation_micro_motion_metadata = _simulation_micro_motion_report_fields(
+        request=micro_motion_request,
+        requested=execute_simulation_micro_motion,
+        precheck=simulation_motion_precheck_metadata.get("simulation_motion_precheck"),
+        readiness=articulation_readiness_metadata.get("articulation_readiness"),
+        before_state=articulation_state_metadata.get("articulation_state"),
     )
     world_reset = False
     try:
@@ -652,6 +741,7 @@ def _execute_isaac_world(
                             articulation_readiness_metadata=articulation_readiness_metadata,
                             articulation_state_metadata=articulation_state_metadata,
                             simulation_motion_precheck_metadata=simulation_motion_precheck_metadata,
+                            simulation_micro_motion_metadata=simulation_micro_motion_metadata,
                             error_code="E_ROBOT_ASSET_LOAD_FAILED",
                             error_message="robot asset path is unavailable",
                             started_at=started_at,
@@ -688,6 +778,7 @@ def _execute_isaac_world(
                                 articulation_readiness_metadata=articulation_readiness_metadata,
                                 articulation_state_metadata=articulation_state_metadata,
                                 simulation_motion_precheck_metadata=simulation_motion_precheck_metadata,
+                                simulation_micro_motion_metadata=simulation_micro_motion_metadata,
                                 error_code="E_ROBOT_ASSET_LOAD_FAILED",
                                 error_message="robot prim was not found after loading asset",
                                 started_at=started_at,
@@ -721,6 +812,7 @@ def _execute_isaac_world(
                             articulation_readiness_metadata=articulation_readiness_metadata,
                             articulation_state_metadata=articulation_state_metadata,
                             simulation_motion_precheck_metadata=simulation_motion_precheck_metadata,
+                            simulation_micro_motion_metadata=simulation_micro_motion_metadata,
                             error_code="E_ROBOT_ASSET_LOAD_FAILED",
                             error_message=str(exc),
                             started_at=started_at,
@@ -756,6 +848,7 @@ def _execute_isaac_world(
                         articulation_readiness_metadata=articulation_readiness_metadata,
                         articulation_state_metadata=articulation_state_metadata,
                         simulation_motion_precheck_metadata=simulation_motion_precheck_metadata,
+                        simulation_micro_motion_metadata=simulation_micro_motion_metadata,
                         error_code="E_CUBE_SPAWN_FAILED",
                         error_message=str(exc),
                         started_at=started_at,
@@ -794,6 +887,7 @@ def _execute_isaac_world(
                         articulation_readiness_metadata=articulation_readiness_metadata,
                         articulation_state_metadata=articulation_state_metadata,
                         simulation_motion_precheck_metadata=simulation_motion_precheck_metadata,
+                        simulation_micro_motion_metadata=simulation_micro_motion_metadata,
                         error_code="E_SIM_OBJECT_MOVE_FAILED",
                         error_message=str(exc),
                         started_at=started_at,
@@ -838,6 +932,64 @@ def _execute_isaac_world(
                 readiness=articulation_readiness_metadata.get("articulation_readiness"),
                 state=articulation_state_metadata.get("articulation_state"),
             )
+        if execute_simulation_micro_motion:
+            executor = simulation_micro_motion_executor or _make_isaac_micro_motion_executor(
+                world,
+                robot_asset_spec=robot_asset_spec,
+                headless=headless,
+                articulation_state_observer=articulation_state_observer,
+                robot_prim_inspection=robot_prim_inspection_metadata.get("robot_prim_inspection"),
+                articulation_readiness=articulation_readiness_metadata.get("articulation_readiness"),
+            )
+            simulation_micro_motion_metadata = _simulation_micro_motion_report_fields(
+                request=micro_motion_request,
+                requested=True,
+                precheck=simulation_motion_precheck_metadata.get("simulation_motion_precheck"),
+                readiness=articulation_readiness_metadata.get("articulation_readiness"),
+                before_state=articulation_state_metadata.get("articulation_state"),
+                motion_executor=executor,
+            )
+            after_state = simulation_micro_motion_metadata.get("after_articulation_state")
+            if isinstance(after_state, dict):
+                articulation_state_metadata = _articulation_state_report_fields(
+                    spec=robot_asset_spec,
+                    requested=True,
+                    inspection=robot_prim_inspection_metadata.get("robot_prim_inspection"),
+                    readiness=articulation_readiness_metadata.get("articulation_readiness"),
+                    state=after_state,
+                )
+            if simulation_micro_motion_metadata.get("simulation_micro_motion_status") != MICRO_MOTION_STATUS_OK:
+                error_code = (
+                    "E_SIMULATION_MOTION_PRECHECK_NOT_READY"
+                    if simulation_micro_motion_metadata.get("simulation_micro_motion_status")
+                    == MICRO_MOTION_STATUS_BLOCKED_BY_PRECHECK
+                    else "E_SIMULATION_MICRO_MOTION_FAILED"
+                )
+                return _finalize_result(
+                    build_simulation_execution_result(
+                        simulation_task=simulation_task,
+                        status="FAIL",
+                        mode="isaac",
+                        steps_requested=steps,
+                        world_reset=world_reset,
+                        object_metadata=object_metadata,
+                        robot_asset_metadata=robot_asset_metadata,
+                        robot_prim_inspection_metadata=robot_prim_inspection_metadata,
+                        articulation_readiness_metadata=articulation_readiness_metadata,
+                        articulation_state_metadata=articulation_state_metadata,
+                        simulation_motion_precheck_metadata=simulation_motion_precheck_metadata,
+                        simulation_micro_motion_metadata=simulation_micro_motion_metadata,
+                        error_code=error_code,
+                        error_message=", ".join(
+                            simulation_micro_motion_metadata.get("simulation_micro_motion_blocking_reasons") or []
+                        ),
+                        started_at=started_at,
+                        finished_at=_timestamp(),
+                    ),
+                    output_dir=output_dir,
+                    write_report=write_report,
+                    demo_command=demo_command,
+                )
 
         steps_completed = 0
         for _ in range(steps):
@@ -858,6 +1010,7 @@ def _execute_isaac_world(
                 articulation_readiness_metadata=articulation_readiness_metadata,
                 articulation_state_metadata=articulation_state_metadata,
                 simulation_motion_precheck_metadata=simulation_motion_precheck_metadata,
+                simulation_micro_motion_metadata=simulation_micro_motion_metadata,
                 started_at=started_at,
                 finished_at=_timestamp(),
             ),
@@ -879,6 +1032,7 @@ def _execute_isaac_world(
                 articulation_readiness_metadata=articulation_readiness_metadata,
                 articulation_state_metadata=articulation_state_metadata,
                 simulation_motion_precheck_metadata=simulation_motion_precheck_metadata,
+                simulation_micro_motion_metadata=simulation_micro_motion_metadata,
                 error_code="E_ISAAC_RUNTIME_FAILED",
                 error_message=str(exc),
                 started_at=started_at,
@@ -1231,6 +1385,329 @@ def _simulation_motion_precheck_report_fields(
             }
         )
     return report_fields
+
+
+def _simulation_micro_motion_report_fields(
+    *,
+    request: SimulationMicroMotionRequest | None = None,
+    requested: bool = False,
+    dry_run: bool = False,
+    precheck: Dict[str, Any] | None = None,
+    readiness: Dict[str, Any] | None = None,
+    before_state: Dict[str, Any] | None = None,
+    motion_executor=None,
+) -> Dict[str, Any]:
+    request = request or SimulationMicroMotionRequest()
+    if not requested:
+        return {
+            "simulation_micro_motion_requested": False,
+            "simulation_micro_motion_status": MICRO_MOTION_STATUS_NOT_REQUESTED,
+            "simulation_only": True,
+            "real_robot_allowed": False,
+            "real_robot_motion_executed": False,
+            "simulation_control_enabled": False,
+            "simulation_command_generated": False,
+            "simulation_joint_delta_generated": False,
+            "before_articulation_state": {},
+            "after_articulation_state": {},
+            "precheck": {
+                "simulation_motion_precheck_status": None,
+                "ready_for_simulation_motion": False,
+                "blocking_reasons": [],
+                "warnings": [],
+                "errors": [],
+            },
+            "motion": {
+                "command_type": None,
+                "joint_name": None,
+                "requested_delta_rad": None,
+                "actual_delta_rad": None,
+                "tolerance_rad": None,
+                "delta_within_tolerance": False,
+                "before_joint_position_rad": None,
+                "after_joint_position_rad": None,
+                "before_joint_state_path": None,
+                "after_joint_state_path": None,
+                "simulation_motion_result_path": None,
+                "simulation_motion_report_path": None,
+            },
+        }
+
+    motion_result = execute_simulation_micro_motion(
+        request,
+        simulation_motion_precheck=precheck,
+        articulation_readiness=readiness,
+        before_articulation_state=before_state,
+        dry_run=dry_run,
+        motion_executor=motion_executor,
+    )
+    return {
+        "simulation_micro_motion_requested": True,
+        "simulation_micro_motion_status": motion_result.get("simulation_micro_motion_status"),
+        "simulation_only": True,
+        "real_robot_allowed": False,
+        "real_robot_motion_executed": False,
+        "robot_motion_executed": motion_result.get("robot_motion_executed", False),
+        "control_enabled": motion_result.get("control_enabled", False),
+        "simulation_control_enabled": motion_result.get("simulation_control_enabled", False),
+        "motion_generated": motion_result.get("motion_generated", False),
+        "command_generated": motion_result.get("command_generated", False),
+        "simulation_command_generated": motion_result.get("simulation_command_generated", False),
+        "joint_targets_generated": motion_result.get("joint_targets_generated", False),
+        "simulation_joint_delta_generated": motion_result.get("simulation_joint_delta_generated", False),
+        "trajectory_generated": motion_result.get("trajectory_generated", False),
+        "tcp_pose_world_generated": motion_result.get("tcp_pose_world_generated", False),
+        "precheck": motion_result.get("precheck", {}),
+        "motion": motion_result.get("motion", {}),
+        "before_articulation_state": motion_result.get("before_articulation_state", {}),
+        "after_articulation_state": motion_result.get("after_articulation_state", {}),
+        "simulation_micro_motion_blocking_reasons": motion_result.get("blocking_reasons", []),
+        "simulation_micro_motion_warnings": motion_result.get("warnings", []),
+        "simulation_micro_motion_errors": motion_result.get("errors", []),
+    }
+
+
+def _make_isaac_micro_motion_executor(
+    world,
+    *,
+    robot_asset_spec: RobotAssetSpec,
+    headless: bool,
+    articulation_state_observer,
+    robot_prim_inspection: Dict[str, Any] | None,
+    articulation_readiness: Dict[str, Any] | None,
+):
+    def executor(request: SimulationMicroMotionRequest, before_state: Dict[str, Any]) -> Dict[str, Any]:
+        return _execute_micro_motion_via_isaac_api(
+            world,
+            request=request,
+            robot_prim_path=robot_asset_spec.robot_prim_path,
+            before_state=before_state,
+            headless=headless,
+            articulation_state_observer=articulation_state_observer,
+            robot_prim_inspection=robot_prim_inspection,
+            articulation_readiness=articulation_readiness,
+        )
+
+    return executor
+
+
+def _execute_micro_motion_via_isaac_api(
+    world,
+    *,
+    request: SimulationMicroMotionRequest,
+    robot_prim_path: str,
+    before_state: Dict[str, Any],
+    headless: bool,
+    articulation_state_observer,
+    robot_prim_inspection: Dict[str, Any] | None,
+    articulation_readiness: Dict[str, Any] | None,
+) -> Dict[str, Any]:
+    handle = _create_isaac_articulation_handle(world, robot_prim_path)
+    joint_names = _isaac_joint_names(handle) or _joint_names_from_state(before_state)
+    if request.joint_name not in joint_names:
+        raise RuntimeError(f"joint not found in Isaac articulation: {request.joint_name}")
+    before_positions = _isaac_joint_positions(handle) or _joint_positions_from_state(before_state, joint_names)
+    joint_index = joint_names.index(request.joint_name)
+    if joint_index >= len(before_positions):
+        raise RuntimeError(f"joint position unavailable for: {request.joint_name}")
+    target_positions = list(before_positions)
+    target_positions[joint_index] = float(target_positions[joint_index]) + float(request.requested_delta_rad)
+    before_api_state = _state_from_joint_positions(
+        before_state,
+        joint_names=joint_names,
+        joint_positions=before_positions,
+        robot_prim_path=robot_prim_path,
+        robot_prim_inspection=robot_prim_inspection,
+        articulation_readiness=articulation_readiness,
+    )
+    _apply_isaac_joint_positions(handle, target_positions)
+    if hasattr(world, "step"):
+        world.step(render=not headless)
+    after_positions = _isaac_joint_positions(handle) or target_positions
+    after_api_state = _state_from_joint_positions(
+        before_state,
+        joint_names=joint_names,
+        joint_positions=after_positions,
+        robot_prim_path=robot_prim_path,
+        robot_prim_inspection=robot_prim_inspection,
+        articulation_readiness=articulation_readiness,
+    )
+    articulation_state_observer(
+        world,
+        robot_prim_path=robot_prim_path,
+        robot_prim_inspection=robot_prim_inspection,
+        articulation_readiness=articulation_readiness,
+    )
+    return {
+        "before_articulation_state": before_api_state,
+        "after_articulation_state": after_api_state,
+    }
+
+
+def _create_isaac_articulation_handle(world, robot_prim_path: str):
+    scene = getattr(world, "scene", None)
+    if scene is not None:
+        get_object = getattr(scene, "get_object", None)
+        if callable(get_object):
+            existing = get_object("teto_micro_motion_articulation")
+            if existing is not None:
+                return existing
+
+    articulation_cls = None
+    for module_name, class_name in (
+        ("isaacsim.core.prims", "SingleArticulation"),
+        ("isaacsim.core.prims", "Articulation"),
+        ("omni.isaac.core.articulations", "Articulation"),
+    ):
+        try:
+            module = __import__(module_name, fromlist=[class_name])
+            articulation_cls = getattr(module, class_name)
+            break
+        except Exception:
+            articulation_cls = None
+    if articulation_cls is None:
+        raise RuntimeError("Isaac articulation API is unavailable")
+
+    try:
+        handle = articulation_cls(prim_path=robot_prim_path, name="teto_micro_motion_articulation")
+    except TypeError:
+        handle = articulation_cls(prim_paths_expr=robot_prim_path, name="teto_micro_motion_articulation")
+
+    if scene is not None and hasattr(scene, "add"):
+        try:
+            handle = scene.add(handle)
+        except Exception:
+            pass
+    initialize = getattr(handle, "initialize", None)
+    if callable(initialize):
+        try:
+            initialize()
+        except Exception:
+            pass
+    return handle
+
+
+def _isaac_joint_names(handle) -> list[str]:
+    for attribute_name in ("dof_names", "joint_names"):
+        names = getattr(handle, attribute_name, None)
+        if callable(names):
+            names = names()
+        if isinstance(names, (list, tuple)):
+            return [str(name) for name in names]
+    get_dof_names = getattr(handle, "get_dof_names", None)
+    if callable(get_dof_names):
+        names = get_dof_names()
+        if isinstance(names, (list, tuple)):
+            return [str(name) for name in names]
+    return []
+
+
+def _isaac_joint_positions(handle) -> list[float]:
+    get_joint_positions = getattr(handle, "get_joint_positions", None)
+    if not callable(get_joint_positions):
+        return []
+    positions = get_joint_positions()
+    return _float_list(positions)
+
+
+def _apply_isaac_joint_positions(handle, joint_positions: list[float]) -> None:
+    set_joint_positions = getattr(handle, "set_joint_positions", None)
+    if callable(set_joint_positions):
+        set_joint_positions(joint_positions)
+        return
+
+    action_cls = None
+    for module_name in ("isaacsim.core.utils.types", "omni.isaac.core.utils.types"):
+        try:
+            module = __import__(module_name, fromlist=["ArticulationAction"])
+            action_cls = getattr(module, "ArticulationAction")
+            break
+        except Exception:
+            action_cls = None
+    if action_cls is not None:
+        action = action_cls(joint_positions=joint_positions)
+        controller = getattr(handle, "get_articulation_controller", lambda: None)()
+        if controller is not None and hasattr(controller, "apply_action"):
+            controller.apply_action(action)
+            return
+        apply_action = getattr(handle, "apply_action", None)
+        if callable(apply_action):
+            apply_action(action)
+            return
+    raise RuntimeError("Isaac articulation handle cannot apply local simulation joint positions")
+
+
+def _state_from_joint_positions(
+    fallback_state: Dict[str, Any],
+    *,
+    joint_names: list[str],
+    joint_positions: list[float],
+    robot_prim_path: str,
+    robot_prim_inspection: Dict[str, Any] | None,
+    articulation_readiness: Dict[str, Any] | None,
+) -> Dict[str, Any]:
+    fallback_rows = {
+        row.get("joint_name"): row for row in fallback_state.get("joint_state_table") or [] if isinstance(row, dict)
+    }
+    rows = []
+    for index, joint_name in enumerate(joint_names):
+        fallback_row = fallback_rows.get(joint_name, {})
+        rows.append(
+            {
+                **fallback_row,
+                "joint_name": joint_name,
+                "category": fallback_row.get("category") or ("arm" if joint_name in set(UR5E_ARM_JOINT_NAMES) else "unknown"),
+                "position": _list_get(joint_positions, index),
+                "velocity": fallback_row.get("velocity", 0.0),
+                "lower_limit": fallback_row.get("lower_limit"),
+                "upper_limit": fallback_row.get("upper_limit"),
+            }
+        )
+    return build_articulation_state_report(
+        requested=True,
+        robot_prim_path=robot_prim_path,
+        robot_prim_inspection=robot_prim_inspection,
+        articulation_readiness=articulation_readiness,
+        joint_state_table=rows,
+        status="OK",
+    )
+
+
+def _joint_names_from_state(state: Dict[str, Any]) -> list[str]:
+    return [row.get("joint_name") for row in state.get("joint_state_table") or [] if isinstance(row, dict)]
+
+
+def _joint_positions_from_state(state: Dict[str, Any], joint_names: list[str]) -> list[float]:
+    row_by_name = {row.get("joint_name"): row for row in state.get("joint_state_table") or [] if isinstance(row, dict)}
+    positions = []
+    for joint_name in joint_names:
+        value = row_by_name.get(joint_name, {}).get("position")
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            raise RuntimeError(f"joint position unavailable for: {joint_name}")
+        positions.append(float(value))
+    return positions
+
+
+def _joint_position_from_state(state: Dict[str, Any], joint_name: str) -> float | None:
+    for row in state.get("joint_state_table") or []:
+        if isinstance(row, dict) and row.get("joint_name") == joint_name:
+            value = row.get("position")
+            return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+    return None
+
+
+def _float_list(values: Any) -> list[float]:
+    if values is None:
+        return []
+    if hasattr(values, "tolist"):
+        values = values.tolist()
+    if not isinstance(values, (list, tuple)):
+        return []
+    return [float(value) for value in values]
+
+
+def _list_get(values: list[Any], index: int, default=None):
+    return values[index] if index < len(values) else default
 
 
 def _dry_run_robot_prim_inspection_report_fields(

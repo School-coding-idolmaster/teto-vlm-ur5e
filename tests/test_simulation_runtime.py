@@ -205,6 +205,26 @@ def test_cli_simulation_motion_precheck_argument_parse():
     assert args.check_simulation_motion_precheck is True
 
 
+def test_cli_simulation_micro_motion_arguments_parse():
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "--execute-simulation-micro-motion",
+            "--micro-motion-joint",
+            "wrist_3_joint",
+            "--micro-motion-delta-rad",
+            "0.01",
+            "--micro-motion-tolerance-rad",
+            "0.005",
+        ]
+    )
+
+    assert args.execute_simulation_micro_motion is True
+    assert args.micro_motion_joint == "wrist_3_joint"
+    assert args.micro_motion_delta_rad == 0.01
+    assert args.micro_motion_tolerance_rad == 0.005
+
+
 def test_dry_run_robot_asset_check_passes_with_unavailable_default():
     result = run_first_simulation_execution(VALID_TASK, dry_run=True, steps=1, check_robot_asset=True)
 

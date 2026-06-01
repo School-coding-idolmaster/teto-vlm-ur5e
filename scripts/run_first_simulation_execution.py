@@ -13,7 +13,7 @@ from src.simulation_runtime import DEFAULT_SIMULATION_TASK, run_first_simulation
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run TETO V2.4.0 simulation-only motion precheck contract smoke test.")
+    parser = argparse.ArgumentParser(description="Run TETO V2.5.0 simulation-only micro-motion smoke test.")
     parser.add_argument("--dry-run", action="store_true", help="Do not import Isaac; produce a test execution report.")
     parser.add_argument("--no-isaac", action="store_true", help="Pure Python test mode without Isaac imports.")
     parser.add_argument("--spawn-cube", action="store_true", help="Spawn a visible cube in the Isaac World.")
@@ -64,6 +64,28 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Evaluate the simulation-only robot motion precheck gate without moving the robot.",
     )
+    parser.add_argument(
+        "--execute-simulation-micro-motion",
+        action="store_true",
+        help="Execute one tiny simulation-only Isaac joint delta after the precheck gate passes.",
+    )
+    parser.add_argument(
+        "--micro-motion-joint",
+        default="wrist_3_joint",
+        help="UR5e arm joint name for the simulation-only micro-motion.",
+    )
+    parser.add_argument(
+        "--micro-motion-delta-rad",
+        type=float,
+        default=0.01,
+        help="Tiny requested simulation joint delta in radians.",
+    )
+    parser.add_argument(
+        "--micro-motion-tolerance-rad",
+        type=float,
+        default=0.005,
+        help="Allowed absolute error for the observed simulation joint delta.",
+    )
     return parser
 
 
@@ -88,6 +110,10 @@ def main() -> int:
         check_articulation_readiness=args.check_articulation_readiness,
         observe_articulation_state=args.observe_articulation_state,
         check_simulation_motion_precheck=args.check_simulation_motion_precheck,
+        execute_simulation_micro_motion=args.execute_simulation_micro_motion,
+        micro_motion_joint=args.micro_motion_joint,
+        micro_motion_delta_rad=args.micro_motion_delta_rad,
+        micro_motion_tolerance_rad=args.micro_motion_tolerance_rad,
         output_dir=args.output_dir,
         write_report=True,
         demo_command=shlex.join([sys.executable, *sys.argv]),
@@ -99,7 +125,7 @@ def main() -> int:
 
 def print_summary(result: dict, report_path: Path) -> None:
     print("=" * 50)
-    print("TETO V2.4.0 SIMULATION-ONLY MOTION PRECHECK CONTRACT")
+    print("TETO V2.5.0 SIMULATION-ONLY MICRO-MOTION")
     print("=" * 50)
     print(f"Status: {result['status']}")
     print(f"Mode: {result['mode']}")
@@ -183,6 +209,20 @@ def print_summary(result: dict, report_path: Path) -> None:
     print(f"precheck_errors: {precheck.get('errors')}")
     print(f"simulation_motion_precheck_path: {result.get('simulation_motion_precheck_path')}")
     print(f"simulation_motion_precheck_report_path: {result.get('simulation_motion_precheck_report_path')}")
+    motion = result.get("motion") or {}
+    print(f"simulation_micro_motion_requested: {result.get('simulation_micro_motion_requested')}")
+    print(f"simulation_micro_motion_status: {result.get('simulation_micro_motion_status')}")
+    print(f"simulation_only: {result.get('simulation_only')}")
+    print(f"real_robot_allowed: {result.get('real_robot_allowed')}")
+    print(f"real_robot_motion_executed: {result.get('real_robot_motion_executed')}")
+    print(f"micro_motion_joint_name: {motion.get('joint_name')}")
+    print(f"requested_delta_rad: {motion.get('requested_delta_rad')}")
+    print(f"actual_delta_rad: {motion.get('actual_delta_rad')}")
+    print(f"delta_within_tolerance: {motion.get('delta_within_tolerance')}")
+    print(f"before_joint_state_path: {motion.get('before_joint_state_path')}")
+    print(f"after_joint_state_path: {motion.get('after_joint_state_path')}")
+    print(f"simulation_motion_result_path: {motion.get('simulation_motion_result_path')}")
+    print(f"simulation_motion_report_path: {motion.get('simulation_motion_report_path')}")
     print(f"Report: {report_path}")
     if result.get("blocking_reasons"):
         print(f"Blocking reasons: {', '.join(result['blocking_reasons'])}")

@@ -1063,7 +1063,7 @@ robot commands, or any simulated robot motion.
 
 TETO V2.4.0 adds a simulation-only motion precheck contract after the V2.3.0
 articulation state observation layer. It is the final precheck gate before the
-planned V2.5.0 first simulation robot micro-motion stage. V2.4.0 only answers:
+V2.5.0 first simulation robot micro-motion stage. V2.4.0 only answers:
 if a future Isaac-only UR5e micro-motion were requested, do the current asset,
 prim, readiness, state, and joint-limit observations satisfy the prerequisites?
 
@@ -1151,6 +1151,64 @@ V2.4.0 does not move the Isaac UR5e, generate joint targets, generate
 trajectories, generate `tcp_pose_world`, call ROS2, call MoveIt, call RTDE,
 generate URScript, connect a real UR5, or open any real or simulated robot
 motion control chain.
+
+## TETO V2.5.0 First Simulation Robot Micro-Motion
+
+TETO V2.5.0 performs the first UR5e joint micro-motion in Isaac Sim, with a
+strict simulation-only boundary. The default request is:
+
+- `joint_name=wrist_3_joint`
+- `requested_delta_rad=0.01`
+- `micro_motion_tolerance_rad=0.005`
+
+The micro-motion path always requires the V2.4.0 precheck gate. If
+`--execute-simulation-micro-motion` is passed, TETO automatically enables the
+robot asset check, robot prim inspection, articulation readiness check,
+articulation state observation, and simulation motion precheck. Motion is only
+attempted when:
+
+- `simulation_motion_precheck_status=READY_FOR_SIMULATION_MOTION`
+- `ready_for_simulation_motion=true`
+- `articulation_readiness_status=READY`
+- `articulation_state_status=OK`
+
+This stage is simulation-only. No real robot command is generated. No ROS2,
+MoveIt, RTDE, URScript, Dashboard, real UR5 backend, trajectory planner, or
+`tcp_pose_world` control chain is used. The only allowed execution mechanism is
+the local Isaac Sim simulation API.
+
+Run dry-run evidence without claiming real Isaac motion:
+
+```bash
+python3 scripts/run_first_simulation_execution.py \
+  --dry-run \
+  --steps 3 \
+  --execute-simulation-micro-motion \
+  --micro-motion-joint wrist_3_joint \
+  --micro-motion-delta-rad 0.01
+```
+
+Run true Isaac simulation micro-motion:
+
+```bash
+PYTHONPATH=. /home/newusername/Storage/home/wu-zijian/下载/isaac-sim-standalone-5.1.0-linux-x86_64/python.sh scripts/run_first_simulation_execution.py \
+  --steps 1 \
+  --check-robot-asset \
+  --inspect-robot-prim \
+  --check-articulation-readiness \
+  --observe-articulation-state \
+  --check-simulation-motion-precheck \
+  --execute-simulation-micro-motion \
+  --micro-motion-joint wrist_3_joint \
+  --micro-motion-delta-rad 0.01
+```
+
+When requested, evidence export adds `simulation_motion_result.json`,
+`simulation_motion_report.md`, `before_articulation_state.json`, and
+`after_articulation_state.json`. The report states that the motion is
+simulation-only, no real robot command was generated, no ROS2 / MoveIt / RTDE /
+URScript / real UR5 control chain was used, and execution happened only through
+the local Isaac Sim simulation API.
 
 Demo commands accept common image formats directly. TETO automatically
 creates a cached RGB JPEG under `data/processed/auto/`, with EXIF orientation
