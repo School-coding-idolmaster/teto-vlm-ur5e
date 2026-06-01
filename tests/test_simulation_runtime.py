@@ -187,6 +187,14 @@ def test_cli_robot_asset_arguments_parse():
     assert args.robot_asset_path == "/tmp/missing.usd"
 
 
+def test_cli_articulation_state_argument_parse():
+    parser = build_parser()
+
+    args = parser.parse_args(["--dry-run", "--steps", "1", "--observe-articulation-state"])
+
+    assert args.observe_articulation_state is True
+
+
 def test_dry_run_robot_asset_check_passes_with_unavailable_default():
     result = run_first_simulation_execution(VALID_TASK, dry_run=True, steps=1, check_robot_asset=True)
 
@@ -261,6 +269,34 @@ def test_dry_run_articulation_readiness_returns_not_ready_diagnostic():
     assert "articulation_root" in readiness["missing_requirements"]
     assert "six_standard_ur5e_arm_joints" in readiness["missing_requirements"]
     assert readiness["safety_boundary"]["read_only"] is True
+
+
+def test_dry_run_articulation_state_observation_returns_not_observable():
+    result = run_first_simulation_execution(
+        VALID_TASK,
+        dry_run=True,
+        steps=1,
+        observe_articulation_state=True,
+    )
+    state = result["articulation_state"]
+
+    assert result["status"] == "PASS"
+    assert result["error"]["code"] == "OK"
+    assert result["articulation_state_observation_requested"] is True
+    assert result["articulation_state_observable"] is False
+    assert result["articulation_state_status"] == "NOT_OBSERVABLE"
+    assert result["control_enabled"] is False
+    assert result["motion_generated"] is False
+    assert result["command_generated"] is False
+    assert result["joint_targets_generated"] is False
+    assert result["observed_joint_count"] == 0
+    assert result["joint_limits_available"] is False
+    assert state["status"] == "NOT_OBSERVABLE"
+    assert state["control_enabled"] is False
+    assert state["motion_generated"] is False
+    assert state["command_generated"] is False
+    assert state["joint_targets_generated"] is False
+    assert state["joint_state_table"] == []
 
 
 def test_inspect_robot_prim_does_not_add_motion_control_fields():
@@ -666,3 +702,170 @@ def test_true_runtime_robot_asset_check_unavailable_passes_without_loading(tmp_p
     assert result["robot_asset_loaded"] is False
     assert result["robot_asset_status"] == "UNAVAILABLE"
     assert result["robot_asset_blocking_reason"] == "E_ROBOT_ASSET_UNAVAILABLE"
+
+
+def test_true_like_articulation_state_observation_report(tmp_path):
+    class FakeSimulationApp:
+        def __init__(self, config):
+            self.config = config
+
+        def close(self):
+            self.closed = True
+
+    class FakeWorld:
+        def reset(self):
+            self.reset_called = True
+
+        def step(self, render=False):
+            self.step_called = True
+
+    def successful_loader(world, *, robot_asset_spec):
+        world.loaded = robot_asset_spec.robot_asset_path
+
+    def prim_exists(world, *, robot_asset_spec):
+        return True
+
+    def prim_inspector(world, *, robot_prim_path):
+        return {
+            "requested": True,
+            "robot_prim_path": robot_prim_path,
+            "robot_prim_exists": True,
+            "robot_root_type_name": "Xform",
+            "total_descendant_prim_count": 8,
+            "link_like_prim_count": 6,
+            "joint_like_prim_count": 6,
+            "visual_like_prim_count": 6,
+            "collision_like_prim_count": 6,
+            "articulation_root_found": True,
+            "physics_schema_summary": [],
+            "joint_names": [],
+            "joint_prim_paths": [],
+            "possible_dof_names": [],
+            "possible_dof_count": 6,
+            "joint_metadata_summary": {
+                "arm_joint_count": 6,
+                "arm_joint_names": [
+                    "shoulder_pan_joint",
+                    "shoulder_lift_joint",
+                    "elbow_joint",
+                    "wrist_1_joint",
+                    "wrist_2_joint",
+                    "wrist_3_joint",
+                ],
+            },
+            "joint_metadata_table": [],
+            "inspection_status": "OK",
+            "inspection_warnings": [],
+        }
+
+    def state_observer(world, *, robot_prim_path, robot_prim_inspection, articulation_readiness):
+        return {
+            "requested": True,
+            "status": "OK",
+            "metadata_only": True,
+            "control_enabled": False,
+            "motion_generated": False,
+            "command_generated": False,
+            "joint_targets_generated": False,
+            "robot_prim_path": robot_prim_path,
+            "articulation_state_observable": True,
+            "arm_joint_count": 6,
+            "observed_joint_count": 6,
+            "expected_arm_joint_names": [
+                "shoulder_pan_joint",
+                "shoulder_lift_joint",
+                "elbow_joint",
+                "wrist_1_joint",
+                "wrist_2_joint",
+                "wrist_3_joint",
+            ],
+            "observed_arm_joint_names": [
+                "shoulder_pan_joint",
+                "shoulder_lift_joint",
+                "elbow_joint",
+                "wrist_1_joint",
+                "wrist_2_joint",
+                "wrist_3_joint",
+            ],
+            "missing_arm_joint_names": [],
+            "extra_joint_names": [],
+            "joint_positions_available": True,
+            "joint_velocities_available": True,
+            "joint_limits_available": True,
+            "joint_state_table": [
+                {
+                    "joint_name": "shoulder_pan_joint",
+                    "category": "arm",
+                    "position": 0.0,
+                    "velocity": 0.0,
+                    "lower_limit": -3.14,
+                    "upper_limit": 3.14,
+                    "limit_available": True,
+                    "within_limit": True,
+                    "metadata_only": True,
+                    "control_target_generated": False,
+                }
+            ],
+            "warnings": [],
+            "errors": [],
+            "safety_boundary": {
+                "read_only": True,
+                "no_robot_motion": True,
+                "no_joint_targets": True,
+                "no_tcp_pose_world": True,
+                "no_trajectory": True,
+                "no_ros2_moveit_rtde_urscript": True,
+            },
+        }
+
+    asset_path = tmp_path / "robot.usd"
+    asset_path.write_text("#usda 1.0\n", encoding="utf-8")
+    result = _execute_isaac_world(
+        simulation_task=VALID_TASK,
+        simulation_app_cls=FakeSimulationApp,
+        world_cls=FakeWorld,
+        steps=1,
+        headless=True,
+        spawn_object=False,
+        move_object=False,
+        object_spec=SimulationObjectSpec(
+            object_type="cube",
+            prim_path=DEFAULT_CUBE_PRIM_PATH,
+            initial_position=tuple(DEFAULT_CUBE_POSITION),
+            target_position=tuple(DEFAULT_CUBE_TARGET_POSITION),
+            size=DEFAULT_CUBE_SIZE,
+        ),
+        started_at="2026-06-01 00:00:00",
+        output_dir=tmp_path,
+        write_report=True,
+        check_robot_asset=True,
+        load_robot_asset=True,
+        robot_asset_spec=RobotAssetSpec(robot_asset_path=str(asset_path)),
+        inspect_robot_prim=True,
+        check_articulation_readiness=True,
+        observe_articulation_state=True,
+        robot_asset_loader=successful_loader,
+        robot_prim_verifier=prim_exists,
+        robot_prim_inspector=prim_inspector,
+        articulation_state_observer=state_observer,
+    )
+
+    assert result["status"] == "PASS"
+    assert result["robot_asset_loaded"] is True
+    assert result["robot_prim_exists"] is True
+    assert result["articulation_readiness"]["readiness_status"] == "READY"
+    assert result["articulation_state_observation_requested"] is True
+    assert result["articulation_state_observable"] is True
+    assert result["articulation_state_status"] == "OK"
+    assert result["control_enabled"] is False
+    assert result["motion_generated"] is False
+    assert result["command_generated"] is False
+    assert result["joint_targets_generated"] is False
+    assert result["arm_joint_count"] == 6
+    assert result["observed_joint_count"] == 6
+    assert result["missing_arm_joint_names"] == []
+    assert result["joint_limits_available"] is True
+    assert result["articulation_state"]["control_enabled"] is False
+    assert result["articulation_state"]["motion_generated"] is False
+    assert result["articulation_state"]["command_generated"] is False
+    assert result["articulation_state"]["joint_targets_generated"] is False

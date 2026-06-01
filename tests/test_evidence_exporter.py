@@ -38,7 +38,7 @@ def test_dry_run_execution_writes_evidence_artifacts(tmp_path):
     assert manifest_path.exists()
 
     summary = summary_path.read_text(encoding="utf-8")
-    assert "TETO version: TETO V2.2.0" in summary
+    assert "TETO version: TETO V2.3.0" in summary
     assert f"run_id: {tmp_path.name}" in summary
     assert "mode: dry_run" in summary
     assert "status: PASS" in summary
@@ -54,6 +54,8 @@ def test_dry_run_execution_writes_evidence_artifacts(tmp_path):
     assert "inspection status: NOT_REQUESTED" in summary
     assert "## Articulation Readiness" in summary
     assert "readiness_status: NOT_REQUESTED" in summary
+    assert "## Articulation State Observation" in summary
+    assert "status: NOT_REQUESTED" in summary
     assert f"report path: {report_path}" in summary
 
     demo_command = demo_command_path.read_text(encoding="utf-8")
@@ -75,7 +77,7 @@ def test_dry_run_execution_writes_evidence_artifacts(tmp_path):
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["schema_version"] == EVIDENCE_MANIFEST_SCHEMA_VERSION
     assert manifest["run_id"] == tmp_path.name
-    assert manifest["teto_version"] == "TETO V2.2.0"
+    assert manifest["teto_version"] == "TETO V2.3.0"
     assert manifest["mode"] == "dry_run"
     assert manifest["status"] == "PASS"
     assert manifest["report_path"] == str(report_path)
@@ -89,6 +91,10 @@ def test_dry_run_execution_writes_evidence_artifacts(tmp_path):
     assert manifest["articulation_readiness"]["requested"] is False
     assert manifest["articulation_readiness"]["readiness_status"] == "NOT_REQUESTED"
     assert manifest["articulation_readiness_path"] is None
+    assert manifest["articulation_state"]["requested"] is False
+    assert manifest["articulation_state"]["status"] == "NOT_REQUESTED"
+    assert manifest["articulation_state_path"] is None
+    assert manifest["articulation_state_report_path"] is None
     assert manifest["robot_prim_inspection_path"] is None
     assert manifest["robot_structure_report_path"] is None
     assert manifest["screenshot_before_path"] is None
@@ -236,6 +242,52 @@ def test_evidence_exporter_writes_articulation_readiness_metadata(tmp_path):
     structure_report = (tmp_path / "robot_structure_report.md").read_text(encoding="utf-8")
     assert "## Articulation Readiness" in structure_report
     assert "readiness_status: NOT_READY" in structure_report
+
+
+def test_evidence_exporter_writes_articulation_state_metadata(tmp_path):
+    result = run_first_simulation_execution(
+        VALID_TASK,
+        dry_run=True,
+        steps=1,
+        observe_articulation_state=True,
+        output_dir=tmp_path,
+        write_report=True,
+        demo_command="python3 scripts/run_first_simulation_execution.py --dry-run --steps 1 --observe-articulation-state",
+    )
+
+    summary = (tmp_path / "summary.md").read_text(encoding="utf-8")
+    assert "## Articulation State Observation" in summary
+    assert "status: NOT_OBSERVABLE" in summary
+    assert "control_enabled: False" in summary
+    assert "motion_generated: False" in summary
+    assert "command_generated: False" in summary
+    assert "joint_targets_generated: False" in summary
+
+    state_path = tmp_path / "articulation_state.json"
+    state_report_path = tmp_path / "articulation_state_report.md"
+    assert state_path.exists()
+    assert state_report_path.exists()
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["requested"] is True
+    assert state["status"] == "NOT_OBSERVABLE"
+    assert state["metadata_only"] is True
+    assert state["control_enabled"] is False
+    assert state["motion_generated"] is False
+    assert state["command_generated"] is False
+    assert state["joint_targets_generated"] is False
+
+    manifest = json.loads((tmp_path / "evidence_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["articulation_state"] == state
+    assert manifest["articulation_state_path"] == str(state_path)
+    assert manifest["articulation_state_report_path"] == str(state_report_path)
+    assert result["articulation_state_path"] == str(state_path)
+    assert result["articulation_state_report_path"] == str(state_report_path)
+
+    state_report = state_report_path.read_text(encoding="utf-8")
+    assert "metadata/state observation only" in state_report
+    assert "control_enabled: False" in state_report
+    assert "joint_targets_generated: False" in state_report
+    assert "## Safety Boundary" in state_report
 
 
 def test_evidence_exporter_displays_joint_metadata_classification(tmp_path):

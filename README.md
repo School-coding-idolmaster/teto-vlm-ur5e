@@ -20,6 +20,7 @@ This project currently focuses on:
 - Demo result saving
 - `robot_task_json` result inspector / replay viewer for saved JSONL runs
 - Simulation object execution reports and evidence exports through Isaac Runtime
+- Read-only UR5e articulation readiness and articulation state observation contracts
 - Placeholder dataset and annotation utilities
 - Placeholder robot interface
 
@@ -974,6 +975,86 @@ generates `robot_structure_report.md`, that report includes an `Articulation
 Readiness` section as well. Screenshot and video placeholders remain null.
 
 V2.2.0 does not connect ROS2, MoveIt, RTDE, URScript, or a real UR5. It does
+not generate joint targets, joint angles, `tcp_pose_world`, trajectories,
+robot commands, or any simulated robot motion.
+
+## TETO V2.3.0 Articulation State Observation Contract
+
+TETO V2.3.0 adds a read-only articulation state observation contract after the
+V2.2.0 articulation readiness layer. It observes and organizes UR5e joint
+metadata/state fields from Isaac-side robot prim information so later versions
+can prepare for simulation robot motion integration without crossing into
+control in this release.
+
+This is still not robot control. Observation means metadata/state reporting
+only. The V2.3.0 report always keeps:
+
+- `metadata_only=true`
+- `control_enabled=false`
+- `motion_generated=false`
+- `command_generated=false`
+- `joint_targets_generated=false`
+- `allow_robot_motion=false`
+
+Run the dry-run observation shape check without Isaac:
+
+```bash
+python3 scripts/run_first_simulation_execution.py --dry-run --steps 1 --observe-articulation-state
+```
+
+Run true Isaac with the locally cached UR5e USD and the full read-only chain:
+
+```bash
+PYTHONPATH=. /home/newusername/Storage/home/wu-zijian/下载/isaac-sim-standalone-5.1.0-linux-x86_64/python.sh scripts/run_first_simulation_execution.py \
+  --steps 1 \
+  --check-robot-asset \
+  --inspect-robot-prim \
+  --check-articulation-readiness \
+  --observe-articulation-state
+```
+
+When a local default UR5e USD exists at the known project machine path, the
+true Isaac check path can load it for this read-only inspection chain. If no
+articulation is available, the run may still pass as a diagnostic while
+`articulation_state.status` reports `NOT_OBSERVABLE` or `NOT_AVAILABLE`.
+
+The structured report adds:
+
+- `articulation_state_observation_requested`
+- `articulation_state_observable`
+- `articulation_state_path`
+- `articulation_state_report_generated`
+- `articulation_state_report_path`
+- `articulation_state.status`
+- `articulation_state.metadata_only`
+- `articulation_state.control_enabled`
+- `articulation_state.motion_generated`
+- `articulation_state.command_generated`
+- `articulation_state.joint_targets_generated`
+- `articulation_state.arm_joint_count`
+- `articulation_state.observed_joint_count`
+- `articulation_state.expected_arm_joint_names`
+- `articulation_state.observed_arm_joint_names`
+- `articulation_state.missing_arm_joint_names`
+- `articulation_state.extra_joint_names`
+- `articulation_state.joint_positions_available`
+- `articulation_state.joint_velocities_available`
+- `articulation_state.joint_limits_available`
+- `articulation_state.joint_state_table`
+- `articulation_state.warnings`
+- `articulation_state.errors`
+- `articulation_state.safety_boundary`
+
+Each joint state table row records the joint name, category, optional position
+and velocity, optional lower/upper limits, limit availability, within-limit
+status, and explicit metadata-only / no-control flags.
+
+Evidence export adds an `Articulation State Observation` section to
+`summary.md`, an `articulation_state` object in `evidence_manifest.json`,
+`articulation_state.json`, and `articulation_state_report.md` when observation
+is requested. Screenshot and video placeholders remain null.
+
+V2.3.0 does not connect ROS2, MoveIt, RTDE, URScript, or a real UR5. It does
 not generate joint targets, joint angles, `tcp_pose_world`, trajectories,
 robot commands, or any simulated robot motion.
 

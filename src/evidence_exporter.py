@@ -24,13 +24,17 @@ def export_simulation_evidence(
     robot_prim_inspection_path = output_dir / "robot_prim_inspection.json"
     robot_structure_report_path = output_dir / "robot_structure_report.md"
     articulation_readiness_path = output_dir / "articulation_readiness.json"
+    articulation_state_path = output_dir / "articulation_state.json"
+    articulation_state_report_path = output_dir / "articulation_state_report.md"
 
     object_info = _simulation_object_info(result)
     robot_asset_info = _robot_asset_info(result)
     robot_prim_inspection_info = _robot_prim_inspection_info(result)
     articulation_readiness_info = _articulation_readiness_info(result)
+    articulation_state_info = _articulation_state_info(result)
     structure_report_requested = bool(robot_prim_inspection_info.get("requested"))
     readiness_requested = bool(articulation_readiness_info.get("requested"))
+    state_requested = bool(articulation_state_info.get("requested"))
     run_id = output_dir.name
     created_at = result.get("finished_at") or result.get("started_at")
     report_path = result.get("report_path")
@@ -43,6 +47,7 @@ def export_simulation_evidence(
             robot_asset_info=robot_asset_info,
             robot_prim_inspection_info=robot_prim_inspection_info,
             articulation_readiness_info=articulation_readiness_info,
+            articulation_state_info=articulation_state_info,
             robot_structure_report_path=structure_report_ref,
             run_id=run_id,
             created_at=created_at,
@@ -68,6 +73,7 @@ def export_simulation_evidence(
                 robot_asset_info=robot_asset_info,
                 robot_prim_inspection_info=robot_prim_inspection_info,
                 articulation_readiness_info=articulation_readiness_info,
+                articulation_state_info=articulation_state_info,
                 run_id=run_id,
                 report_path=report_path,
             ),
@@ -77,6 +83,18 @@ def export_simulation_evidence(
         with articulation_readiness_path.open("w", encoding="utf-8") as readiness_file:
             json.dump(articulation_readiness_info, readiness_file, ensure_ascii=False, indent=2)
             readiness_file.write("\n")
+    if state_requested:
+        with articulation_state_path.open("w", encoding="utf-8") as state_file:
+            json.dump(articulation_state_info, state_file, ensure_ascii=False, indent=2)
+            state_file.write("\n")
+        articulation_state_report_path.write_text(
+            _build_articulation_state_report_markdown(
+                articulation_state_info,
+                run_id=run_id,
+                report_path=report_path,
+            ),
+            encoding="utf-8",
+        )
 
     manifest = {
         "schema_version": EVIDENCE_MANIFEST_SCHEMA_VERSION,
@@ -97,6 +115,9 @@ def export_simulation_evidence(
         "robot_structure_report_path": structure_report_ref,
         "articulation_readiness": articulation_readiness_info,
         "articulation_readiness_path": str(articulation_readiness_path) if readiness_requested else None,
+        "articulation_state": articulation_state_info,
+        "articulation_state_path": str(articulation_state_path) if state_requested else None,
+        "articulation_state_report_path": str(articulation_state_report_path) if state_requested else None,
         "screenshot_before_path": None,
         "screenshot_after_path": None,
         "video_path": None,
@@ -113,6 +134,8 @@ def export_simulation_evidence(
         "robot_prim_inspection_path": robot_prim_inspection_path,
         "robot_structure_report_path": robot_structure_report_path,
         "articulation_readiness_path": articulation_readiness_path,
+        "articulation_state_path": articulation_state_path,
+        "articulation_state_report_path": articulation_state_report_path,
     }
 
 
@@ -213,6 +236,49 @@ def _articulation_readiness_info(result: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _articulation_state_info(result: Dict[str, Any]) -> Dict[str, Any]:
+    state = result.get("articulation_state")
+    if not isinstance(state, dict):
+        state = {}
+    return {
+        "requested": result.get("articulation_state_observation_requested", state.get("requested", False)),
+        "status": state.get("status", "NOT_REQUESTED"),
+        "metadata_only": state.get("metadata_only", True),
+        "control_enabled": state.get("control_enabled", False),
+        "motion_generated": state.get("motion_generated", False),
+        "command_generated": state.get("command_generated", False),
+        "joint_targets_generated": state.get("joint_targets_generated", False),
+        "robot_prim_path": state.get("robot_prim_path"),
+        "articulation_state_observable": result.get(
+            "articulation_state_observable",
+            state.get("articulation_state_observable", False),
+        ),
+        "arm_joint_count": state.get("arm_joint_count", 0),
+        "observed_joint_count": state.get("observed_joint_count", 0),
+        "expected_arm_joint_names": state.get("expected_arm_joint_names", []),
+        "observed_arm_joint_names": state.get("observed_arm_joint_names", []),
+        "missing_arm_joint_names": state.get("missing_arm_joint_names", []),
+        "extra_joint_names": state.get("extra_joint_names", []),
+        "joint_positions_available": state.get("joint_positions_available", False),
+        "joint_velocities_available": state.get("joint_velocities_available", False),
+        "joint_limits_available": state.get("joint_limits_available", False),
+        "joint_state_table": state.get("joint_state_table", []),
+        "warnings": state.get("warnings", []),
+        "errors": state.get("errors", []),
+        "safety_boundary": state.get(
+            "safety_boundary",
+            {
+                "read_only": True,
+                "no_robot_motion": True,
+                "no_joint_targets": True,
+                "no_tcp_pose_world": True,
+                "no_trajectory": True,
+                "no_ros2_moveit_rtde_urscript": True,
+            },
+        ),
+    }
+
+
 def _build_summary_markdown(
     result: Dict[str, Any],
     *,
@@ -220,6 +286,7 @@ def _build_summary_markdown(
     robot_asset_info: Dict[str, Any],
     robot_prim_inspection_info: Dict[str, Any],
     articulation_readiness_info: Dict[str, Any],
+    articulation_state_info: Dict[str, Any],
     robot_structure_report_path: str | None,
     run_id: str,
     created_at: str | None,
@@ -313,6 +380,25 @@ def _build_summary_markdown(
             f"- missing_requirements: {_format_value(articulation_readiness_info.get('missing_requirements'))}",
             f"- warnings: {_format_value(articulation_readiness_info.get('warnings'))}",
             "",
+            "## Articulation State Observation",
+            "",
+            f"- requested: {_format_value(articulation_state_info.get('requested'))}",
+            f"- status: {_format_value(articulation_state_info.get('status'))}",
+            f"- articulation_state_observable: {_format_value(articulation_state_info.get('articulation_state_observable'))}",
+            f"- metadata_only: {_format_value(articulation_state_info.get('metadata_only'))}",
+            f"- control_enabled: {_format_value(articulation_state_info.get('control_enabled'))}",
+            f"- motion_generated: {_format_value(articulation_state_info.get('motion_generated'))}",
+            f"- command_generated: {_format_value(articulation_state_info.get('command_generated'))}",
+            f"- joint_targets_generated: {_format_value(articulation_state_info.get('joint_targets_generated'))}",
+            f"- observed_joint_count: {_format_value(articulation_state_info.get('observed_joint_count'))}",
+            f"- arm_joint_count: {_format_value(articulation_state_info.get('arm_joint_count'))}",
+            f"- observed_arm_joint_names: {_format_value(articulation_state_info.get('observed_arm_joint_names'))}",
+            f"- missing_arm_joint_names: {_format_value(articulation_state_info.get('missing_arm_joint_names'))}",
+            f"- extra_joint_names: {_format_value(articulation_state_info.get('extra_joint_names'))}",
+            f"- joint_limits_available: {_format_value(articulation_state_info.get('joint_limits_available'))}",
+            f"- warnings: {_format_value(articulation_state_info.get('warnings'))}",
+            f"- errors: {_format_value(articulation_state_info.get('errors'))}",
+            "",
         ]
     )
 
@@ -323,6 +409,7 @@ def _build_robot_structure_report_markdown(
     robot_asset_info: Dict[str, Any],
     robot_prim_inspection_info: Dict[str, Any],
     articulation_readiness_info: Dict[str, Any],
+    articulation_state_info: Dict[str, Any],
     run_id: str,
     report_path: str | None,
 ) -> str:
@@ -402,6 +489,22 @@ def _build_robot_structure_report_markdown(
             f"- missing_requirements: {_format_value(articulation_readiness_info.get('missing_requirements'))}",
             f"- warnings: {_format_value(articulation_readiness_info.get('warnings'))}",
             "",
+            "## Articulation State Observation",
+            "",
+            f"- status: {_format_value(articulation_state_info.get('status'))}",
+            f"- articulation_state_observable: {_format_value(articulation_state_info.get('articulation_state_observable'))}",
+            f"- metadata_only: {_format_value(articulation_state_info.get('metadata_only'))}",
+            f"- control_enabled: {_format_value(articulation_state_info.get('control_enabled'))}",
+            f"- motion_generated: {_format_value(articulation_state_info.get('motion_generated'))}",
+            f"- command_generated: {_format_value(articulation_state_info.get('command_generated'))}",
+            f"- joint_targets_generated: {_format_value(articulation_state_info.get('joint_targets_generated'))}",
+            f"- observed_arm_joint_names: {_format_value(articulation_state_info.get('observed_arm_joint_names'))}",
+            f"- missing_arm_joint_names: {_format_value(articulation_state_info.get('missing_arm_joint_names'))}",
+            f"- extra_joint_names: {_format_value(articulation_state_info.get('extra_joint_names'))}",
+            f"- joint_limits_available: {_format_value(articulation_state_info.get('joint_limits_available'))}",
+            f"- warnings: {_format_value(articulation_state_info.get('warnings'))}",
+            f"- errors: {_format_value(articulation_state_info.get('errors'))}",
+            "",
             "## Safety Boundary",
             "",
             "This report is generated from read-only USD metadata inspection. It does not contain robot commands, joint targets, joint angles, tcp_pose_world, URScript, MoveIt requests, RTDE commands, or real robot control.",
@@ -437,8 +540,65 @@ def _build_demo_command_text(result: Dict[str, Any], *, demo_command: str | None
         f"robot_asset_path={_format_value(result.get('robot_asset_path'))}",
         f"inspect_robot_prim={_format_value(result.get('robot_prim_inspection_requested'))}",
         f"check_articulation_readiness={_format_value(result.get('articulation_readiness_requested'))}",
+        f"observe_articulation_state={_format_value(result.get('articulation_state_observation_requested'))}",
     ]
     return "\n".join(lines) + "\n"
+
+
+def _build_articulation_state_report_markdown(
+    state: Dict[str, Any],
+    *,
+    run_id: str,
+    report_path: str | None,
+) -> str:
+    rows = state.get("joint_state_table") if isinstance(state.get("joint_state_table"), list) else []
+    return "\n".join(
+        [
+            "# TETO Articulation State Observation Report",
+            "",
+            "This report is metadata/state observation only. It does not contain robot commands, joint targets, trajectories, tcp_pose_world, URScript, MoveIt requests, RTDE commands, ROS2 messages, or real robot control.",
+            "",
+            "## Basic Information",
+            "",
+            f"- run_id: {_format_value(run_id)}",
+            f"- report_path: {_format_value(report_path)}",
+            f"- status: {_format_value(state.get('status'))}",
+            f"- articulation_state_observable: {_format_value(state.get('articulation_state_observable'))}",
+            f"- metadata_only: {_format_value(state.get('metadata_only'))}",
+            f"- control_enabled: {_format_value(state.get('control_enabled'))}",
+            f"- motion_generated: {_format_value(state.get('motion_generated'))}",
+            f"- command_generated: {_format_value(state.get('command_generated'))}",
+            f"- joint_targets_generated: {_format_value(state.get('joint_targets_generated'))}",
+            "",
+            "## Joint Summary",
+            "",
+            f"- expected_arm_joint_names: {_format_value(state.get('expected_arm_joint_names'))}",
+            f"- observed_arm_joint_names: {_format_value(state.get('observed_arm_joint_names'))}",
+            f"- missing_arm_joint_names: {_format_value(state.get('missing_arm_joint_names'))}",
+            f"- extra_joint_names: {_format_value(state.get('extra_joint_names'))}",
+            f"- joint_positions_available: {_format_value(state.get('joint_positions_available'))}",
+            f"- joint_velocities_available: {_format_value(state.get('joint_velocities_available'))}",
+            f"- joint_limits_available: {_format_value(state.get('joint_limits_available'))}",
+            f"- warnings: {_format_value(state.get('warnings'))}",
+            f"- errors: {_format_value(state.get('errors'))}",
+            "",
+            "## Joint State Table",
+            "",
+            "| Joint name | Category | Position | Velocity | Lower limit | Upper limit | Limit available | Within limit | metadata_only | control_target_generated |",
+            "| --- | --- | ---: | ---: | ---: | ---: | --- | --- | --- | --- |",
+            *[_joint_state_table_row(row) for row in rows],
+            "",
+            "## Safety Boundary",
+            "",
+            f"- read_only: {_format_value((state.get('safety_boundary') or {}).get('read_only'))}",
+            f"- no_robot_motion: {_format_value((state.get('safety_boundary') or {}).get('no_robot_motion'))}",
+            f"- no_joint_targets: {_format_value((state.get('safety_boundary') or {}).get('no_joint_targets'))}",
+            f"- no_tcp_pose_world: {_format_value((state.get('safety_boundary') or {}).get('no_tcp_pose_world'))}",
+            f"- no_trajectory: {_format_value((state.get('safety_boundary') or {}).get('no_trajectory'))}",
+            f"- no_ros2_moveit_rtde_urscript: {_format_value((state.get('safety_boundary') or {}).get('no_ros2_moveit_rtde_urscript'))}",
+            "",
+        ]
+    )
 
 
 def _build_pose_delta_markdown(result: Dict[str, Any], *, object_info: Dict[str, Any]) -> str:
@@ -477,6 +637,21 @@ def _joint_metadata_table_row(row: Dict[str, Any]) -> str:
         f"| {_format_value(row.get('joint_prim_path'))} "
         f"| {_format_value(row.get('joint_type_name'))} "
         f"| {_format_value(row.get('is_ur5e_arm_joint'))} "
+        f"| {_format_value(row.get('metadata_only'))} "
+        f"| {_format_value(row.get('control_target_generated'))} |"
+    )
+
+
+def _joint_state_table_row(row: Dict[str, Any]) -> str:
+    return (
+        f"| {_format_value(row.get('joint_name'))} "
+        f"| {_format_value(row.get('category'))} "
+        f"| {_format_value(row.get('position'))} "
+        f"| {_format_value(row.get('velocity'))} "
+        f"| {_format_value(row.get('lower_limit'))} "
+        f"| {_format_value(row.get('upper_limit'))} "
+        f"| {_format_value(row.get('limit_available'))} "
+        f"| {_format_value(row.get('within_limit'))} "
         f"| {_format_value(row.get('metadata_only'))} "
         f"| {_format_value(row.get('control_target_generated'))} |"
     )

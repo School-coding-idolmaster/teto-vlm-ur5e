@@ -13,7 +13,7 @@ from src.simulation_runtime import DEFAULT_SIMULATION_TASK, run_first_simulation
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run TETO V2.2.0 articulation readiness contract smoke test.")
+    parser = argparse.ArgumentParser(description="Run TETO V2.3.0 articulation state observation contract smoke test.")
     parser.add_argument("--dry-run", action="store_true", help="Do not import Isaac; produce a test execution report.")
     parser.add_argument("--no-isaac", action="store_true", help="Pure Python test mode without Isaac imports.")
     parser.add_argument("--spawn-cube", action="store_true", help="Spawn a visible cube in the Isaac World.")
@@ -54,6 +54,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Evaluate read-only articulation readiness without enabling control or motion.",
     )
+    parser.add_argument(
+        "--observe-articulation-state",
+        action="store_true",
+        help="Observe read-only articulation joint state metadata without generating control targets.",
+    )
     return parser
 
 
@@ -76,6 +81,7 @@ def main() -> int:
         robot_asset_path=args.robot_asset_path,
         inspect_robot_prim=args.inspect_robot_prim,
         check_articulation_readiness=args.check_articulation_readiness,
+        observe_articulation_state=args.observe_articulation_state,
         output_dir=args.output_dir,
         write_report=True,
         demo_command=shlex.join([sys.executable, *sys.argv]),
@@ -87,7 +93,7 @@ def main() -> int:
 
 def print_summary(result: dict, report_path: Path) -> None:
     print("=" * 50)
-    print("TETO V2.2.0 ARTICULATION READINESS CONTRACT")
+    print("TETO V2.3.0 ARTICULATION STATE OBSERVATION CONTRACT")
     print("=" * 50)
     print(f"Status: {result['status']}")
     print(f"Mode: {result['mode']}")
@@ -145,6 +151,20 @@ def print_summary(result: dict, report_path: Path) -> None:
     print(f"missing_requirements: {readiness.get('missing_requirements')}")
     print(f"readiness_warnings: {readiness.get('warnings')}")
     print(f"articulation_readiness_path: {result.get('articulation_readiness_path')}")
+    state = result.get("articulation_state") or {}
+    print(f"articulation_state_observation_requested: {result.get('articulation_state_observation_requested')}")
+    print(f"articulation_state_observable: {result.get('articulation_state_observable')}")
+    print(f"articulation_state_status: {state.get('status')}")
+    print(f"joint_targets_generated: {state.get('joint_targets_generated')}")
+    print(f"observed_joint_count: {state.get('observed_joint_count')}")
+    print(f"observed_arm_joint_names: {state.get('observed_arm_joint_names')}")
+    print(f"missing_arm_joint_names: {state.get('missing_arm_joint_names')}")
+    print(f"extra_joint_names: {state.get('extra_joint_names')}")
+    print(f"joint_limits_available: {state.get('joint_limits_available')}")
+    print(f"state_warnings: {state.get('warnings')}")
+    print(f"state_errors: {state.get('errors')}")
+    print(f"articulation_state_path: {result.get('articulation_state_path')}")
+    print(f"articulation_state_report_path: {result.get('articulation_state_report_path')}")
     print(f"Report: {report_path}")
     if result.get("blocking_reasons"):
         print(f"Blocking reasons: {', '.join(result['blocking_reasons'])}")
