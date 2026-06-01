@@ -13,7 +13,7 @@ from src.simulation_runtime import DEFAULT_SIMULATION_TASK, run_first_simulation
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run TETO V2.5.0 simulation-only micro-motion smoke test.")
+    parser = argparse.ArgumentParser(description="Run TETO V2.5.1 simulation-only micro-motion evidence smoke test.")
     parser.add_argument("--dry-run", action="store_true", help="Do not import Isaac; produce a test execution report.")
     parser.add_argument("--no-isaac", action="store_true", help="Pure Python test mode without Isaac imports.")
     parser.add_argument("--spawn-cube", action="store_true", help="Spawn a visible cube in the Isaac World.")
@@ -125,7 +125,7 @@ def main() -> int:
 
 def print_summary(result: dict, report_path: Path) -> None:
     print("=" * 50)
-    print("TETO V2.5.0 SIMULATION-ONLY MICRO-MOTION")
+    print("TETO V2.5.1 SIMULATION-ONLY MICRO-MOTION EVIDENCE")
     print("=" * 50)
     print(f"Status: {result['status']}")
     print(f"Mode: {result['mode']}")
@@ -218,7 +218,13 @@ def print_summary(result: dict, report_path: Path) -> None:
     print(f"micro_motion_joint_name: {motion.get('joint_name')}")
     print(f"requested_delta_rad: {motion.get('requested_delta_rad')}")
     print(f"actual_delta_rad: {motion.get('actual_delta_rad')}")
+    print(f"tolerance_rad: {motion.get('tolerance_rad')}")
     print(f"delta_within_tolerance: {motion.get('delta_within_tolerance')}")
+    print(f"motion_evidence_available: {result.get('motion_evidence_available')}")
+    print("Motion evidence files:")
+    for item in result.get("motion_evidence_files") or []:
+        if isinstance(item, dict):
+            print(f"- {item.get('name')}: {item.get('path')}")
     print(f"before_joint_state_path: {motion.get('before_joint_state_path')}")
     print(f"after_joint_state_path: {motion.get('after_joint_state_path')}")
     print(f"simulation_motion_result_path: {motion.get('simulation_motion_result_path')}")

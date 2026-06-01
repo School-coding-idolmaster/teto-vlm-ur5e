@@ -6,8 +6,10 @@ import pytest
 from src.simulation_micro_motion import (
     DEFAULT_MICRO_MOTION_TOLERANCE_RAD,
     SimulationMicroMotionRequest,
+    build_joint_diff_summary,
     compute_joint_delta,
     execute_simulation_micro_motion,
+    format_joint_diff_table,
     format_simulation_micro_motion_report,
     validate_micro_motion_request,
 )
@@ -162,6 +164,70 @@ def test_report_markdown_contains_simulation_only_safety_statement():
     assert "No real robot command was generated." in report
     assert "No ROS2 / MoveIt / RTDE / URScript / real UR5 control chain was used." in report
     assert "The motion was executed only through the local Isaac Sim simulation API." in report
+
+
+def test_joint_diff_summary_and_table_are_formatted():
+    result = execute_simulation_micro_motion(
+        SimulationMicroMotionRequest(),
+        simulation_motion_precheck=ready_precheck(),
+        articulation_readiness=ready_readiness(),
+        before_articulation_state=articulation_state(),
+        motion_executor=fake_executor,
+    )
+
+    summary = build_joint_diff_summary(result)
+    table = format_joint_diff_table(result)
+
+    assert summary["joint_name"] == "wrist_3_joint"
+    assert summary["before_joint_position_rad"] == 0.2
+    assert summary["after_joint_position_rad"] == pytest.approx(0.21)
+    assert summary["requested_delta_rad"] == 0.01
+    assert summary["actual_delta_rad"] == pytest.approx(0.01)
+    assert summary["delta_within_tolerance"] is True
+    assert "| Joint name | Before rad | After rad | Requested delta rad | Actual delta rad |" in table
+    assert "| wrist_3_joint | 0.2 |" in table
+
+
+def test_report_markdown_contains_diff_and_evidence_sections():
+    result = execute_simulation_micro_motion(
+        SimulationMicroMotionRequest(),
+        simulation_motion_precheck=ready_precheck(),
+        articulation_readiness=ready_readiness(),
+        before_articulation_state=articulation_state(),
+        motion_executor=fake_executor,
+    )
+
+    report = format_simulation_micro_motion_report(result)
+
+    assert "# TETO V2.5.1 Simulation Micro-Motion Evidence Report" in report
+    assert "## Status" in report
+    assert "## Precheck Summary" in report
+    assert "## Joint Diff Summary" in report
+    assert "## Evidence Files" in report
+    assert "## Safety Boundary" in report
+    assert "before_joint_position_rad: 0.2" in report
+    assert "after_joint_position_rad: 0.21000000000000002" in report
+    assert "requested_delta_rad: 0.01" in report
+    assert "actual_delta_rad: 0.010000000000000009" in report
+    assert "tolerance_rad: 0.005" in report
+    assert "delta_within_tolerance: True" in report
+
+
+def test_blocked_by_precheck_report_is_auditable():
+    result = execute_simulation_micro_motion(
+        SimulationMicroMotionRequest(),
+        simulation_motion_precheck={"status": "NOT_READY", "ready": False, "blocking_reasons": ["E_NOT_READY"]},
+        articulation_readiness=ready_readiness(),
+        before_articulation_state=articulation_state(),
+        motion_executor=fake_executor,
+    )
+
+    report = format_simulation_micro_motion_report(result)
+
+    assert "simulation_micro_motion_status: BLOCKED_BY_PRECHECK" in report
+    assert "simulation_motion_precheck_status: NOT_READY" in report
+    assert "blocking_reasons: [\"E_NOT_READY\"]" in report
+    assert "robot_motion_executed: False" in report
 
 
 def test_result_json_does_not_add_real_robot_control_chain_fields():

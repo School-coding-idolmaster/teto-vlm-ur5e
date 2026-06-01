@@ -26,12 +26,13 @@ from src.simulation_micro_motion import (
     MICRO_MOTION_STATUS_OK,
     SimulationMicroMotionRequest,
     execute_simulation_micro_motion,
+    summarize_motion_evidence,
 )
 from src.simulation_motion_precheck import build_simulation_motion_precheck_report
 
 
 REPORT_VERSION = "teto_simulation_execution.v1"
-CURRENT_TETO_VERSION = "TETO V2.5.0"
+CURRENT_TETO_VERSION = "TETO V2.5.1"
 DEFAULT_STEPS = 5
 DEFAULT_SIMULATION_OBJECT_TYPE = "cube"
 DEFAULT_CUBE_PRIM_PATH = "/World/TETO_Cube"
@@ -141,6 +142,9 @@ def build_simulation_execution_result(
     result.setdefault("simulation_motion_report_path", None)
     result.setdefault("before_joint_state_path", None)
     result.setdefault("after_joint_state_path", None)
+    result.setdefault("motion_evidence_available", False)
+    result.setdefault("motion_evidence_files", [])
+    result.setdefault("motion_diff_summary", {})
     return result
 
 
@@ -508,6 +512,16 @@ def write_simulation_execution_result(
         result["motion"]["simulation_motion_report_path"] = result["simulation_motion_report_path"]
         result["motion"]["before_joint_state_path"] = result["before_joint_state_path"]
         result["motion"]["after_joint_state_path"] = result["after_joint_state_path"]
+        evidence = summarize_motion_evidence(result)
+        result["motion_evidence_available"] = evidence["motion_evidence_available"]
+        result["motion_evidence_files"] = evidence["motion_evidence_files"]
+        result["motion_diff_summary"] = evidence["motion_diff_summary"]
+        result["before_joint_position_rad"] = result["motion"].get("before_joint_position_rad")
+        result["after_joint_position_rad"] = result["motion"].get("after_joint_position_rad")
+        result["requested_delta_rad"] = result["motion"].get("requested_delta_rad")
+        result["actual_delta_rad"] = result["motion"].get("actual_delta_rad")
+        result["tolerance_rad"] = result["motion"].get("tolerance_rad")
+        result["delta_within_tolerance"] = result["motion"].get("delta_within_tolerance")
     with report_path.open("w", encoding="utf-8") as report_file:
         json.dump(result, report_file, ensure_ascii=False, indent=2)
         report_file.write("\n")

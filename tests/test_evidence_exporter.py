@@ -38,7 +38,7 @@ def test_dry_run_execution_writes_evidence_artifacts(tmp_path):
     assert manifest_path.exists()
 
     summary = summary_path.read_text(encoding="utf-8")
-    assert "TETO version: TETO V2.5.0" in summary
+    assert "TETO version: TETO V2.5.1" in summary
     assert f"run_id: {tmp_path.name}" in summary
     assert "mode: dry_run" in summary
     assert "status: PASS" in summary
@@ -77,7 +77,7 @@ def test_dry_run_execution_writes_evidence_artifacts(tmp_path):
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["schema_version"] == EVIDENCE_MANIFEST_SCHEMA_VERSION
     assert manifest["run_id"] == tmp_path.name
-    assert manifest["teto_version"] == "TETO V2.5.0"
+    assert manifest["teto_version"] == "TETO V2.5.1"
     assert manifest["mode"] == "dry_run"
     assert manifest["status"] == "PASS"
     assert manifest["report_path"] == str(report_path)
@@ -108,6 +108,57 @@ def test_dry_run_execution_writes_evidence_artifacts(tmp_path):
     assert result["robot_structure_report_generated"] is False
     assert result["robot_structure_report_path"] is None
     assert not structure_report_path.exists()
+
+
+def test_evidence_exporter_writes_micro_motion_manifest_and_summary(tmp_path):
+    result = run_first_simulation_execution(
+        VALID_TASK,
+        dry_run=True,
+        steps=3,
+        execute_simulation_micro_motion=True,
+        micro_motion_joint="wrist_3_joint",
+        micro_motion_delta_rad=0.01,
+        output_dir=tmp_path,
+        write_report=True,
+        demo_command=(
+            "python3 scripts/run_first_simulation_execution.py --dry-run --steps 3 "
+            "--execute-simulation-micro-motion --micro-motion-joint wrist_3_joint --micro-motion-delta-rad 0.01"
+        ),
+    )
+
+    summary = (tmp_path / "summary.md").read_text(encoding="utf-8")
+    manifest = json.loads((tmp_path / "evidence_manifest.json").read_text(encoding="utf-8"))
+    report = (tmp_path / "simulation_motion_report.md").read_text(encoding="utf-8")
+
+    assert "## Micro-Motion Evidence Summary" in summary
+    assert "actual_delta_rad: null" in summary
+    assert "delta_within_tolerance: False" in summary
+    assert f"simulation_motion_report_path: {tmp_path / 'simulation_motion_report.md'}" in summary
+    assert f"before_joint_state_path: {tmp_path / 'before_articulation_state.json'}" in summary
+    assert f"after_joint_state_path: {tmp_path / 'after_articulation_state.json'}" in summary
+
+    assert manifest["motion_evidence_available"] is True
+    assert manifest["simulation_only"] is True
+    assert manifest["real_robot_motion_executed"] is False
+    assert manifest["motion_diff_summary"]["joint_name"] == "wrist_3_joint"
+    assert manifest["motion_diff_summary"]["requested_delta_rad"] == 0.01
+    assert manifest["motion_diff_summary"]["actual_delta_rad"] is None
+    assert manifest["motion_diff_summary"]["delta_within_tolerance"] is False
+    assert manifest["motion_evidence_files"] == [
+        {"name": "simulation_motion_result.json", "path": str(tmp_path / "simulation_motion_result.json")},
+        {"name": "simulation_motion_report.md", "path": str(tmp_path / "simulation_motion_report.md")},
+        {"name": "before_articulation_state.json", "path": str(tmp_path / "before_articulation_state.json")},
+        {"name": "after_articulation_state.json", "path": str(tmp_path / "after_articulation_state.json")},
+    ]
+    assert manifest["simulation_micro_motion"]["motion_evidence_files"] == manifest["motion_evidence_files"]
+
+    assert "# TETO V2.5.1 Simulation Micro-Motion Evidence Report" in report
+    assert "## Joint Diff Summary" in report
+    assert "## Evidence Files" in report
+    assert "simulation_motion_result.json" in report
+    assert "before_articulation_state.json" in report
+    assert result["robot_motion_executed"] is False
+    assert result["real_robot_motion_executed"] is False
 
 
 def test_evidence_exporter_writes_robot_asset_metadata(tmp_path):

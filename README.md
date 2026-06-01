@@ -1210,6 +1210,31 @@ simulation-only, no real robot command was generated, no ROS2 / MoveIt / RTDE /
 URScript / real UR5 control chain was used, and execution happened only through
 the local Isaac Sim simulation API.
 
+## TETO V2.5.1 Motion Evidence Polish
+
+TETO V2.5.1 does not add any new robot motion capability and does not change
+the V2.5.0 simulation-only safety boundary. It polishes the micro-motion
+evidence so dry-run, blocked-by-precheck, and true Isaac runs are easier to
+audit.
+
+The evidence export now highlights:
+
+- before/after joint position diff
+- `requested_delta_rad`, `actual_delta_rad`, `tolerance_rad`
+- `delta_within_tolerance`
+- motion evidence file paths in `summary.md`
+- `motion_evidence_available`, `motion_evidence_files`, and
+  `motion_diff_summary` in `evidence_manifest.json`
+
+The generated `simulation_motion_report.md` is titled
+`TETO V2.5.1 Simulation Micro-Motion Evidence Report` and includes Status,
+Precheck Summary, Joint Diff Summary, Evidence Files, and Safety Boundary
+sections.
+
+V2.5.1 remains simulation-only. No real robot command is generated. No ROS2 /
+MoveIt / RTDE / URScript / Dashboard / real UR5 control chain, trajectory
+planner, or `tcp_pose_world` control path is used.
+
 Demo commands accept common image formats directly. TETO automatically
 creates a cached RGB JPEG under `data/processed/auto/`, with EXIF orientation
 applied, long edge resized, animated images reduced to the first frame, and
@@ -1417,4 +1442,5 @@ python3 -m src.cli prepare-images --input-dir data/raw --output-dir data/process
 - V2.3.0 = articulation state observation contract
 - V2.4.0 = simulation-only motion precheck contract
 - V2.5.0 = first simulation robot micro-motion
+- V2.5.1 = motion evidence polish
 - Future ROS2 / MoveIt2 / RTDE / URScript / real UR5 controller integration remains outside the current implemented safety boundary
