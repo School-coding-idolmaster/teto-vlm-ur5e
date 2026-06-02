@@ -75,7 +75,7 @@ def startup_animation():
    ██║   ███████╗   ██║   ╚██████╔╝
    ╚═╝   ╚══════╝   ╚═╝    ╚═════╝
 
-              TETO V2.8.0
+              TETO V2.8.1
            -- Test Launcher --
 """
     print(RED + title + RESET)
@@ -88,7 +88,7 @@ def _clean_path(value: str) -> str:
 
 def print_menu():
     print("=" * 40)
-    print("              TETO V2.8.0")
+    print("              TETO V2.8.1")
     print("             Test Launcher")
     print("=" * 40)
     print("1. Convert images")
@@ -501,7 +501,7 @@ def handle_check_environment():
 
 def handle_first_simulation_execution():
     script_path = PROJECT_ROOT / "scripts" / "run_first_simulation_execution.py"
-    print("Running TETO V2.8.0 lab readiness no-motion dry-run check.")
+    print("Running TETO V2.8.1 readiness evidence polish dry-run check.")
     print(
         f"For real Isaac runtime, run: {sys.executable} {script_path} "
         "--check-robot-asset --inspect-robot-prim --check-articulation-readiness "

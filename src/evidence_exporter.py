@@ -325,13 +325,21 @@ def export_simulation_evidence(
         "no_automatic_retry_executed": no_automatic_retry_executed,
         "lab_readiness_requested": lab_readiness_requested,
         "lab_readiness_status": lab_readiness_info.get("status"),
+        "lab_backend_readiness_status": lab_readiness_info.get("lab_backend_readiness_status"),
         "camera_readiness_status": lab_readiness_info.get("camera_readiness_status"),
         "live_vlm_readiness_status": lab_readiness_info.get("live_vlm_readiness_status"),
         "shadow_mode_readiness_status": lab_readiness_info.get("shadow_mode_readiness_status"),
+        "readiness_evidence_available": lab_readiness_requested and bool(_readiness_evidence_files(lab_readiness_info)),
         "no_motion_readiness_passed": lab_readiness_info.get("no_motion_readiness_passed", False),
+        "readiness_statuses": _readiness_statuses(lab_readiness_info),
+        "blocking_reasons": list(lab_readiness_info.get("blocking_reasons") or result.get("blocking_reasons") or []),
+        "safety_flags": _readiness_safety_flags(lab_readiness_info),
         "allow_robot_motion": lab_readiness_info.get("allow_robot_motion", result.get("allow_robot_motion", False)),
         "allow_live_camera": lab_readiness_info.get("allow_live_camera", False),
         "allow_live_vlm": lab_readiness_info.get("allow_live_vlm", False),
+        "live_camera_used": lab_readiness_info.get("live_camera_used", False),
+        "live_vlm_called": lab_readiness_info.get("live_vlm_called", False),
+        "real_robot_motion_executed": lab_readiness_info.get("real_robot_motion_executed", False),
         "real_robot_command_enabled": lab_readiness_info.get("real_robot_command_enabled", False),
         "readiness_evidence_files": (
             _readiness_evidence_files(lab_readiness_info) if lab_readiness_requested else []
@@ -341,7 +349,10 @@ def export_simulation_evidence(
         "motion_evidence_files": motion_evidence_summary["motion_evidence_files"],
         "motion_diff_summary": motion_evidence_summary["motion_diff_summary"],
         "simulation_only": result.get("simulation_only", True),
-        "real_robot_motion_executed": result.get("real_robot_motion_executed", False),
+        "real_robot_motion_executed": lab_readiness_info.get(
+            "real_robot_motion_executed",
+            result.get("real_robot_motion_executed", False),
+        ),
         "simulation_motion_result_path": str(simulation_motion_result_path) if micro_motion_requested else None,
         "simulation_motion_report_path": str(simulation_motion_report_path) if micro_motion_requested else None,
         "before_articulation_state_path": str(before_articulation_state_path) if micro_motion_requested else None,
@@ -808,6 +819,50 @@ def _readiness_evidence_files(lab_readiness_info: Dict[str, Any]) -> list[Dict[s
     ]
 
 
+def _readiness_statuses(lab_readiness_info: Dict[str, Any]) -> Dict[str, Any]:
+    statuses = lab_readiness_info.get("readiness_statuses")
+    if isinstance(statuses, dict):
+        return statuses
+    return {
+        "lab_backend": _readiness_evidence_status(lab_readiness_info.get("lab_backend_readiness_status")),
+        "camera": _readiness_evidence_status(lab_readiness_info.get("camera_readiness_status")),
+        "live_vlm": _readiness_evidence_status(lab_readiness_info.get("live_vlm_readiness_status")),
+        "shadow_mode": _readiness_evidence_status(lab_readiness_info.get("shadow_mode_readiness_status")),
+    }
+
+
+def _readiness_evidence_status(status: Any) -> str:
+    if status == "READY_FOR_SHADOW_MODE":
+        return "PASS"
+    if status in {"BLOCKED", "NOT_READY", "CONFIG_ONLY", "DISABLED"}:
+        return str(status)
+    return "NOT_REQUESTED"
+
+
+def _readiness_safety_flags(lab_readiness_info: Dict[str, Any]) -> Dict[str, bool]:
+    safety_flags = lab_readiness_info.get("safety_flags")
+    if isinstance(safety_flags, dict):
+        return {str(key): bool(value) for key, value in safety_flags.items()}
+    return {
+        "allow_robot_motion": lab_readiness_info.get("allow_robot_motion", False) is True,
+        "allow_live_camera": lab_readiness_info.get("allow_live_camera", False) is True,
+        "allow_live_vlm": lab_readiness_info.get("allow_live_vlm", False) is True,
+        "real_robot_backend_used": False,
+        "real_robot_command_enabled": lab_readiness_info.get("real_robot_command_enabled", False) is True,
+        "real_robot_motion_executed": lab_readiness_info.get("real_robot_motion_executed", False) is True,
+        "live_camera_used": lab_readiness_info.get("live_camera_used", False) is True,
+        "live_vlm_called": lab_readiness_info.get("live_vlm_called", False) is True,
+        "ros2_used": False,
+        "moveit_used": False,
+        "rtde_used": False,
+        "urscript_used": False,
+        "dashboard_used": False,
+        "trajectory_generated": False,
+        "tcp_pose_world_executed": False,
+        "automatic_retry_motion_executed": False,
+    }
+
+
 def _latest_execution_summary(
     execution_info: Dict[str, Any],
     precheck_info: Dict[str, Any],
@@ -1040,6 +1095,15 @@ def _build_summary_markdown(
             f"- warnings: {_format_value(simulation_motion_precheck_info.get('warnings'))}",
             f"- errors: {_format_value(simulation_motion_precheck_info.get('errors'))}",
             "",
+            "## Readiness Evidence Summary",
+            "",
+            f"- readiness_evidence_available: {_format_value(lab_readiness_info.get('requested'))}",
+            f"- lab_backend: {_format_value(_readiness_statuses(lab_readiness_info).get('lab_backend'))}",
+            f"- camera: {_format_value(_readiness_statuses(lab_readiness_info).get('camera'))}",
+            f"- live_vlm: {_format_value(_readiness_statuses(lab_readiness_info).get('live_vlm'))}",
+            f"- shadow_mode: {_format_value(_readiness_statuses(lab_readiness_info).get('shadow_mode'))}",
+            f"- no_motion_readiness_passed: {_format_value(lab_readiness_info.get('no_motion_readiness_passed'))}",
+            "",
             "## Lab / Camera / VLM No-Motion Readiness Summary",
             "",
             f"- lab_backend_readiness_status: {_format_value(lab_readiness_info.get('lab_backend_readiness_status'))}",
@@ -1050,8 +1114,13 @@ def _build_summary_markdown(
             f"- allow_live_camera: {_format_value(lab_readiness_info.get('allow_live_camera'))}",
             f"- allow_live_vlm: {_format_value(lab_readiness_info.get('allow_live_vlm'))}",
             f"- real_robot_command_enabled: {_format_value(lab_readiness_info.get('real_robot_command_enabled'))}",
+            f"- real_robot_motion_executed: {_format_value(lab_readiness_info.get('real_robot_motion_executed', False))}",
+            f"- live_camera_used: {_format_value(lab_readiness_info.get('live_camera_used', False))}",
+            f"- live_vlm_called: {_format_value(lab_readiness_info.get('live_vlm_called', False))}",
+            f"- blocking_reasons: {_format_value(lab_readiness_info.get('blocking_reasons'))}",
+            f"- warnings: {_format_value(lab_readiness_info.get('warnings'))}",
             f"- next_safe_action: {_format_value(lab_readiness_info.get('next_safe_action'))}",
-            "This V2.8.0 readiness section is no-motion evidence only: no real UR5, ROS2, MoveIt, RTDE, URScript, Dashboard, trajectory, tcp_pose_world, live camera capture, or live VLM call is executed.",
+            "This V2.8.1 readiness evidence is shadow-mode/no-motion preparation only because it only checks declared config fields and exports evidence. It does not connect to a real UR5, ROS2, MoveIt, RTDE, URScript, Dashboard, a trajectory planner, tcp_pose_world execution, live camera capture, or live VLM/Qwen.",
             "",
             "## Micro-Motion Evidence Summary",
             "",

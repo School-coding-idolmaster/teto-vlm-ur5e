@@ -303,7 +303,7 @@ def format_simulation_micro_motion_report(result: Dict[str, Any]) -> str:
     evidence = summarize_motion_evidence(result)
     return "\n".join(
         [
-            "# TETO V2.8.0 Simulation Micro-Motion Evidence Report",
+            "# TETO V2.8.1 Simulation Micro-Motion Evidence Report",
             "",
             "This is simulation-only micro-motion.",
             "No real robot command was generated.",

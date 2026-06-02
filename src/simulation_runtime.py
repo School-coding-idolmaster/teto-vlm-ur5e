@@ -46,7 +46,7 @@ from src.simulated_task_execution import (
 
 
 REPORT_VERSION = "teto_simulation_execution.v1"
-CURRENT_TETO_VERSION = "TETO V2.8.0"
+CURRENT_TETO_VERSION = "TETO V2.8.1"
 DEFAULT_STEPS = 5
 DEFAULT_SIMULATION_OBJECT_TYPE = "cube"
 DEFAULT_CUBE_PRIM_PATH = "/World/TETO_Cube"

@@ -199,7 +199,7 @@ def test_report_markdown_contains_diff_and_evidence_sections():
 
     report = format_simulation_micro_motion_report(result)
 
-    assert "# TETO V2.8.0 Simulation Micro-Motion Evidence Report" in report
+    assert "# TETO V2.8.1 Simulation Micro-Motion Evidence Report" in report
     assert "## Status" in report
     assert "## Precheck Summary" in report
     assert "## Joint Diff Summary" in report

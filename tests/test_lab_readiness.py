@@ -164,10 +164,18 @@ def test_readiness_report_contains_no_motion_safety_boundary():
 
     report = format_lab_readiness_report(result)
 
+    assert "# TETO V2.8.1 Readiness Evidence Polish Report" in report
+    assert "## Overall Status" in report
+    assert "## Readiness Contracts" in report
+    assert "| Lab Backend | PASS | READY_FOR_SHADOW_MODE | [] | [] |" in report
     assert "no-motion" in report.lower()
     assert "does not connect to a real UR5" in report
     assert "does not generate trajectories" in report
     assert "does not execute tcp_pose_world" in report
+    assert "allow_live_camera=false" in report
+    assert "allow_live_vlm=false" in report
+    assert "real_robot_command_enabled=false" in report
+    assert "real_robot_motion_executed=false" in report
 
 
 def test_runtime_evidence_manifest_and_summary_contain_readiness_files(tmp_path):
@@ -189,9 +197,26 @@ def test_runtime_evidence_manifest_and_summary_contain_readiness_files(tmp_path)
     summary = (tmp_path / "summary.md").read_text(encoding="utf-8")
 
     assert manifest["lab_readiness_requested"] is True
+    assert manifest["readiness_evidence_available"] is True
     assert manifest["no_motion_readiness_passed"] is True
+    assert manifest["readiness_statuses"] == {
+        "lab_backend": "PASS",
+        "camera": "PASS",
+        "live_vlm": "PASS",
+        "shadow_mode": "PASS",
+    }
+    assert manifest["blocking_reasons"] == []
+    assert manifest["safety_flags"]["live_camera_used"] is False
+    assert manifest["safety_flags"]["live_vlm_called"] is False
+    assert manifest["safety_flags"]["real_robot_motion_executed"] is False
+    assert manifest["live_camera_used"] is False
+    assert manifest["live_vlm_called"] is False
+    assert manifest["real_robot_motion_executed"] is False
+    assert manifest["real_robot_command_enabled"] is False
     assert "lab_readiness_result.json" in [item["name"] for item in manifest["readiness_evidence_files"]]
+    assert "## Readiness Evidence Summary" in summary
     assert "## Lab / Camera / VLM No-Motion Readiness Summary" in summary
+    assert "shadow-mode/no-motion preparation only" in summary
     assert (tmp_path / "lab_readiness_result.json").exists()
     assert (tmp_path / "lab_readiness_report.md").exists()
     assert (tmp_path / "camera_readiness_result.json").exists()
@@ -219,6 +244,73 @@ def test_no_real_execution_fields_are_introduced_misleadingly():
     assert "tcp_pose_world_command" not in serialized
     assert "trajectory_command" not in serialized
     assert "urscript_program" not in serialized
+
+
+def test_example_config_smoke_remains_ready_for_shadow_mode():
+    request = build_lab_readiness_request(
+        check_lab_backend=True,
+        check_camera=True,
+        check_live_vlm=True,
+        check_shadow_mode=True,
+        config_path="configs/lab_backend.example.yaml",
+    )
+
+    result = evaluate_lab_readiness(request)
+
+    assert result["status"] == "READY_FOR_SHADOW_MODE"
+    assert result["readiness_statuses"] == {
+        "lab_backend": "PASS",
+        "camera": "PASS",
+        "live_vlm": "PASS",
+        "shadow_mode": "PASS",
+    }
+    assert result["safety_flags"]["live_camera_used"] is False
+    assert result["safety_flags"]["live_vlm_called"] is False
+    assert result["safety_flags"]["real_robot_motion_executed"] is False
+    assert result["safety_flags"]["trajectory_generated"] is False
+    assert result["safety_flags"]["tcp_pose_world_executed"] is False
+
+
+def test_shadow_mode_no_motion_does_not_emit_real_control_payload_fields(tmp_path):
+    config_path = _write_config(tmp_path, _ready_config())
+
+    run_first_simulation_execution(
+        VALID_TASK,
+        steps=1,
+        check_lab_readiness=True,
+        check_camera_readiness=True,
+        check_live_vlm_readiness=True,
+        check_shadow_mode_readiness=True,
+        lab_readiness_config=config_path,
+        output_dir=tmp_path,
+        write_report=True,
+    )
+
+    combined = "\n".join(
+        [
+            (tmp_path / "lab_readiness_result.json").read_text(encoding="utf-8"),
+            (tmp_path / "lab_readiness_report.md").read_text(encoding="utf-8"),
+            (tmp_path / "summary.md").read_text(encoding="utf-8"),
+            (tmp_path / "evidence_manifest.json").read_text(encoding="utf-8"),
+        ]
+    )
+
+    forbidden_fields = [
+        "trajectory_command",
+        "trajectory_plan",
+        "tcp_pose_world_command",
+        "urscript_program",
+        "dashboard_command",
+        "rtde_control_command",
+        "moveit_plan",
+        "ros2_action_goal",
+        "live_camera_frame",
+        "live_vlm_response",
+        "automatic_retry_motion_request",
+        "automatic_retry_motion_command",
+    ]
+    for field in forbidden_fields:
+        assert field not in combined
 
 
 def _write_config(tmp_path, config):

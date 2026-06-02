@@ -8,7 +8,7 @@ import yaml
 
 
 CONTRACT_VERSION = "teto_lab_readiness.v1"
-CURRENT_READINESS_VERSION = "TETO V2.8.0"
+CURRENT_READINESS_VERSION = "TETO V2.8.1"
 
 STATUS_READY_FOR_SHADOW_MODE = "READY_FOR_SHADOW_MODE"
 STATUS_CONFIG_ONLY = "CONFIG_ONLY"
@@ -292,6 +292,12 @@ def evaluate_lab_readiness(request: LabBackendReadinessRequest) -> Dict[str, Any
         "requested": requested,
         "config_path": request.config_path,
         "status": status,
+        "readiness_statuses": {
+            "lab_backend": _evidence_status(lab["status"]),
+            "camera": _evidence_status(camera["status"]),
+            "live_vlm": _evidence_status(live_vlm["status"]),
+            "shadow_mode": _evidence_status(shadow["status"]),
+        },
         "lab_backend_readiness_status": lab["status"],
         "camera_readiness_status": camera["status"],
         "live_vlm_readiness_status": live_vlm["status"],
@@ -301,6 +307,9 @@ def evaluate_lab_readiness(request: LabBackendReadinessRequest) -> Dict[str, Any
         "allow_live_camera": camera["fields"].get("allow_live_camera", False) is True,
         "allow_live_vlm": live_vlm["fields"].get("allow_live_vlm", False) is True,
         "real_robot_command_enabled": lab["fields"].get("real_robot_command_enabled", False) is True,
+        "real_robot_motion_executed": False,
+        "live_camera_used": False,
+        "live_vlm_called": False,
         "blocking_reasons": blocking_reasons,
         "warnings": _unique(
             list(lab.get("warnings") or [])
@@ -309,6 +318,12 @@ def evaluate_lab_readiness(request: LabBackendReadinessRequest) -> Dict[str, Any
             + list(shadow.get("warnings") or [])
         ),
         "next_safe_action": next_safe_action,
+        "safety_flags": _safety_flags(
+            allow_robot_motion=lab["fields"].get("allow_robot_motion", False) is True,
+            allow_live_camera=camera["fields"].get("allow_live_camera", False) is True,
+            allow_live_vlm=live_vlm["fields"].get("allow_live_vlm", False) is True,
+            real_robot_command_enabled=lab["fields"].get("real_robot_command_enabled", False) is True,
+        ),
         "safety_boundary": dict(NO_MOTION_SAFETY_BOUNDARY),
         "lab_backend": lab,
         "camera": camera,
@@ -318,28 +333,67 @@ def evaluate_lab_readiness(request: LabBackendReadinessRequest) -> Dict[str, Any
 
 
 def format_lab_readiness_report(result: Dict[str, Any]) -> str:
+    lab = _component(result, "lab_backend")
+    camera = _component(result, "camera")
+    live_vlm = _component(result, "live_vlm")
+    shadow = _component(result, "shadow_mode")
+    safety_flags = result.get("safety_flags") if isinstance(result.get("safety_flags"), dict) else {}
     return "\n".join(
         [
-            "# TETO V2.8.0 Lab / Camera / VLM No-Motion Readiness Report",
+            "# TETO V2.8.1 Readiness Evidence Polish Report",
             "",
-            "## Safety Boundary",
+            "## Version",
             "",
-            "V2.8.0 is a config-only and shadow-mode readiness contract. It does not connect to a real UR5, camera, or live VLM, does not generate real robot commands, does not generate trajectories, and does not execute tcp_pose_world.",
+            f"- TETO version: {_format_value(result.get('teto_version'))}",
+            f"- contract_version: {_format_value(result.get('contract_version'))}",
+            f"- config_path: {_format_value(result.get('config_path'))}",
             "",
-            "## Status",
+            "## Overall Status",
             "",
             f"- overall_status: {_format_value(result.get('status'))}",
-            f"- lab_backend_readiness_status: {_format_value(result.get('lab_backend_readiness_status'))}",
-            f"- camera_readiness_status: {_format_value(result.get('camera_readiness_status'))}",
-            f"- live_vlm_readiness_status: {_format_value(result.get('live_vlm_readiness_status'))}",
-            f"- shadow_mode_readiness_status: {_format_value(result.get('shadow_mode_readiness_status'))}",
             f"- no_motion_readiness_passed: {_format_value(result.get('no_motion_readiness_passed'))}",
-            f"- allow_robot_motion: {_format_value(result.get('allow_robot_motion'))}",
-            f"- allow_live_camera: {_format_value(result.get('allow_live_camera'))}",
-            f"- allow_live_vlm: {_format_value(result.get('allow_live_vlm'))}",
-            f"- real_robot_command_enabled: {_format_value(result.get('real_robot_command_enabled'))}",
+            f"- readiness_statuses: {_format_value(result.get('readiness_statuses'))}",
             f"- blocking_reasons: {_format_value(result.get('blocking_reasons'))}",
+            f"- warnings: {_format_value(result.get('warnings'))}",
             f"- next_safe_action: {_format_value(result.get('next_safe_action'))}",
+            "",
+            "## Readiness Contracts",
+            "",
+            "| Contract | Evidence Status | Raw Status | Blocking Reasons | Warnings |",
+            "| --- | --- | --- | --- | --- |",
+            _component_row("Lab Backend", lab),
+            _component_row("Camera", camera),
+            _component_row("Live VLM", live_vlm),
+            _component_row("Shadow Mode", shadow),
+            "",
+            "## Key Readiness Fields",
+            "",
+            "| Field | Value |",
+            "| --- | --- |",
+            f"| lab_backend_readiness_status | {_format_value(result.get('lab_backend_readiness_status'))} |",
+            f"| camera_readiness_status | {_format_value(result.get('camera_readiness_status'))} |",
+            f"| live_vlm_readiness_status | {_format_value(result.get('live_vlm_readiness_status'))} |",
+            f"| shadow_mode_readiness_status | {_format_value(result.get('shadow_mode_readiness_status'))} |",
+            f"| allow_robot_motion | {_format_value(result.get('allow_robot_motion'))} |",
+            f"| allow_live_camera | {_format_value(result.get('allow_live_camera'))} |",
+            f"| allow_live_vlm | {_format_value(result.get('allow_live_vlm'))} |",
+            f"| real_robot_command_enabled | {_format_value(result.get('real_robot_command_enabled'))} |",
+            f"| real_robot_motion_executed | {_format_value(result.get('real_robot_motion_executed', False))} |",
+            f"| live_camera_used | {_format_value(result.get('live_camera_used', False))} |",
+            f"| live_vlm_called | {_format_value(result.get('live_vlm_called', False))} |",
+            "",
+            "## No-Motion Safety Boundary",
+            "",
+            "V2.8.1 is readiness evidence polish only. It is config-only and shadow-mode preparation; it does not connect to a real UR5, does not capture from a live camera, does not call live Qwen or any live VLM, does not generate real robot commands, does not generate trajectories, and does not execute tcp_pose_world.",
+            "",
+            "| Safety Flag | Value |",
+            "| --- | --- |",
+            *[
+                f"| {key} | {_format_value(value)} |"
+                for key, value in sorted(safety_flags.items())
+            ],
+            "",
+            "Required false flags: allow_live_camera=false, allow_live_vlm=false, real_robot_command_enabled=false, real_robot_motion_executed=false.",
             "",
         ]
     )
@@ -451,6 +505,55 @@ def _result(
         "warnings": _unique(warnings or []),
         "fields": fields,
         "safety_boundary": dict(NO_MOTION_SAFETY_BOUNDARY),
+    }
+
+
+def _component(result: Dict[str, Any], name: str) -> Dict[str, Any]:
+    value = result.get(name)
+    return value if isinstance(value, dict) else {}
+
+
+def _component_row(label: str, component: Dict[str, Any]) -> str:
+    status = component.get("status", STATUS_NOT_REQUESTED)
+    return (
+        f"| {label} | {_evidence_status(status)} | {_format_value(status)} | "
+        f"{_format_value(component.get('blocking_reasons', []))} | "
+        f"{_format_value(component.get('warnings', []))} |"
+    )
+
+
+def _evidence_status(status: Any) -> str:
+    if status == STATUS_READY_FOR_SHADOW_MODE:
+        return "PASS"
+    if status in {STATUS_BLOCKED, STATUS_NOT_READY, STATUS_CONFIG_ONLY, STATUS_DISABLED}:
+        return str(status)
+    return STATUS_NOT_REQUESTED
+
+
+def _safety_flags(
+    *,
+    allow_robot_motion: bool,
+    allow_live_camera: bool,
+    allow_live_vlm: bool,
+    real_robot_command_enabled: bool,
+) -> Dict[str, bool]:
+    return {
+        "allow_robot_motion": allow_robot_motion,
+        "allow_live_camera": allow_live_camera,
+        "allow_live_vlm": allow_live_vlm,
+        "real_robot_backend_used": False,
+        "real_robot_command_enabled": real_robot_command_enabled,
+        "real_robot_motion_executed": False,
+        "live_camera_used": False,
+        "live_vlm_called": False,
+        "ros2_used": False,
+        "moveit_used": False,
+        "rtde_used": False,
+        "urscript_used": False,
+        "dashboard_used": False,
+        "trajectory_generated": False,
+        "tcp_pose_world_executed": False,
+        "automatic_retry_motion_executed": False,
     }
 
 
