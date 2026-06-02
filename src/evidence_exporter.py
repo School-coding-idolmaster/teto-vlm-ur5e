@@ -11,6 +11,7 @@ from src.simulation_micro_motion import (
     write_simulation_micro_motion_artifacts,
 )
 from src.lab_readiness import format_lab_readiness_report
+from src.real_scene_shadow_pipeline import format_real_scene_shadow_report
 from src.semantic_simulation_bridge import format_semantic_simulation_bridge_report
 from src.simulated_task_execution import format_simulated_task_execution_report
 
@@ -58,6 +59,8 @@ def export_simulation_evidence(
     shadow_mode_readiness_result_path = output_dir / "shadow_mode_readiness_result.json"
     camera_snapshot_result_path = output_dir / "camera_snapshot_result.json"
     camera_snapshot_report_path = output_dir / "camera_snapshot_report.md"
+    real_scene_shadow_result_path = output_dir / "real_scene_shadow_result.json"
+    real_scene_shadow_report_path = output_dir / "real_scene_shadow_report.md"
 
     object_info = _simulation_object_info(result)
     robot_asset_info = _robot_asset_info(result)
@@ -70,6 +73,7 @@ def export_simulation_evidence(
     simulated_task_execution_info = _simulated_task_execution_info(result)
     lab_readiness_info = _lab_readiness_info(result)
     camera_snapshot_info = _camera_snapshot_info(result)
+    real_scene_shadow_info = _real_scene_shadow_info(result)
     structure_report_requested = bool(robot_prim_inspection_info.get("requested"))
     readiness_requested = bool(articulation_readiness_info.get("requested"))
     state_requested = bool(articulation_state_info.get("requested"))
@@ -81,6 +85,7 @@ def export_simulation_evidence(
     )
     lab_readiness_requested = bool(lab_readiness_info.get("requested"))
     camera_snapshot_requested = bool(camera_snapshot_info.get("requested"))
+    real_scene_shadow_requested = bool(real_scene_shadow_info.get("requested"))
     run_id = output_dir.name
     created_at = result.get("finished_at") or result.get("started_at")
     report_path = result.get("report_path")
@@ -100,6 +105,7 @@ def export_simulation_evidence(
             simulated_task_execution_info=simulated_task_execution_info,
             lab_readiness_info=lab_readiness_info,
             camera_snapshot_info=camera_snapshot_info,
+            real_scene_shadow_info=real_scene_shadow_info,
             robot_structure_report_path=structure_report_ref,
             run_id=run_id,
             created_at=created_at,
@@ -247,6 +253,17 @@ def export_simulation_evidence(
         _write_json_artifact(camera_snapshot_result_path, camera_snapshot_info)
         camera_snapshot_report_path.write_text(
             format_camera_snapshot_report(camera_snapshot_info),
+            encoding="utf-8",
+        )
+    if real_scene_shadow_requested:
+        real_scene_shadow_info["real_scene_shadow_result_path"] = str(real_scene_shadow_result_path)
+        real_scene_shadow_info["real_scene_shadow_report_path"] = str(real_scene_shadow_report_path)
+        real_scene_shadow_info["real_scene_shadow_evidence_files"] = _real_scene_shadow_evidence_files(
+            real_scene_shadow_info
+        )
+        _write_json_artifact(real_scene_shadow_result_path, real_scene_shadow_info)
+        real_scene_shadow_report_path.write_text(
+            format_real_scene_shadow_report(real_scene_shadow_info),
             encoding="utf-8",
         )
     motion_evidence_summary = summarize_motion_evidence(simulation_micro_motion_info)
@@ -427,6 +444,53 @@ def export_simulation_evidence(
         "shadow_mode_readiness_result_path": str(shadow_mode_readiness_result_path) if lab_readiness_requested else None,
         "camera_snapshot_result_path": str(camera_snapshot_result_path) if camera_snapshot_requested else None,
         "camera_snapshot_report_path": str(camera_snapshot_report_path) if camera_snapshot_requested else None,
+        "real_scene_shadow_evidence_available": real_scene_shadow_requested,
+        "snapshot_id": real_scene_shadow_info.get("snapshot_id"),
+        "grounding_id": real_scene_shadow_info.get("grounding_id"),
+        "shadow_pipeline_status": real_scene_shadow_info.get("shadow_pipeline_status"),
+        "semantic_gate_passed": (
+            real_scene_shadow_info.get("semantic_gate_passed", False)
+            if real_scene_shadow_requested
+            else semantic_bridge_info.get("gate_passed")
+        ),
+        "real_scene_shadow_semantic_gate_passed": real_scene_shadow_info.get(
+            "semantic_gate_passed",
+            False,
+        ),
+        "no_motion_shadow_passed": real_scene_shadow_info.get("no_motion_shadow_passed", False),
+        "real_scene_shadow_blocking_reasons": real_scene_shadow_info.get("blocking_reasons", []),
+        "real_scene_shadow_warnings": real_scene_shadow_info.get("warnings", []),
+        "real_scene_shadow_next_safe_action": real_scene_shadow_info.get("next_safe_action"),
+        "real_scene_shadow_replay_ready": real_scene_shadow_info.get("replay_ready", False),
+        "blocking_reasons": (
+            real_scene_shadow_info.get("blocking_reasons")
+            if real_scene_shadow_requested
+            else list(lab_readiness_info.get("blocking_reasons") or result.get("blocking_reasons") or [])
+        ),
+        "warnings": real_scene_shadow_info.get("warnings", []) if real_scene_shadow_requested else [],
+        "next_safe_action": (
+            real_scene_shadow_info.get("next_safe_action")
+            if real_scene_shadow_requested
+            else lab_readiness_info.get("next_safe_action")
+        ),
+        "replay_ready": real_scene_shadow_info.get(
+            "replay_ready",
+            False,
+        )
+        if real_scene_shadow_requested
+        else simulated_task_execution_info.get(
+            "replay_ready",
+            False,
+        ),
+        "robot_command_generated": real_scene_shadow_info.get("robot_command_generated", False),
+        "trajectory_generated": real_scene_shadow_info.get("trajectory_generated", False),
+        "joint_targets_generated": real_scene_shadow_info.get("joint_targets_generated", False),
+        "tcp_pose_world_generated": real_scene_shadow_info.get("tcp_pose_world_generated", False),
+        "real_scene_shadow_evidence_files": (
+            _real_scene_shadow_evidence_files(real_scene_shadow_info) if real_scene_shadow_requested else []
+        ),
+        "real_scene_shadow_result_path": str(real_scene_shadow_result_path) if real_scene_shadow_requested else None,
+        "real_scene_shadow_report_path": str(real_scene_shadow_report_path) if real_scene_shadow_requested else None,
         "screenshot_before_path": None,
         "screenshot_after_path": None,
         "video_path": None,
@@ -467,6 +531,8 @@ def export_simulation_evidence(
         "shadow_mode_readiness_result_path": shadow_mode_readiness_result_path,
         "camera_snapshot_result_path": camera_snapshot_result_path,
         "camera_snapshot_report_path": camera_snapshot_report_path,
+        "real_scene_shadow_result_path": real_scene_shadow_result_path,
+        "real_scene_shadow_report_path": real_scene_shadow_report_path,
     }
 
 
@@ -959,6 +1025,59 @@ def _camera_snapshot_evidence_files(camera_snapshot_info: Dict[str, Any]) -> lis
     ]
 
 
+def _real_scene_shadow_info(result: Dict[str, Any]) -> Dict[str, Any]:
+    shadow = result.get("real_scene_shadow") if isinstance(result.get("real_scene_shadow"), dict) else {}
+    return {
+        **shadow,
+        "requested": result.get("real_scene_shadow_requested", shadow.get("requested", False)) is True,
+        "snapshot_id": result.get("real_scene_shadow_snapshot_id", shadow.get("snapshot_id")),
+        "grounding_id": result.get("real_scene_shadow_grounding_id", shadow.get("grounding_id")),
+        "scene_version": result.get("real_scene_shadow_scene_version", shadow.get("scene_version")),
+        "shadow_pipeline_status": result.get(
+            "real_scene_shadow_status",
+            shadow.get("shadow_pipeline_status", "NOT_REQUESTED"),
+        ),
+        "semantic_gate_passed": result.get("semantic_gate_passed", shadow.get("semantic_gate_passed", False))
+        is True,
+        "no_motion_shadow_passed": result.get(
+            "no_motion_shadow_passed",
+            shadow.get("no_motion_shadow_passed", False),
+        )
+        is True,
+        "blocking_reasons": result.get(
+            "real_scene_shadow_blocking_reasons",
+            shadow.get("blocking_reasons", []),
+        ),
+        "warnings": result.get("real_scene_shadow_warnings", shadow.get("warnings", [])),
+        "next_safe_action": result.get(
+            "real_scene_shadow_next_safe_action",
+            shadow.get("next_safe_action"),
+        ),
+        "replay_ready": result.get("real_scene_shadow_replay_ready", shadow.get("replay_ready", False)) is True,
+        "live_camera_used": shadow.get("live_camera_used", False) is True,
+        "live_vlm_called": shadow.get("live_vlm_called", False) is True,
+        "real_robot_motion_executed": shadow.get("real_robot_motion_executed", False) is True,
+        "real_robot_command_enabled": shadow.get("real_robot_command_enabled", False) is True,
+        "robot_command_generated": shadow.get("robot_command_generated", False) is True,
+        "trajectory_generated": shadow.get("trajectory_generated", False) is True,
+        "joint_targets_generated": shadow.get("joint_targets_generated", False) is True,
+        "tcp_pose_world_generated": shadow.get("tcp_pose_world_generated", False) is True,
+    }
+
+
+def _real_scene_shadow_evidence_files(real_scene_shadow_info: Dict[str, Any]) -> list[Dict[str, str | None]]:
+    return [
+        {
+            "name": "real_scene_shadow_result.json",
+            "path": real_scene_shadow_info.get("real_scene_shadow_result_path"),
+        },
+        {
+            "name": "real_scene_shadow_report.md",
+            "path": real_scene_shadow_info.get("real_scene_shadow_report_path"),
+        },
+    ]
+
+
 def _latest_execution_summary(
     execution_info: Dict[str, Any],
     precheck_info: Dict[str, Any],
@@ -1062,6 +1181,7 @@ def _build_summary_markdown(
     simulated_task_execution_info: Dict[str, Any],
     lab_readiness_info: Dict[str, Any],
     camera_snapshot_info: Dict[str, Any],
+    real_scene_shadow_info: Dict[str, Any],
     robot_structure_report_path: str | None,
     run_id: str,
     created_at: str | None,
@@ -1207,6 +1327,29 @@ def _build_summary_markdown(
             f"- real_robot_motion_executed: {_format_value(camera_snapshot_info.get('real_robot_motion_executed'))}",
             f"- real_robot_command_enabled: {_format_value(camera_snapshot_info.get('real_robot_command_enabled'))}",
             "This V2.8.2 camera snapshot evidence validates a declared offline/manual snapshot manifest only. It does not capture a live camera frame, call live Qwen/VLM, connect to a real UR5, generate trajectory, execute tcp_pose_world, or produce robot control fields.",
+            "",
+            "## Real-Scene Shadow Pipeline Summary",
+            "",
+            f"- real_scene_shadow_evidence_available: {_format_value(real_scene_shadow_info.get('requested'))}",
+            f"- snapshot_id: {_format_value(real_scene_shadow_info.get('snapshot_id'))}",
+            f"- grounding_id: {_format_value(real_scene_shadow_info.get('grounding_id'))}",
+            f"- scene_version: {_format_value(real_scene_shadow_info.get('scene_version'))}",
+            f"- shadow_pipeline_status: {_format_value(real_scene_shadow_info.get('shadow_pipeline_status'))}",
+            f"- semantic_gate_passed: {_format_value(real_scene_shadow_info.get('semantic_gate_passed'))}",
+            f"- no_motion_shadow_passed: {_format_value(real_scene_shadow_info.get('no_motion_shadow_passed'))}",
+            f"- blocking_reasons: {_format_value(real_scene_shadow_info.get('blocking_reasons'))}",
+            f"- warnings: {_format_value(real_scene_shadow_info.get('warnings'))}",
+            f"- next_safe_action: {_format_value(real_scene_shadow_info.get('next_safe_action'))}",
+            f"- replay_ready: {_format_value(real_scene_shadow_info.get('replay_ready'))}",
+            f"- live_camera_used: {_format_value(real_scene_shadow_info.get('live_camera_used'))}",
+            f"- live_vlm_called: {_format_value(real_scene_shadow_info.get('live_vlm_called'))}",
+            f"- real_robot_motion_executed: {_format_value(real_scene_shadow_info.get('real_robot_motion_executed'))}",
+            f"- real_robot_command_enabled: {_format_value(real_scene_shadow_info.get('real_robot_command_enabled'))}",
+            f"- robot_command_generated: {_format_value(real_scene_shadow_info.get('robot_command_generated'))}",
+            f"- trajectory_generated: {_format_value(real_scene_shadow_info.get('trajectory_generated'))}",
+            f"- joint_targets_generated: {_format_value(real_scene_shadow_info.get('joint_targets_generated'))}",
+            f"- tcp_pose_world_generated: {_format_value(real_scene_shadow_info.get('tcp_pose_world_generated'))}",
+            "This V2.9.0 real-scene shadow pipeline joins camera snapshot evidence with offline/mock grounding only. It does not capture live camera frames, call live Qwen/VLM, connect to a real UR5, use ROS2, MoveIt, RTDE, URScript, Dashboard, generate trajectory, execute tcp_pose_world, or produce robot commands.",
             "",
             "## Readiness Evidence Summary",
             "",

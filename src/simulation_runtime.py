@@ -12,6 +12,10 @@ from src.articulation_state_observer import build_articulation_state_report, obs
 from src.camera_snapshot import build_camera_snapshot_request, evaluate_camera_snapshot_contract
 from src.evidence_exporter import export_simulation_evidence
 from src.lab_readiness import build_lab_readiness_request, evaluate_lab_readiness
+from src.real_scene_shadow_pipeline import (
+    build_real_scene_shadow_request,
+    evaluate_real_scene_shadow_pipeline,
+)
 from src.robot_prim_inspector import (
     UR5E_ARM_JOINT_NAMES,
     build_robot_prim_inspection_report,
@@ -47,7 +51,7 @@ from src.simulated_task_execution import (
 
 
 REPORT_VERSION = "teto_simulation_execution.v1"
-CURRENT_TETO_VERSION = "TETO V2.8.2"
+CURRENT_TETO_VERSION = "TETO V2.9.0"
 DEFAULT_STEPS = 5
 DEFAULT_SIMULATION_OBJECT_TYPE = "cube"
 DEFAULT_CUBE_PRIM_PATH = "/World/TETO_Cube"
@@ -110,6 +114,7 @@ def build_simulation_execution_result(
     simulated_task_execution_metadata: Dict[str, Any] | None = None,
     lab_readiness_metadata: Dict[str, Any] | None = None,
     camera_snapshot_metadata: Dict[str, Any] | None = None,
+    real_scene_shadow_metadata: Dict[str, Any] | None = None,
     started_at: str | None = None,
     finished_at: str | None = None,
 ) -> Dict[str, Any]:
@@ -150,6 +155,7 @@ def build_simulation_execution_result(
     result.update(semantic_bridge_metadata or _semantic_bridge_report_fields())
     result.update(lab_readiness_metadata or _lab_readiness_report_fields())
     result.update(camera_snapshot_metadata or _camera_snapshot_report_fields())
+    result.update(real_scene_shadow_metadata or _real_scene_shadow_report_fields())
     if (
         result.get("semantic_simulation_bridge_requested") is True
         and result.get("semantic_gate_passed") is not True
@@ -234,6 +240,10 @@ def run_first_simulation_execution(
     check_camera_snapshot: bool = False,
     camera_snapshot_config: str | Path | None = None,
     camera_snapshot_report: bool = False,
+    run_real_scene_shadow: bool = False,
+    real_scene_shadow_config: str | Path | None = None,
+    grounding_result: str | Path | None = None,
+    real_scene_shadow_report: bool = False,
     output_dir: str | Path | None = None,
     write_report: bool = False,
     demo_command: str | None = None,
@@ -241,13 +251,14 @@ def run_first_simulation_execution(
     task = simulation_task or dict(DEFAULT_SIMULATION_TASK)
     started_at = _timestamp()
     camera_snapshot_requested = check_camera_snapshot or camera_snapshot_report
+    real_scene_shadow_requested = run_real_scene_shadow or real_scene_shadow_report
     lab_readiness_requested = (
         check_lab_readiness
         or check_camera_readiness
         or check_live_vlm_readiness
         or check_shadow_mode_readiness
     )
-    if (lab_readiness_requested or camera_snapshot_requested) and not dry_run:
+    if (lab_readiness_requested or camera_snapshot_requested or real_scene_shadow_requested) and not dry_run:
         no_isaac = True
     lab_readiness_request = build_lab_readiness_request(
         check_lab_backend=check_lab_readiness,
@@ -267,6 +278,15 @@ def run_first_simulation_execution(
     camera_snapshot_metadata = _camera_snapshot_report_fields(
         requested=camera_snapshot_requested,
         snapshot=evaluate_camera_snapshot_contract(camera_snapshot_request),
+    )
+    real_scene_shadow_request = build_real_scene_shadow_request(
+        requested=real_scene_shadow_requested,
+        config_path=real_scene_shadow_config,
+        grounding_result_path=grounding_result,
+    )
+    real_scene_shadow_metadata = _real_scene_shadow_report_fields(
+        requested=real_scene_shadow_requested,
+        shadow=evaluate_real_scene_shadow_pipeline(real_scene_shadow_request),
     )
     effective_move_object = move_object or move_cube
     effective_spawn_cube = spawn_cube or effective_move_object
@@ -383,6 +403,7 @@ def run_first_simulation_execution(
                 simulated_task_execution_metadata=simulated_task_execution_metadata,
                 lab_readiness_metadata=lab_readiness_metadata,
                 camera_snapshot_metadata=camera_snapshot_metadata,
+                real_scene_shadow_metadata=real_scene_shadow_metadata,
                 error_code="E_INVALID_STEPS",
                 error_message="steps must be a positive integer",
                 started_at=started_at,
@@ -431,6 +452,7 @@ def run_first_simulation_execution(
                 simulated_task_execution_metadata=simulated_task_execution_metadata,
                 lab_readiness_metadata=lab_readiness_metadata,
                 camera_snapshot_metadata=camera_snapshot_metadata,
+                real_scene_shadow_metadata=real_scene_shadow_metadata,
                 error_code="E_INVALID_SIMULATION_TASK",
                 error_message=f"missing simulation task fields: {', '.join(missing_fields)}",
                 started_at=started_at,
@@ -518,6 +540,7 @@ def run_first_simulation_execution(
                     simulated_task_execution_metadata=simulated_task_execution_metadata,
                     lab_readiness_metadata=lab_readiness_metadata,
                     camera_snapshot_metadata=camera_snapshot_metadata,
+                    real_scene_shadow_metadata=real_scene_shadow_metadata,
                     error_code="E_ROBOT_ASSET_LOAD_FAILED",
                     error_message="robot asset path is unavailable",
                     started_at=started_at,
@@ -552,6 +575,7 @@ def run_first_simulation_execution(
                 simulated_task_execution_metadata=simulated_task_execution_metadata,
                 lab_readiness_metadata=lab_readiness_metadata,
                 camera_snapshot_metadata=camera_snapshot_metadata,
+                real_scene_shadow_metadata=real_scene_shadow_metadata,
                 started_at=started_at,
                 finished_at=_timestamp(),
             ),
@@ -1487,6 +1511,47 @@ def _camera_snapshot_report_fields(
         "live_vlm_called": snapshot.get("live_vlm_called", False) is True,
         "real_robot_command_enabled": snapshot.get("real_robot_command_enabled", False) is True,
     }
+
+
+def _real_scene_shadow_report_fields(
+    *,
+    requested: bool = False,
+    shadow: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    shadow = shadow if isinstance(shadow, dict) else {}
+    fields = {
+        "real_scene_shadow_requested": requested,
+        "real_scene_shadow": shadow
+        or {
+            "requested": False,
+            "shadow_pipeline_status": "NOT_REQUESTED",
+            "semantic_gate_passed": False,
+            "no_motion_shadow_passed": False,
+            "blocking_reasons": [],
+            "warnings": [],
+            "replay_ready": False,
+            "live_camera_used": False,
+            "live_vlm_called": False,
+            "real_robot_motion_executed": False,
+            "real_robot_command_enabled": False,
+            "robot_command_generated": False,
+            "trajectory_generated": False,
+            "joint_targets_generated": False,
+            "tcp_pose_world_generated": False,
+        },
+        "real_scene_shadow_status": shadow.get("shadow_pipeline_status", "NOT_REQUESTED"),
+        "real_scene_shadow_snapshot_id": shadow.get("snapshot_id"),
+        "real_scene_shadow_grounding_id": shadow.get("grounding_id"),
+        "real_scene_shadow_scene_version": shadow.get("scene_version"),
+        "no_motion_shadow_passed": shadow.get("no_motion_shadow_passed", False) is True,
+        "real_scene_shadow_blocking_reasons": list(shadow.get("blocking_reasons") or []),
+        "real_scene_shadow_warnings": list(shadow.get("warnings") or []),
+        "real_scene_shadow_next_safe_action": shadow.get("next_safe_action"),
+        "real_scene_shadow_replay_ready": shadow.get("replay_ready", False) is True,
+    }
+    if requested:
+        fields["semantic_gate_passed"] = shadow.get("semantic_gate_passed", False) is True
+    return fields
 
 
 def _simulation_object_report_fields(

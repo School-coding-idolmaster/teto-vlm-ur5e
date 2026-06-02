@@ -18,7 +18,9 @@ from src.simulation_runtime import DEFAULT_SIMULATION_TASK, CURRENT_TETO_VERSION
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run TETO V2.8.2 camera snapshot and safe simulation evidence smoke test.")
+    parser = argparse.ArgumentParser(
+        description="Run TETO V2.9.0 real-scene no-motion shadow and safe simulation evidence smoke test."
+    )
     parser.add_argument("--dry-run", action="store_true", help="Do not import Isaac; produce a test execution report.")
     parser.add_argument("--no-isaac", action="store_true", help="Pure Python test mode without Isaac imports.")
     parser.add_argument("--spawn-cube", action="store_true", help="Spawn a visible cube in the Isaac World.")
@@ -118,7 +120,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--execution-max-attempts",
         type=int,
         default=1,
-        help="Maximum attempts metadata. V2.8.2 supports 1 and does not auto-retry.",
+        help="Maximum attempts metadata. V2.9.0 supports 1 and does not auto-retry.",
     )
     parser.add_argument(
         "--execution-enable-retry-recommendation",
@@ -168,13 +170,31 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Generate camera snapshot evidence report from the supplied manifest.",
     )
+    parser.add_argument(
+        "--run-real-scene-shadow",
+        action="store_true",
+        help="Validate offline/manual camera snapshot plus offline/mock grounding evidence without motion.",
+    )
+    parser.add_argument(
+        "--real-scene-shadow-config",
+        help="Path to real-scene shadow YAML/JSON config. Only declared evidence references are validated.",
+    )
+    parser.add_argument(
+        "--grounding-result",
+        help="Path to an offline/mock grounding result JSON/YAML file.",
+    )
+    parser.add_argument(
+        "--real-scene-shadow-report",
+        action="store_true",
+        help="Generate real-scene no-motion shadow evidence report.",
+    )
     return parser
 
 
 def main() -> int:
     args = build_parser().parse_args()
     if args.execution_max_attempts != 1:
-        raise ValueError("--execution-max-attempts currently supports only 1 in TETO V2.8.2")
+        raise ValueError("--execution-max-attempts currently supports only 1 in TETO V2.9.0")
     simulation_task = _load_simulation_task(args.task_json)
     semantic_contract = None
     semantic_contract_path = None
@@ -232,6 +252,10 @@ def main() -> int:
         check_camera_snapshot=args.check_camera_snapshot,
         camera_snapshot_config=args.camera_snapshot_config,
         camera_snapshot_report=args.camera_snapshot_report,
+        run_real_scene_shadow=args.run_real_scene_shadow,
+        real_scene_shadow_config=args.real_scene_shadow_config,
+        grounding_result=args.grounding_result,
+        real_scene_shadow_report=args.real_scene_shadow_report,
         output_dir=args.output_dir,
         write_report=True,
         demo_command=shlex.join([sys.executable, *sys.argv]),
@@ -243,7 +267,7 @@ def main() -> int:
 
 def print_summary(result: dict, report_path: Path) -> None:
     print("=" * 50)
-    print(f"{CURRENT_TETO_VERSION} CAMERA SNAPSHOT / SIMULATION EVIDENCE")
+    print(f"{CURRENT_TETO_VERSION} REAL-SCENE SHADOW / SIMULATION EVIDENCE")
     print("=" * 50)
     print(f"Status: {result['status']}")
     print(f"Mode: {result['mode']}")
@@ -389,6 +413,14 @@ def print_summary(result: dict, report_path: Path) -> None:
     print(f"no_motion_snapshot_passed: {result.get('no_motion_snapshot_passed')}")
     print(f"live_capture_used: {result.get('live_capture_used')}")
     print(f"live_camera_enabled: {result.get('live_camera_enabled')}")
+    print(f"real_scene_shadow_requested: {result.get('real_scene_shadow_requested')}")
+    print(f"real_scene_shadow_snapshot_id: {result.get('real_scene_shadow_snapshot_id')}")
+    print(f"real_scene_shadow_grounding_id: {result.get('real_scene_shadow_grounding_id')}")
+    print(f"real_scene_shadow_status: {result.get('real_scene_shadow_status')}")
+    print(f"real_scene_shadow_semantic_gate_passed: {result.get('semantic_gate_passed')}")
+    print(f"no_motion_shadow_passed: {result.get('no_motion_shadow_passed')}")
+    print(f"real_scene_shadow_replay_ready: {result.get('real_scene_shadow_replay_ready')}")
+    print(f"real_scene_shadow_blocking_reasons: {result.get('real_scene_shadow_blocking_reasons')}")
     print(f"Report: {report_path}")
     if result.get("blocking_reasons"):
         print(f"Blocking reasons: {', '.join(result['blocking_reasons'])}")

@@ -1485,6 +1485,61 @@ The evidence bundle includes `camera_snapshot_result.json`,
 `camera_snapshot_blocking_reasons`, `camera_snapshot_warnings`,
 `no_motion_snapshot_passed`, and the live/real-robot safety flags.
 
+## TETO V2.9.0 Real-Scene No-Motion Shadow Pipeline
+
+TETO V2.9.0 adds a real-scene no-motion shadow pipeline. It joins a validated
+offline/manual camera snapshot contract with an offline/mock grounding result
+JSON, then exports replayable evidence about whether the semantic gate would
+accept the scene.
+
+V2.9.0 is real-scene pipeline preparation only. It is not live camera capture,
+not live VLM/Qwen inference, and not real UR5 execution. It does not connect to
+ROS2, MoveIt, RTDE, URScript, Dashboard, a trajectory planner,
+`tcp_pose_world`, a real robot backend, joint targets, robot commands,
+automatic retry motion, or any real execution request.
+
+The shadow pipeline validates:
+
+- camera snapshot contract status, `snapshot_id`, and `scene_version`
+- offline/mock grounding result `grounding_id`, target label, object id,
+  bounding box, pixel center, and confidence values
+- snapshot / grounding ID match and scene version match
+- rejection states such as no target, invalid box, invalid pixel center, low
+  confidence, live VLM/camera flags, and forbidden robot control fields
+- safety flags such as `live_camera_used=false`, `live_vlm_called=false`,
+  `real_robot_motion_executed=false`, `real_robot_command_enabled=false`,
+  `robot_command_generated=false`, `trajectory_generated=false`,
+  `joint_targets_generated=false`, and `tcp_pose_world_generated=false`
+
+Positive shadow smoke:
+
+```bash
+python3 scripts/run_first_simulation_execution.py \
+  --run-real-scene-shadow \
+  --real-scene-shadow-config configs/real_scene_shadow.example.yaml \
+  --real-scene-shadow-report \
+  --output-dir /tmp/teto_v290_real_scene_shadow_positive
+```
+
+No-target shadow smoke:
+
+```bash
+python3 scripts/run_first_simulation_execution.py \
+  --run-real-scene-shadow \
+  --real-scene-shadow-config configs/real_scene_shadow.example.yaml \
+  --grounding-result examples/grounding_result_no_target_example.json \
+  --real-scene-shadow-report \
+  --output-dir /tmp/teto_v290_real_scene_shadow_no_target
+```
+
+The evidence bundle includes `real_scene_shadow_result.json`,
+`real_scene_shadow_report.md`, `summary.md`, and `evidence_manifest.json`.
+`real_scene_shadow_report.md` states the no-motion safety boundary, and
+`evidence_manifest.json` records `real_scene_shadow_evidence_available`,
+`snapshot_id`, `grounding_id`, `shadow_pipeline_status`,
+`semantic_gate_passed`, `no_motion_shadow_passed`, blocking reasons, warnings,
+replay readiness, and live/real-robot safety flags.
+
 Demo commands accept common image formats directly. TETO automatically
 creates a cached RGB JPEG under `data/processed/auto/`, with EXIF orientation
 applied, long edge resized, animated images reduced to the first frame, and
@@ -1699,4 +1754,5 @@ python3 -m src.cli prepare-images --input-dir data/raw --output-dir data/process
 - V2.8.0 = lab backend / camera / VLM no-motion readiness
 - V2.8.1 = readiness evidence polish
 - V2.8.2 = camera snapshot contract
+- V2.9.0 = real-scene no-motion shadow pipeline
 - Future ROS2 / MoveIt2 / RTDE / URScript / real UR5 controller integration remains outside the current implemented safety boundary

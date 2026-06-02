@@ -1,0 +1,26 @@
+{
+  "grounding_result": {
+    "grounding_id": "example_grounding_no_target_001",
+    "snapshot_id": "example_offline_snapshot_001",
+    "scene_version": "example_lab_scene_v1",
+    "source": "manual_annotation",
+    "user_command": "inspect the red cup",
+    "target_label": "red cup",
+    "target_object_id": null,
+    "bbox_xyxy": null,
+    "pixel_center": null,
+    "mask_ref": null,
+    "semantic_confidence": 0.0,
+    "grounding_confidence": 0.0,
+    "overall_confidence": 0.0,
+    "grounded": false,
+    "rejected": true,
+    "rejection_reason": "E_NO_TARGET",
+    "error_code": "E_NO_TARGET",
+    "warnings": ["target not present in offline/mock grounding result"],
+    "live_vlm_called": false,
+    "live_camera_used": false,
+    "real_robot_motion_executed": false,
+    "real_robot_command_enabled": false
+  }
+}
