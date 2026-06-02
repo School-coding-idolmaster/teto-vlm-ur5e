@@ -1,0 +1,28 @@
+{
+  "camera_snapshot": {
+    "snapshot_id": "example_offline_snapshot_json_001",
+    "scene_version": "example_lab_scene_v1",
+    "capture_timestamp": "2099-01-01T00:00:00Z",
+    "ttl_ms": 315360000000,
+    "source": "offline_file",
+    "frame_id": "example_camera_frame_json_001",
+    "image_ref": "data/processed/examples/offline_rgb_placeholder.jpg",
+    "depth_ref": "data/processed/examples/offline_depth_placeholder.png",
+    "camera_info_ref": "data/processed/examples/camera_info_placeholder.json",
+    "metadata_ref": "data/processed/examples/camera_metadata_placeholder.json",
+    "extrinsics_ref": "data/processed/examples/camera_extrinsics_placeholder.json",
+    "width": 640,
+    "height": 480,
+    "color_encoding": "rgb8",
+    "depth_encoding": "uint16_mm",
+    "camera_frame": "camera_color_optical_frame",
+    "alignment_status": "aligned_rgb_depth",
+    "sync_status": "offline_manifest",
+    "depth_available": true,
+    "camera_info_available": true,
+    "metadata_available": true,
+    "extrinsics_available": true,
+    "depth_required": true,
+    "live_camera_enabled": false
+  }
+}

@@ -283,6 +283,22 @@ def test_cli_lab_readiness_arguments_parse():
     assert args.check_shadow_mode_readiness is True
 
 
+def test_cli_camera_snapshot_arguments_parse():
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "--check-camera-snapshot",
+            "--camera-snapshot-config",
+            "configs/camera_snapshot.example.yaml",
+            "--camera-snapshot-report",
+        ]
+    )
+
+    assert args.check_camera_snapshot is True
+    assert args.camera_snapshot_config == "configs/camera_snapshot.example.yaml"
+    assert args.camera_snapshot_report is True
+
+
 def test_dry_run_robot_asset_check_passes_with_unavailable_default():
     result = run_first_simulation_execution(VALID_TASK, dry_run=True, steps=1, check_robot_asset=True)
 

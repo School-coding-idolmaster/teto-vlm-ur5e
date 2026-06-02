@@ -16,6 +16,10 @@ data/processed/auto/
 local.lab_backend.yaml
 local.camera.yaml
 local.live_vlm.yaml
+local.camera_snapshot.yaml
+local.camera_snapshot.json
 configs/local.lab_backend.yaml
 configs/local.camera.yaml
 configs/local.live_vlm.yaml
+configs/local.camera_snapshot.yaml
+configs/local.camera_snapshot.json

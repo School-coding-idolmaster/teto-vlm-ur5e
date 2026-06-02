@@ -1443,6 +1443,48 @@ capture from a live camera, does not call live Qwen or any live VLM, does not
 connect to ROS2, MoveIt, RTDE, URScript, Dashboard, a trajectory planner,
 `tcp_pose_world`, a real robot backend, or automatic retry motion.
 
+## TETO V2.8.2 Camera Snapshot Contract
+
+TETO V2.8.2 adds a camera snapshot contract so future real-scene or offline
+camera frames can enter TETO as safe, verifiable, rejectable, and replayable
+manifest evidence. It is real-scene pipeline preparation before live capture or
+robot execution.
+
+V2.8.2 is not live camera capture, not live VLM/Qwen inference, and not real
+UR5 execution. It does not connect to ROS2, MoveIt, RTDE, URScript, Dashboard,
+a trajectory planner, `tcp_pose_world`, a real robot backend, joint targets, or
+automatic retry motion.
+
+The snapshot contract validates declared fields only:
+
+- `snapshot_id`, `scene_version`, `capture_timestamp`, and `ttl_ms`
+- `source`, `frame_id`, `image_ref`, optional `depth_ref`, camera info,
+  metadata, and extrinsics references
+- width, height, encodings, camera frame, alignment, sync, and availability
+  flags
+- no-motion flags such as `live_capture_used=false`,
+  `live_camera_enabled=false`, `live_vlm_called=false`,
+  `real_robot_motion_executed=false`, and
+  `real_robot_command_enabled=false`
+
+Example manifest:
+
+```bash
+python3 scripts/run_first_simulation_execution.py \
+  --check-camera-snapshot \
+  --camera-snapshot-config configs/camera_snapshot.example.yaml \
+  --camera-snapshot-report \
+  --output-dir /tmp/teto_v282_camera_snapshot
+```
+
+The evidence bundle includes `camera_snapshot_result.json`,
+`camera_snapshot_report.md`, `summary.md`, and `evidence_manifest.json`.
+`camera_snapshot_report.md` states the no-motion safety boundary, and
+`evidence_manifest.json` records `camera_snapshot_evidence_available`,
+`camera_snapshot_id`, `scene_version`, `camera_snapshot_validity_status`,
+`camera_snapshot_blocking_reasons`, `camera_snapshot_warnings`,
+`no_motion_snapshot_passed`, and the live/real-robot safety flags.
+
 Demo commands accept common image formats directly. TETO automatically
 creates a cached RGB JPEG under `data/processed/auto/`, with EXIF orientation
 applied, long edge resized, animated images reduced to the first frame, and
@@ -1656,4 +1698,5 @@ python3 -m src.cli prepare-images --input-dir data/raw --output-dir data/process
 - V2.7.1 = execution evidence polish
 - V2.8.0 = lab backend / camera / VLM no-motion readiness
 - V2.8.1 = readiness evidence polish
+- V2.8.2 = camera snapshot contract
 - Future ROS2 / MoveIt2 / RTDE / URScript / real UR5 controller integration remains outside the current implemented safety boundary

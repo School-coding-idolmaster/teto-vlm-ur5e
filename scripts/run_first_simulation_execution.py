@@ -18,7 +18,7 @@ from src.simulation_runtime import DEFAULT_SIMULATION_TASK, CURRENT_TETO_VERSION
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run TETO V2.8.1 lab readiness and safe simulation evidence smoke test.")
+    parser = argparse.ArgumentParser(description="Run TETO V2.8.2 camera snapshot and safe simulation evidence smoke test.")
     parser.add_argument("--dry-run", action="store_true", help="Do not import Isaac; produce a test execution report.")
     parser.add_argument("--no-isaac", action="store_true", help="Pure Python test mode without Isaac imports.")
     parser.add_argument("--spawn-cube", action="store_true", help="Spawn a visible cube in the Isaac World.")
@@ -118,7 +118,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--execution-max-attempts",
         type=int,
         default=1,
-        help="Maximum attempts metadata. V2.8.1 supports 1 and does not auto-retry.",
+        help="Maximum attempts metadata. V2.8.2 supports 1 and does not auto-retry.",
     )
     parser.add_argument(
         "--execution-enable-retry-recommendation",
@@ -154,13 +154,27 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Evaluate no-motion shadow-mode readiness.",
     )
+    parser.add_argument(
+        "--check-camera-snapshot",
+        action="store_true",
+        help="Validate a camera snapshot manifest without live capture, VLM calls, or robot motion.",
+    )
+    parser.add_argument(
+        "--camera-snapshot-config",
+        help="Path to a camera snapshot YAML/JSON manifest. Only declared fields are validated.",
+    )
+    parser.add_argument(
+        "--camera-snapshot-report",
+        action="store_true",
+        help="Generate camera snapshot evidence report from the supplied manifest.",
+    )
     return parser
 
 
 def main() -> int:
     args = build_parser().parse_args()
     if args.execution_max_attempts != 1:
-        raise ValueError("--execution-max-attempts currently supports only 1 in TETO V2.8.1")
+        raise ValueError("--execution-max-attempts currently supports only 1 in TETO V2.8.2")
     simulation_task = _load_simulation_task(args.task_json)
     semantic_contract = None
     semantic_contract_path = None
@@ -215,6 +229,9 @@ def main() -> int:
         check_camera_readiness=args.check_camera_readiness,
         check_live_vlm_readiness=args.check_live_vlm_readiness,
         check_shadow_mode_readiness=args.check_shadow_mode_readiness,
+        check_camera_snapshot=args.check_camera_snapshot,
+        camera_snapshot_config=args.camera_snapshot_config,
+        camera_snapshot_report=args.camera_snapshot_report,
         output_dir=args.output_dir,
         write_report=True,
         demo_command=shlex.join([sys.executable, *sys.argv]),
@@ -226,7 +243,7 @@ def main() -> int:
 
 def print_summary(result: dict, report_path: Path) -> None:
     print("=" * 50)
-    print(f"{CURRENT_TETO_VERSION} LAB READINESS / SIMULATION EVIDENCE")
+    print(f"{CURRENT_TETO_VERSION} CAMERA SNAPSHOT / SIMULATION EVIDENCE")
     print("=" * 50)
     print(f"Status: {result['status']}")
     print(f"Mode: {result['mode']}")
@@ -365,6 +382,13 @@ def print_summary(result: dict, report_path: Path) -> None:
     print(f"real_robot_command_enabled: {result.get('real_robot_command_enabled')}")
     print(f"readiness_blocking_reasons: {result.get('readiness_blocking_reasons')}")
     print(f"next_safe_action: {result.get('next_safe_action')}")
+    print(f"camera_snapshot_requested: {result.get('camera_snapshot_requested')}")
+    print(f"camera_snapshot_id: {result.get('camera_snapshot_id')}")
+    print(f"camera_snapshot_validity_status: {result.get('camera_snapshot_validity_status')}")
+    print(f"camera_snapshot_blocking_reasons: {result.get('camera_snapshot_blocking_reasons')}")
+    print(f"no_motion_snapshot_passed: {result.get('no_motion_snapshot_passed')}")
+    print(f"live_capture_used: {result.get('live_capture_used')}")
+    print(f"live_camera_enabled: {result.get('live_camera_enabled')}")
     print(f"Report: {report_path}")
     if result.get("blocking_reasons"):
         print(f"Blocking reasons: {', '.join(result['blocking_reasons'])}")

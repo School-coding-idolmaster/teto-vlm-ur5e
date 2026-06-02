@@ -9,6 +9,7 @@ from typing import Any, Dict
 
 from src.articulation_readiness_contract import build_articulation_readiness_report
 from src.articulation_state_observer import build_articulation_state_report, observe_articulation_state as observe_articulation_state_in_world
+from src.camera_snapshot import build_camera_snapshot_request, evaluate_camera_snapshot_contract
 from src.evidence_exporter import export_simulation_evidence
 from src.lab_readiness import build_lab_readiness_request, evaluate_lab_readiness
 from src.robot_prim_inspector import (
@@ -46,7 +47,7 @@ from src.simulated_task_execution import (
 
 
 REPORT_VERSION = "teto_simulation_execution.v1"
-CURRENT_TETO_VERSION = "TETO V2.8.1"
+CURRENT_TETO_VERSION = "TETO V2.8.2"
 DEFAULT_STEPS = 5
 DEFAULT_SIMULATION_OBJECT_TYPE = "cube"
 DEFAULT_CUBE_PRIM_PATH = "/World/TETO_Cube"
@@ -108,6 +109,7 @@ def build_simulation_execution_result(
     semantic_bridge_metadata: Dict[str, Any] | None = None,
     simulated_task_execution_metadata: Dict[str, Any] | None = None,
     lab_readiness_metadata: Dict[str, Any] | None = None,
+    camera_snapshot_metadata: Dict[str, Any] | None = None,
     started_at: str | None = None,
     finished_at: str | None = None,
 ) -> Dict[str, Any]:
@@ -147,6 +149,7 @@ def build_simulation_execution_result(
     result.update(simulation_micro_motion_metadata or _simulation_micro_motion_report_fields())
     result.update(semantic_bridge_metadata or _semantic_bridge_report_fields())
     result.update(lab_readiness_metadata or _lab_readiness_report_fields())
+    result.update(camera_snapshot_metadata or _camera_snapshot_report_fields())
     if (
         result.get("semantic_simulation_bridge_requested") is True
         and result.get("semantic_gate_passed") is not True
@@ -228,19 +231,23 @@ def run_first_simulation_execution(
     check_camera_readiness: bool = False,
     check_live_vlm_readiness: bool = False,
     check_shadow_mode_readiness: bool = False,
+    check_camera_snapshot: bool = False,
+    camera_snapshot_config: str | Path | None = None,
+    camera_snapshot_report: bool = False,
     output_dir: str | Path | None = None,
     write_report: bool = False,
     demo_command: str | None = None,
 ) -> Dict[str, Any]:
     task = simulation_task or dict(DEFAULT_SIMULATION_TASK)
     started_at = _timestamp()
+    camera_snapshot_requested = check_camera_snapshot or camera_snapshot_report
     lab_readiness_requested = (
         check_lab_readiness
         or check_camera_readiness
         or check_live_vlm_readiness
         or check_shadow_mode_readiness
     )
-    if lab_readiness_requested and not dry_run:
+    if (lab_readiness_requested or camera_snapshot_requested) and not dry_run:
         no_isaac = True
     lab_readiness_request = build_lab_readiness_request(
         check_lab_backend=check_lab_readiness,
@@ -252,6 +259,14 @@ def run_first_simulation_execution(
     lab_readiness_metadata = _lab_readiness_report_fields(
         requested=lab_readiness_requested,
         readiness=evaluate_lab_readiness(lab_readiness_request),
+    )
+    camera_snapshot_request = build_camera_snapshot_request(
+        requested=camera_snapshot_requested,
+        config_path=camera_snapshot_config,
+    )
+    camera_snapshot_metadata = _camera_snapshot_report_fields(
+        requested=camera_snapshot_requested,
+        snapshot=evaluate_camera_snapshot_contract(camera_snapshot_request),
     )
     effective_move_object = move_object or move_cube
     effective_spawn_cube = spawn_cube or effective_move_object
@@ -367,6 +382,7 @@ def run_first_simulation_execution(
                 semantic_bridge_metadata=semantic_bridge_metadata,
                 simulated_task_execution_metadata=simulated_task_execution_metadata,
                 lab_readiness_metadata=lab_readiness_metadata,
+                camera_snapshot_metadata=camera_snapshot_metadata,
                 error_code="E_INVALID_STEPS",
                 error_message="steps must be a positive integer",
                 started_at=started_at,
@@ -414,6 +430,7 @@ def run_first_simulation_execution(
                 semantic_bridge_metadata=semantic_bridge_metadata,
                 simulated_task_execution_metadata=simulated_task_execution_metadata,
                 lab_readiness_metadata=lab_readiness_metadata,
+                camera_snapshot_metadata=camera_snapshot_metadata,
                 error_code="E_INVALID_SIMULATION_TASK",
                 error_message=f"missing simulation task fields: {', '.join(missing_fields)}",
                 started_at=started_at,
@@ -500,6 +517,7 @@ def run_first_simulation_execution(
                     semantic_bridge_metadata=semantic_bridge_metadata,
                     simulated_task_execution_metadata=simulated_task_execution_metadata,
                     lab_readiness_metadata=lab_readiness_metadata,
+                    camera_snapshot_metadata=camera_snapshot_metadata,
                     error_code="E_ROBOT_ASSET_LOAD_FAILED",
                     error_message="robot asset path is unavailable",
                     started_at=started_at,
@@ -533,6 +551,7 @@ def run_first_simulation_execution(
                 semantic_bridge_metadata=semantic_bridge_metadata,
                 simulated_task_execution_metadata=simulated_task_execution_metadata,
                 lab_readiness_metadata=lab_readiness_metadata,
+                camera_snapshot_metadata=camera_snapshot_metadata,
                 started_at=started_at,
                 finished_at=_timestamp(),
             ),
@@ -1433,6 +1452,40 @@ def _lab_readiness_report_fields(
             "readiness_evidence_files": [],
             "next_safe_action": None,
         },
+    }
+
+
+def _camera_snapshot_report_fields(
+    *,
+    requested: bool = False,
+    snapshot: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    snapshot = snapshot if isinstance(snapshot, dict) else {}
+    return {
+        "camera_snapshot_requested": requested,
+        "camera_snapshot": snapshot
+        or {
+            "requested": False,
+            "validity_status": "NOT_REQUESTED",
+            "blocking_reasons": [],
+            "warnings": [],
+            "no_motion_snapshot_passed": False,
+            "live_capture_used": False,
+            "live_camera_enabled": False,
+            "live_vlm_called": False,
+            "real_robot_motion_executed": False,
+            "real_robot_command_enabled": False,
+        },
+        "camera_snapshot_id": snapshot.get("snapshot_id"),
+        "camera_snapshot_scene_version": snapshot.get("scene_version"),
+        "camera_snapshot_validity_status": snapshot.get("validity_status", "NOT_REQUESTED"),
+        "camera_snapshot_blocking_reasons": list(snapshot.get("blocking_reasons") or []),
+        "camera_snapshot_warnings": list(snapshot.get("warnings") or []),
+        "no_motion_snapshot_passed": snapshot.get("no_motion_snapshot_passed", False) is True,
+        "live_capture_used": snapshot.get("live_capture_used", False) is True,
+        "live_camera_enabled": snapshot.get("live_camera_enabled", False) is True,
+        "live_vlm_called": snapshot.get("live_vlm_called", False) is True,
+        "real_robot_command_enabled": snapshot.get("real_robot_command_enabled", False) is True,
     }
 
 

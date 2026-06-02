@@ -229,7 +229,7 @@ def test_evidence_files_are_written_for_safe_execution(tmp_path):
     assert "### Human-readable conclusion" in summary
     assert "DRY_RUN_ONLY: this run generated replay-ready dry-run evidence only" in summary
     assert "### Evidence Files" in summary
-    assert "# TETO V2.8.1 Safe Simulated Task Execution Evidence Report" in report
+    assert "# TETO V2.8.2 Safe Simulated Task Execution Evidence Report" in report
     assert "## Execution Lifecycle Table" in report
     assert "## Gate Decision Table" in report
     assert "## Motion Verification Table" in report

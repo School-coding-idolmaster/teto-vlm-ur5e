@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict
 
+from src.camera_snapshot import format_camera_snapshot_report
 from src.simulation_micro_motion import (
     normalize_motion_evidence_paths,
     summarize_motion_evidence,
@@ -55,6 +56,8 @@ def export_simulation_evidence(
     camera_readiness_result_path = output_dir / "camera_readiness_result.json"
     live_vlm_readiness_result_path = output_dir / "live_vlm_readiness_result.json"
     shadow_mode_readiness_result_path = output_dir / "shadow_mode_readiness_result.json"
+    camera_snapshot_result_path = output_dir / "camera_snapshot_result.json"
+    camera_snapshot_report_path = output_dir / "camera_snapshot_report.md"
 
     object_info = _simulation_object_info(result)
     robot_asset_info = _robot_asset_info(result)
@@ -66,6 +69,7 @@ def export_simulation_evidence(
     semantic_bridge_info = _semantic_bridge_info(result)
     simulated_task_execution_info = _simulated_task_execution_info(result)
     lab_readiness_info = _lab_readiness_info(result)
+    camera_snapshot_info = _camera_snapshot_info(result)
     structure_report_requested = bool(robot_prim_inspection_info.get("requested"))
     readiness_requested = bool(articulation_readiness_info.get("requested"))
     state_requested = bool(articulation_state_info.get("requested"))
@@ -76,6 +80,7 @@ def export_simulation_evidence(
         simulated_task_execution_info.get("safe_simulated_task_execution_requested")
     )
     lab_readiness_requested = bool(lab_readiness_info.get("requested"))
+    camera_snapshot_requested = bool(camera_snapshot_info.get("requested"))
     run_id = output_dir.name
     created_at = result.get("finished_at") or result.get("started_at")
     report_path = result.get("report_path")
@@ -94,6 +99,7 @@ def export_simulation_evidence(
             semantic_bridge_info=semantic_bridge_info,
             simulated_task_execution_info=simulated_task_execution_info,
             lab_readiness_info=lab_readiness_info,
+            camera_snapshot_info=camera_snapshot_info,
             robot_structure_report_path=structure_report_ref,
             run_id=run_id,
             created_at=created_at,
@@ -232,6 +238,17 @@ def export_simulation_evidence(
         _write_json_artifact(camera_readiness_result_path, lab_readiness_info.get("camera", {}))
         _write_json_artifact(live_vlm_readiness_result_path, lab_readiness_info.get("live_vlm", {}))
         _write_json_artifact(shadow_mode_readiness_result_path, lab_readiness_info.get("shadow_mode", {}))
+    if camera_snapshot_requested:
+        camera_snapshot_info["camera_snapshot_result_path"] = str(camera_snapshot_result_path)
+        camera_snapshot_info["camera_snapshot_report_path"] = str(camera_snapshot_report_path)
+        camera_snapshot_info["camera_snapshot_evidence_files"] = _camera_snapshot_evidence_files(
+            camera_snapshot_info
+        )
+        _write_json_artifact(camera_snapshot_result_path, camera_snapshot_info)
+        camera_snapshot_report_path.write_text(
+            format_camera_snapshot_report(camera_snapshot_info),
+            encoding="utf-8",
+        )
     motion_evidence_summary = summarize_motion_evidence(simulation_micro_motion_info)
     execution_evidence_files = (
         _simulated_task_execution_files(simulated_task_execution_info)
@@ -337,22 +354,43 @@ def export_simulation_evidence(
         "allow_robot_motion": lab_readiness_info.get("allow_robot_motion", result.get("allow_robot_motion", False)),
         "allow_live_camera": lab_readiness_info.get("allow_live_camera", False),
         "allow_live_vlm": lab_readiness_info.get("allow_live_vlm", False),
-        "live_camera_used": lab_readiness_info.get("live_camera_used", False),
-        "live_vlm_called": lab_readiness_info.get("live_vlm_called", False),
-        "real_robot_motion_executed": lab_readiness_info.get("real_robot_motion_executed", False),
-        "real_robot_command_enabled": lab_readiness_info.get("real_robot_command_enabled", False),
         "readiness_evidence_files": (
             _readiness_evidence_files(lab_readiness_info) if lab_readiness_requested else []
         ),
         "next_safe_action": lab_readiness_info.get("next_safe_action"),
+        "camera_snapshot_evidence_available": camera_snapshot_requested,
+        "camera_snapshot_id": camera_snapshot_info.get("snapshot_id"),
+        "scene_version": camera_snapshot_info.get("scene_version") or result.get("scene_version"),
+        "camera_snapshot_validity_status": camera_snapshot_info.get("validity_status"),
+        "camera_snapshot_blocking_reasons": camera_snapshot_info.get("blocking_reasons", []),
+        "camera_snapshot_warnings": camera_snapshot_info.get("warnings", []),
+        "no_motion_snapshot_passed": camera_snapshot_info.get("no_motion_snapshot_passed", False),
+        "camera_snapshot_evidence_files": (
+            _camera_snapshot_evidence_files(camera_snapshot_info) if camera_snapshot_requested else []
+        ),
+        "live_capture_used": camera_snapshot_info.get("live_capture_used", False),
+        "live_camera_enabled": camera_snapshot_info.get("live_camera_enabled", False),
+        "live_camera_used": (
+            camera_snapshot_info.get("live_capture_used", False)
+            or lab_readiness_info.get("live_camera_used", False)
+        ),
+        "live_vlm_called": (
+            camera_snapshot_info.get("live_vlm_called", False)
+            or lab_readiness_info.get("live_vlm_called", False)
+        ),
+        "real_robot_motion_executed": (
+            camera_snapshot_info.get("real_robot_motion_executed", False)
+            or lab_readiness_info.get("real_robot_motion_executed", False)
+            or result.get("real_robot_motion_executed", False)
+        ),
+        "real_robot_command_enabled": (
+            camera_snapshot_info.get("real_robot_command_enabled", False)
+            or lab_readiness_info.get("real_robot_command_enabled", False)
+        ),
         "motion_evidence_available": motion_evidence_summary["motion_evidence_available"],
         "motion_evidence_files": motion_evidence_summary["motion_evidence_files"],
         "motion_diff_summary": motion_evidence_summary["motion_diff_summary"],
         "simulation_only": result.get("simulation_only", True),
-        "real_robot_motion_executed": lab_readiness_info.get(
-            "real_robot_motion_executed",
-            result.get("real_robot_motion_executed", False),
-        ),
         "simulation_motion_result_path": str(simulation_motion_result_path) if micro_motion_requested else None,
         "simulation_motion_report_path": str(simulation_motion_report_path) if micro_motion_requested else None,
         "before_articulation_state_path": str(before_articulation_state_path) if micro_motion_requested else None,
@@ -387,6 +425,8 @@ def export_simulation_evidence(
         "camera_readiness_result_path": str(camera_readiness_result_path) if lab_readiness_requested else None,
         "live_vlm_readiness_result_path": str(live_vlm_readiness_result_path) if lab_readiness_requested else None,
         "shadow_mode_readiness_result_path": str(shadow_mode_readiness_result_path) if lab_readiness_requested else None,
+        "camera_snapshot_result_path": str(camera_snapshot_result_path) if camera_snapshot_requested else None,
+        "camera_snapshot_report_path": str(camera_snapshot_report_path) if camera_snapshot_requested else None,
         "screenshot_before_path": None,
         "screenshot_after_path": None,
         "video_path": None,
@@ -425,6 +465,8 @@ def export_simulation_evidence(
         "camera_readiness_result_path": camera_readiness_result_path,
         "live_vlm_readiness_result_path": live_vlm_readiness_result_path,
         "shadow_mode_readiness_result_path": shadow_mode_readiness_result_path,
+        "camera_snapshot_result_path": camera_snapshot_result_path,
+        "camera_snapshot_report_path": camera_snapshot_report_path,
     }
 
 
@@ -863,6 +905,60 @@ def _readiness_safety_flags(lab_readiness_info: Dict[str, Any]) -> Dict[str, boo
     }
 
 
+def _camera_snapshot_info(result: Dict[str, Any]) -> Dict[str, Any]:
+    snapshot = result.get("camera_snapshot") if isinstance(result.get("camera_snapshot"), dict) else {}
+    return {
+        **snapshot,
+        "requested": result.get("camera_snapshot_requested", snapshot.get("requested", False)) is True,
+        "snapshot_id": result.get("camera_snapshot_id", snapshot.get("snapshot_id")),
+        "scene_version": result.get("camera_snapshot_scene_version", snapshot.get("scene_version")),
+        "validity_status": result.get(
+            "camera_snapshot_validity_status",
+            snapshot.get("validity_status", "NOT_REQUESTED"),
+        ),
+        "blocking_reasons": result.get(
+            "camera_snapshot_blocking_reasons",
+            snapshot.get("blocking_reasons", []),
+        ),
+        "warnings": result.get("camera_snapshot_warnings", snapshot.get("warnings", [])),
+        "no_motion_snapshot_passed": result.get(
+            "no_motion_snapshot_passed",
+            snapshot.get("no_motion_snapshot_passed", False),
+        )
+        is True,
+        "live_capture_used": result.get("live_capture_used", snapshot.get("live_capture_used", False)) is True,
+        "live_camera_enabled": result.get(
+            "live_camera_enabled",
+            snapshot.get("live_camera_enabled", False),
+        )
+        is True,
+        "live_vlm_called": result.get("live_vlm_called", snapshot.get("live_vlm_called", False)) is True,
+        "real_robot_motion_executed": result.get(
+            "real_robot_motion_executed",
+            snapshot.get("real_robot_motion_executed", False),
+        )
+        is True,
+        "real_robot_command_enabled": result.get(
+            "real_robot_command_enabled",
+            snapshot.get("real_robot_command_enabled", False),
+        )
+        is True,
+    }
+
+
+def _camera_snapshot_evidence_files(camera_snapshot_info: Dict[str, Any]) -> list[Dict[str, str | None]]:
+    return [
+        {
+            "name": "camera_snapshot_result.json",
+            "path": camera_snapshot_info.get("camera_snapshot_result_path"),
+        },
+        {
+            "name": "camera_snapshot_report.md",
+            "path": camera_snapshot_info.get("camera_snapshot_report_path"),
+        },
+    ]
+
+
 def _latest_execution_summary(
     execution_info: Dict[str, Any],
     precheck_info: Dict[str, Any],
@@ -965,6 +1061,7 @@ def _build_summary_markdown(
     semantic_bridge_info: Dict[str, Any],
     simulated_task_execution_info: Dict[str, Any],
     lab_readiness_info: Dict[str, Any],
+    camera_snapshot_info: Dict[str, Any],
     robot_structure_report_path: str | None,
     run_id: str,
     created_at: str | None,
@@ -1094,6 +1191,22 @@ def _build_summary_markdown(
             f"- blocking_reasons: {_format_value(simulation_motion_precheck_info.get('blocking_reasons'))}",
             f"- warnings: {_format_value(simulation_motion_precheck_info.get('warnings'))}",
             f"- errors: {_format_value(simulation_motion_precheck_info.get('errors'))}",
+            "",
+            "## Camera Snapshot Evidence Summary",
+            "",
+            f"- camera_snapshot_evidence_available: {_format_value(camera_snapshot_info.get('requested'))}",
+            f"- camera_snapshot_id: {_format_value(camera_snapshot_info.get('snapshot_id'))}",
+            f"- scene_version: {_format_value(camera_snapshot_info.get('scene_version'))}",
+            f"- camera_snapshot_validity_status: {_format_value(camera_snapshot_info.get('validity_status'))}",
+            f"- camera_snapshot_blocking_reasons: {_format_value(camera_snapshot_info.get('blocking_reasons'))}",
+            f"- camera_snapshot_warnings: {_format_value(camera_snapshot_info.get('warnings'))}",
+            f"- no_motion_snapshot_passed: {_format_value(camera_snapshot_info.get('no_motion_snapshot_passed'))}",
+            f"- live_capture_used: {_format_value(camera_snapshot_info.get('live_capture_used'))}",
+            f"- live_camera_enabled: {_format_value(camera_snapshot_info.get('live_camera_enabled'))}",
+            f"- live_vlm_called: {_format_value(camera_snapshot_info.get('live_vlm_called'))}",
+            f"- real_robot_motion_executed: {_format_value(camera_snapshot_info.get('real_robot_motion_executed'))}",
+            f"- real_robot_command_enabled: {_format_value(camera_snapshot_info.get('real_robot_command_enabled'))}",
+            "This V2.8.2 camera snapshot evidence validates a declared offline/manual snapshot manifest only. It does not capture a live camera frame, call live Qwen/VLM, connect to a real UR5, generate trajectory, execute tcp_pose_world, or produce robot control fields.",
             "",
             "## Readiness Evidence Summary",
             "",
