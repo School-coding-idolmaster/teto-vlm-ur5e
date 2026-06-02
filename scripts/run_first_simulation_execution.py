@@ -19,7 +19,7 @@ from src.simulation_runtime import DEFAULT_SIMULATION_TASK, CURRENT_TETO_VERSION
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run TETO V2.9.0 real-scene no-motion shadow and safe simulation evidence smoke test."
+        description="Run TETO V2.9.1 geometry validity, real-scene no-motion shadow, and safe simulation evidence smoke test."
     )
     parser.add_argument("--dry-run", action="store_true", help="Do not import Isaac; produce a test execution report.")
     parser.add_argument("--no-isaac", action="store_true", help="Pure Python test mode without Isaac imports.")
@@ -120,7 +120,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--execution-max-attempts",
         type=int,
         default=1,
-        help="Maximum attempts metadata. V2.9.0 supports 1 and does not auto-retry.",
+        help="Maximum attempts metadata. V2.9.1 supports 1 and does not auto-retry.",
     )
     parser.add_argument(
         "--execution-enable-retry-recommendation",
@@ -171,6 +171,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Generate camera snapshot evidence report from the supplied manifest.",
     )
     parser.add_argument(
+        "--check-geometry-validity",
+        action="store_true",
+        help="Validate snapshot plus offline/mock grounding geometry before projector handoff.",
+    )
+    parser.add_argument(
+        "--geometry-validity-config",
+        help="Path to geometry validity YAML/JSON config. Only declared evidence references are validated.",
+    )
+    parser.add_argument(
+        "--geometry-validity-report",
+        action="store_true",
+        help="Generate geometry validity evidence report without live camera, live VLM, or robot motion.",
+    )
+    parser.add_argument(
         "--run-real-scene-shadow",
         action="store_true",
         help="Validate offline/manual camera snapshot plus offline/mock grounding evidence without motion.",
@@ -194,7 +208,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
     if args.execution_max_attempts != 1:
-        raise ValueError("--execution-max-attempts currently supports only 1 in TETO V2.9.0")
+        raise ValueError("--execution-max-attempts currently supports only 1 in TETO V2.9.1")
     simulation_task = _load_simulation_task(args.task_json)
     semantic_contract = None
     semantic_contract_path = None
@@ -252,6 +266,9 @@ def main() -> int:
         check_camera_snapshot=args.check_camera_snapshot,
         camera_snapshot_config=args.camera_snapshot_config,
         camera_snapshot_report=args.camera_snapshot_report,
+        check_geometry_validity=args.check_geometry_validity,
+        geometry_validity_config=args.geometry_validity_config,
+        geometry_validity_report=args.geometry_validity_report,
         run_real_scene_shadow=args.run_real_scene_shadow,
         real_scene_shadow_config=args.real_scene_shadow_config,
         grounding_result=args.grounding_result,
@@ -413,6 +430,12 @@ def print_summary(result: dict, report_path: Path) -> None:
     print(f"no_motion_snapshot_passed: {result.get('no_motion_snapshot_passed')}")
     print(f"live_capture_used: {result.get('live_capture_used')}")
     print(f"live_camera_enabled: {result.get('live_camera_enabled')}")
+    print(f"geometry_validity_requested: {result.get('geometry_validity_requested')}")
+    print(f"geometry_validity_snapshot_id: {result.get('geometry_validity_snapshot_id')}")
+    print(f"geometry_validity_grounding_id: {result.get('geometry_validity_grounding_id')}")
+    print(f"geometry_validity_status: {result.get('geometry_validity_status')}")
+    print(f"no_motion_geometry_passed: {result.get('no_motion_geometry_passed')}")
+    print(f"geometry_validity_blocking_reasons: {result.get('geometry_validity_blocking_reasons')}")
     print(f"real_scene_shadow_requested: {result.get('real_scene_shadow_requested')}")
     print(f"real_scene_shadow_snapshot_id: {result.get('real_scene_shadow_snapshot_id')}")
     print(f"real_scene_shadow_grounding_id: {result.get('real_scene_shadow_grounding_id')}")

@@ -1,0 +1,26 @@
+{
+  "grounding_result": {
+    "grounding_id": "example_grounding_no_depth_001",
+    "snapshot_id": "example_offline_snapshot_001",
+    "scene_version": "example_lab_scene_v1",
+    "source": "mock_grounding",
+    "user_command": "inspect the red cup",
+    "target_label": "red cup",
+    "target_object_id": "object_red_cup_001",
+    "bbox_xyxy": [120, 90, 260, 260],
+    "pixel_center": [190, 175],
+    "mask_ref": null,
+    "semantic_confidence": 0.91,
+    "grounding_confidence": 0.88,
+    "overall_confidence": 0.86,
+    "grounded": true,
+    "rejected": false,
+    "rejection_reason": null,
+    "error_code": "E_NO_DEPTH",
+    "warnings": ["use with a snapshot fixture where depth_required=true and depth_available=false"],
+    "live_vlm_called": false,
+    "live_camera_used": false,
+    "real_robot_motion_executed": false,
+    "real_robot_command_enabled": false
+  }
+}

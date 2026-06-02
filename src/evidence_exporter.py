@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from src.camera_snapshot import format_camera_snapshot_report
+from src.geometry_validity import format_geometry_validity_report
 from src.simulation_micro_motion import (
     normalize_motion_evidence_paths,
     summarize_motion_evidence,
@@ -59,6 +60,8 @@ def export_simulation_evidence(
     shadow_mode_readiness_result_path = output_dir / "shadow_mode_readiness_result.json"
     camera_snapshot_result_path = output_dir / "camera_snapshot_result.json"
     camera_snapshot_report_path = output_dir / "camera_snapshot_report.md"
+    geometry_validity_result_path = output_dir / "geometry_validity_result.json"
+    geometry_validity_report_path = output_dir / "geometry_validity_report.md"
     real_scene_shadow_result_path = output_dir / "real_scene_shadow_result.json"
     real_scene_shadow_report_path = output_dir / "real_scene_shadow_report.md"
 
@@ -73,6 +76,7 @@ def export_simulation_evidence(
     simulated_task_execution_info = _simulated_task_execution_info(result)
     lab_readiness_info = _lab_readiness_info(result)
     camera_snapshot_info = _camera_snapshot_info(result)
+    geometry_validity_info = _geometry_validity_info(result)
     real_scene_shadow_info = _real_scene_shadow_info(result)
     structure_report_requested = bool(robot_prim_inspection_info.get("requested"))
     readiness_requested = bool(articulation_readiness_info.get("requested"))
@@ -85,6 +89,7 @@ def export_simulation_evidence(
     )
     lab_readiness_requested = bool(lab_readiness_info.get("requested"))
     camera_snapshot_requested = bool(camera_snapshot_info.get("requested"))
+    geometry_validity_requested = bool(geometry_validity_info.get("requested"))
     real_scene_shadow_requested = bool(real_scene_shadow_info.get("requested"))
     run_id = output_dir.name
     created_at = result.get("finished_at") or result.get("started_at")
@@ -105,6 +110,7 @@ def export_simulation_evidence(
             simulated_task_execution_info=simulated_task_execution_info,
             lab_readiness_info=lab_readiness_info,
             camera_snapshot_info=camera_snapshot_info,
+            geometry_validity_info=geometry_validity_info,
             real_scene_shadow_info=real_scene_shadow_info,
             robot_structure_report_path=structure_report_ref,
             run_id=run_id,
@@ -253,6 +259,17 @@ def export_simulation_evidence(
         _write_json_artifact(camera_snapshot_result_path, camera_snapshot_info)
         camera_snapshot_report_path.write_text(
             format_camera_snapshot_report(camera_snapshot_info),
+            encoding="utf-8",
+        )
+    if geometry_validity_requested:
+        geometry_validity_info["geometry_validity_result_path"] = str(geometry_validity_result_path)
+        geometry_validity_info["geometry_validity_report_path"] = str(geometry_validity_report_path)
+        geometry_validity_info["geometry_validity_evidence_files"] = _geometry_validity_evidence_files(
+            geometry_validity_info
+        )
+        _write_json_artifact(geometry_validity_result_path, geometry_validity_info)
+        geometry_validity_report_path.write_text(
+            format_geometry_validity_report(geometry_validity_info),
             encoding="utf-8",
         )
     if real_scene_shadow_requested:
@@ -444,9 +461,38 @@ def export_simulation_evidence(
         "shadow_mode_readiness_result_path": str(shadow_mode_readiness_result_path) if lab_readiness_requested else None,
         "camera_snapshot_result_path": str(camera_snapshot_result_path) if camera_snapshot_requested else None,
         "camera_snapshot_report_path": str(camera_snapshot_report_path) if camera_snapshot_requested else None,
+        "geometry_validity_evidence_available": geometry_validity_requested,
+        "geometry_validity_status": geometry_validity_info.get("geometry_validity_status"),
+        "geometry_validity_requested": geometry_validity_requested,
+        "snapshot_id": geometry_validity_info.get("snapshot_id") or real_scene_shadow_info.get("snapshot_id"),
+        "grounding_id": geometry_validity_info.get("grounding_id") or real_scene_shadow_info.get("grounding_id"),
+        "scene_version": geometry_validity_info.get("scene_version")
+        or real_scene_shadow_info.get("scene_version")
+        or camera_snapshot_info.get("scene_version")
+        or result.get("scene_version"),
+        "bbox_valid": geometry_validity_info.get("bbox_valid"),
+        "pixel_center_valid": geometry_validity_info.get("pixel_center_valid"),
+        "bbox_inside_image": geometry_validity_info.get("bbox_inside_image"),
+        "pixel_center_inside_image": geometry_validity_info.get("pixel_center_inside_image"),
+        "confidence_check_passed": geometry_validity_info.get("confidence_check_passed"),
+        "ttl_check_passed": geometry_validity_info.get("ttl_check_passed"),
+        "depth_required": geometry_validity_info.get("depth_required"),
+        "depth_available": geometry_validity_info.get("depth_available"),
+        "camera_frame_available": geometry_validity_info.get("camera_frame_available"),
+        "geometry_validity_blocking_reasons": geometry_validity_info.get("blocking_reasons", []),
+        "geometry_validity_warnings": geometry_validity_info.get("warnings", []),
+        "geometry_validity_next_safe_action": geometry_validity_info.get("next_safe_action"),
+        "no_motion_geometry_passed": geometry_validity_info.get("no_motion_geometry_passed", False),
+        "geometry_validity_evidence_files": (
+            _geometry_validity_evidence_files(geometry_validity_info) if geometry_validity_requested else []
+        ),
+        "geometry_validity_result_path": str(geometry_validity_result_path)
+        if geometry_validity_requested
+        else None,
+        "geometry_validity_report_path": str(geometry_validity_report_path)
+        if geometry_validity_requested
+        else None,
         "real_scene_shadow_evidence_available": real_scene_shadow_requested,
-        "snapshot_id": real_scene_shadow_info.get("snapshot_id"),
-        "grounding_id": real_scene_shadow_info.get("grounding_id"),
         "shadow_pipeline_status": real_scene_shadow_info.get("shadow_pipeline_status"),
         "semantic_gate_passed": (
             real_scene_shadow_info.get("semantic_gate_passed", False)
@@ -463,13 +509,23 @@ def export_simulation_evidence(
         "real_scene_shadow_next_safe_action": real_scene_shadow_info.get("next_safe_action"),
         "real_scene_shadow_replay_ready": real_scene_shadow_info.get("replay_ready", False),
         "blocking_reasons": (
-            real_scene_shadow_info.get("blocking_reasons")
+            geometry_validity_info.get("blocking_reasons")
+            if geometry_validity_requested
+            else real_scene_shadow_info.get("blocking_reasons")
             if real_scene_shadow_requested
             else list(lab_readiness_info.get("blocking_reasons") or result.get("blocking_reasons") or [])
         ),
-        "warnings": real_scene_shadow_info.get("warnings", []) if real_scene_shadow_requested else [],
+        "warnings": (
+            geometry_validity_info.get("warnings", [])
+            if geometry_validity_requested
+            else real_scene_shadow_info.get("warnings", [])
+            if real_scene_shadow_requested
+            else []
+        ),
         "next_safe_action": (
-            real_scene_shadow_info.get("next_safe_action")
+            geometry_validity_info.get("next_safe_action")
+            if geometry_validity_requested
+            else real_scene_shadow_info.get("next_safe_action")
             if real_scene_shadow_requested
             else lab_readiness_info.get("next_safe_action")
         ),
@@ -531,6 +587,8 @@ def export_simulation_evidence(
         "shadow_mode_readiness_result_path": shadow_mode_readiness_result_path,
         "camera_snapshot_result_path": camera_snapshot_result_path,
         "camera_snapshot_report_path": camera_snapshot_report_path,
+        "geometry_validity_result_path": geometry_validity_result_path,
+        "geometry_validity_report_path": geometry_validity_report_path,
         "real_scene_shadow_result_path": real_scene_shadow_result_path,
         "real_scene_shadow_report_path": real_scene_shadow_report_path,
     }
@@ -1025,6 +1083,61 @@ def _camera_snapshot_evidence_files(camera_snapshot_info: Dict[str, Any]) -> lis
     ]
 
 
+def _geometry_validity_info(result: Dict[str, Any]) -> Dict[str, Any]:
+    geometry = result.get("geometry_validity") if isinstance(result.get("geometry_validity"), dict) else {}
+    return {
+        **geometry,
+        "requested": result.get("geometry_validity_requested", geometry.get("requested", False)) is True,
+        "geometry_validity_requested": result.get(
+            "geometry_validity_requested",
+            geometry.get("geometry_validity_requested", False),
+        )
+        is True,
+        "geometry_validity_status": result.get(
+            "geometry_validity_status",
+            geometry.get("geometry_validity_status", "NOT_REQUESTED"),
+        ),
+        "snapshot_id": result.get("geometry_validity_snapshot_id", geometry.get("snapshot_id")),
+        "grounding_id": result.get("geometry_validity_grounding_id", geometry.get("grounding_id")),
+        "scene_version": result.get("geometry_validity_scene_version", geometry.get("scene_version")),
+        "blocking_reasons": result.get(
+            "geometry_validity_blocking_reasons",
+            geometry.get("blocking_reasons", []),
+        ),
+        "warnings": result.get("geometry_validity_warnings", geometry.get("warnings", [])),
+        "next_safe_action": result.get(
+            "geometry_validity_next_safe_action",
+            geometry.get("next_safe_action"),
+        ),
+        "no_motion_geometry_passed": result.get(
+            "no_motion_geometry_passed",
+            geometry.get("no_motion_geometry_passed", False),
+        )
+        is True,
+        "live_camera_used": geometry.get("live_camera_used", False) is True,
+        "live_vlm_called": geometry.get("live_vlm_called", False) is True,
+        "real_robot_motion_executed": geometry.get("real_robot_motion_executed", False) is True,
+        "real_robot_command_enabled": geometry.get("real_robot_command_enabled", False) is True,
+        "robot_command_generated": geometry.get("robot_command_generated", False) is True,
+        "trajectory_generated": geometry.get("trajectory_generated", False) is True,
+        "joint_targets_generated": geometry.get("joint_targets_generated", False) is True,
+        "tcp_pose_world_generated": geometry.get("tcp_pose_world_generated", False) is True,
+    }
+
+
+def _geometry_validity_evidence_files(geometry_validity_info: Dict[str, Any]) -> list[Dict[str, str | None]]:
+    return [
+        {
+            "name": "geometry_validity_result.json",
+            "path": geometry_validity_info.get("geometry_validity_result_path"),
+        },
+        {
+            "name": "geometry_validity_report.md",
+            "path": geometry_validity_info.get("geometry_validity_report_path"),
+        },
+    ]
+
+
 def _real_scene_shadow_info(result: Dict[str, Any]) -> Dict[str, Any]:
     shadow = result.get("real_scene_shadow") if isinstance(result.get("real_scene_shadow"), dict) else {}
     return {
@@ -1181,6 +1294,7 @@ def _build_summary_markdown(
     simulated_task_execution_info: Dict[str, Any],
     lab_readiness_info: Dict[str, Any],
     camera_snapshot_info: Dict[str, Any],
+    geometry_validity_info: Dict[str, Any],
     real_scene_shadow_info: Dict[str, Any],
     robot_structure_report_path: str | None,
     run_id: str,
@@ -1327,6 +1441,36 @@ def _build_summary_markdown(
             f"- real_robot_motion_executed: {_format_value(camera_snapshot_info.get('real_robot_motion_executed'))}",
             f"- real_robot_command_enabled: {_format_value(camera_snapshot_info.get('real_robot_command_enabled'))}",
             "This V2.8.2 camera snapshot evidence validates a declared offline/manual snapshot manifest only. It does not capture a live camera frame, call live Qwen/VLM, connect to a real UR5, generate trajectory, execute tcp_pose_world, or produce robot control fields.",
+            "",
+            "## Geometry Validity Evidence Summary",
+            "",
+            f"- geometry_validity_evidence_available: {_format_value(geometry_validity_info.get('requested'))}",
+            f"- geometry_validity_status: {_format_value(geometry_validity_info.get('geometry_validity_status'))}",
+            f"- snapshot_id: {_format_value(geometry_validity_info.get('snapshot_id'))}",
+            f"- grounding_id: {_format_value(geometry_validity_info.get('grounding_id'))}",
+            f"- scene_version: {_format_value(geometry_validity_info.get('scene_version'))}",
+            f"- bbox_valid: {_format_value(geometry_validity_info.get('bbox_valid'))}",
+            f"- pixel_center_valid: {_format_value(geometry_validity_info.get('pixel_center_valid'))}",
+            f"- bbox_inside_image: {_format_value(geometry_validity_info.get('bbox_inside_image'))}",
+            f"- pixel_center_inside_image: {_format_value(geometry_validity_info.get('pixel_center_inside_image'))}",
+            f"- confidence_check_passed: {_format_value(geometry_validity_info.get('confidence_check_passed'))}",
+            f"- ttl_check_passed: {_format_value(geometry_validity_info.get('ttl_check_passed'))}",
+            f"- depth_required: {_format_value(geometry_validity_info.get('depth_required'))}",
+            f"- depth_available: {_format_value(geometry_validity_info.get('depth_available'))}",
+            f"- camera_frame_available: {_format_value(geometry_validity_info.get('camera_frame_available'))}",
+            f"- no_motion_geometry_passed: {_format_value(geometry_validity_info.get('no_motion_geometry_passed'))}",
+            f"- blocking_reasons: {_format_value(geometry_validity_info.get('blocking_reasons'))}",
+            f"- warnings: {_format_value(geometry_validity_info.get('warnings'))}",
+            f"- next_safe_action: {_format_value(geometry_validity_info.get('next_safe_action'))}",
+            f"- live_camera_used: {_format_value(geometry_validity_info.get('live_camera_used'))}",
+            f"- live_vlm_called: {_format_value(geometry_validity_info.get('live_vlm_called'))}",
+            f"- real_robot_motion_executed: {_format_value(geometry_validity_info.get('real_robot_motion_executed'))}",
+            f"- real_robot_command_enabled: {_format_value(geometry_validity_info.get('real_robot_command_enabled'))}",
+            f"- robot_command_generated: {_format_value(geometry_validity_info.get('robot_command_generated'))}",
+            f"- trajectory_generated: {_format_value(geometry_validity_info.get('trajectory_generated'))}",
+            f"- joint_targets_generated: {_format_value(geometry_validity_info.get('joint_targets_generated'))}",
+            f"- tcp_pose_world_generated: {_format_value(geometry_validity_info.get('tcp_pose_world_generated'))}",
+            "This V2.9.1 geometry validity evidence checks declared bbox, pixel_center, frame, depth, TTL, and confidence before a future 2D-to-3D projector. It is no-motion, no-live-camera, no-live-VLM, and no-real-robot evidence only; it does not connect to ROS2, MoveIt, RTDE, URScript, Dashboard, or a real UR5, and it does not generate trajectory, tcp_pose_world, joint targets, or robot commands.",
             "",
             "## Real-Scene Shadow Pipeline Summary",
             "",

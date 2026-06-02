@@ -1540,6 +1540,59 @@ The evidence bundle includes `real_scene_shadow_result.json`,
 `semantic_gate_passed`, `no_motion_shadow_passed`, blocking reasons, warnings,
 replay readiness, and live/real-robot safety flags.
 
+## TETO V2.9.1 Geometry Validity Contract
+
+TETO V2.9.1 adds a geometry validity contract. It checks whether an offline/mock
+VLM grounding result is geometrically usable before a future 2D-to-3D projector
+handoff.
+
+The contract validates declared evidence only:
+
+- snapshot / grounding `snapshot_id` and `scene_version` match
+- image width and height are present and valid
+- `bbox_xyxy` format, image bounds, and nonzero/minimum area
+- `pixel_center` format and image bounds
+- camera frame and frame ID availability
+- depth availability when `depth_required=true`
+- confidence threshold and TTL freshness
+- grounded/rejected state, live camera/VLM flags, and forbidden robot control
+  fields
+
+V2.9.1 is not live camera capture, not live VLM/Qwen inference, not a ROS2
+bridge, not MoveIt planning, and not real UR5 execution. It does not generate
+trajectory, `tcp_pose_world`, URScript, joint targets, robot commands,
+automatic retry motion, or any real execution request.
+
+Positive geometry validity smoke:
+
+```bash
+python3 scripts/run_first_simulation_execution.py \
+  --check-geometry-validity \
+  --geometry-validity-config configs/geometry_validity.example.yaml \
+  --geometry-validity-report \
+  --output-dir /tmp/teto_v291_geometry_validity_positive
+```
+
+Invalid bbox geometry smoke:
+
+```bash
+python3 scripts/run_first_simulation_execution.py \
+  --check-geometry-validity \
+  --geometry-validity-config configs/geometry_validity.example.yaml \
+  --grounding-result examples/grounding_result_invalid_bbox_example.json \
+  --geometry-validity-report \
+  --output-dir /tmp/teto_v291_geometry_validity_invalid_bbox
+```
+
+The evidence bundle includes `geometry_validity_result.json`,
+`geometry_validity_report.md`, `summary.md`, and `evidence_manifest.json`.
+`geometry_validity_report.md` states the no-motion / no-live-camera /
+no-live-VLM / no-real-robot safety boundary, and `evidence_manifest.json`
+records `geometry_validity_evidence_available`, `geometry_validity_status`,
+`snapshot_id`, `grounding_id`, `bbox_valid`, `pixel_center_valid`,
+depth/confidence/TTL checks, blocking reasons, warnings, `next_safe_action`,
+and the no-motion safety flags.
+
 Demo commands accept common image formats directly. TETO automatically
 creates a cached RGB JPEG under `data/processed/auto/`, with EXIF orientation
 applied, long edge resized, animated images reduced to the first frame, and
@@ -1755,4 +1808,5 @@ python3 -m src.cli prepare-images --input-dir data/raw --output-dir data/process
 - V2.8.1 = readiness evidence polish
 - V2.8.2 = camera snapshot contract
 - V2.9.0 = real-scene no-motion shadow pipeline
+- V2.9.1 = geometry validity contract
 - Future ROS2 / MoveIt2 / RTDE / URScript / real UR5 controller integration remains outside the current implemented safety boundary

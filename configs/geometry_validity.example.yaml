@@ -1,0 +1,7 @@
+geometry_validity:
+  camera_snapshot_config: configs/camera_snapshot.example.yaml
+  grounding_result: examples/grounding_result_example.json
+  depth_required: true
+  thresholds:
+    confidence_threshold: 0.6
+    min_bbox_area_px: 1.0
