@@ -139,6 +139,12 @@ def build_simulation_execution_result(
     result.update(simulation_motion_precheck_metadata or _simulation_motion_precheck_report_fields())
     result.update(simulation_micro_motion_metadata or _simulation_micro_motion_report_fields())
     result.update(semantic_bridge_metadata or _semantic_bridge_report_fields())
+    if (
+        result.get("semantic_simulation_bridge_requested") is True
+        and result.get("semantic_gate_passed") is not True
+        and result.get("simulation_micro_motion_requested") is not True
+    ):
+        result["simulation_micro_motion_status"] = "BLOCKED_BY_SEMANTIC_GATE"
     result["semantic_bridge"] = _semantic_bridge_info(result)
     result["motion"] = _motion_info(result)
     result["safety"] = _safety_report_fields(result)

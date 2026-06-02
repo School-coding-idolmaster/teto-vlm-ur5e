@@ -145,7 +145,7 @@ def test_blocked_semantic_bridge_generates_evidence_without_motion(tmp_path):
     assert result["semantic_gate_passed"] is False
     assert result["triggered_simulation_micro_motion"] is False
     assert result["simulation_micro_motion_requested"] is False
-    assert result["simulation_micro_motion_status"] == "NOT_REQUESTED"
+    assert result["simulation_micro_motion_status"] == "BLOCKED_BY_SEMANTIC_GATE"
     assert result["robot_motion_executed"] is False
     assert result["real_robot_motion_executed"] is False
     assert "E_NO_TARGET" in result["semantic_bridge_blocking_reasons"]
