@@ -263,6 +263,26 @@ def test_cli_safe_simulated_task_execution_arguments_parse():
     assert args.execution_enable_fallback_recommendation is True
 
 
+def test_cli_lab_readiness_arguments_parse():
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "--check-lab-readiness",
+            "--lab-readiness-config",
+            "configs/lab_backend.example.yaml",
+            "--check-camera-readiness",
+            "--check-live-vlm-readiness",
+            "--check-shadow-mode-readiness",
+        ]
+    )
+
+    assert args.check_lab_readiness is True
+    assert args.lab_readiness_config == "configs/lab_backend.example.yaml"
+    assert args.check_camera_readiness is True
+    assert args.check_live_vlm_readiness is True
+    assert args.check_shadow_mode_readiness is True
+
+
 def test_dry_run_robot_asset_check_passes_with_unavailable_default():
     result = run_first_simulation_execution(VALID_TASK, dry_run=True, steps=1, check_robot_asset=True)
 

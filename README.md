@@ -1373,6 +1373,51 @@ URScript, Dashboard, real UR5, trajectory, or `tcp_pose_world` control chain.
 Retry and fallback remain recommendations only; no automatic retry motion is
 executed.
 
+## TETO V2.8.0 Lab Backend / Camera Readiness No-Motion Preparation
+
+TETO V2.8.0 prepares a lab backend, camera, live VLM, and shadow-mode readiness
+contract for future lab UR5 computer integration. It is not a real robot
+execution release. No real robot command is generated, no trajectory is
+generated, no `tcp_pose_world` execution is performed, and no ROS2, MoveIt,
+RTDE, URScript, Dashboard, real UR5, live camera capture, or live VLM call is
+made.
+
+Default V2.8.0 safety flags remain disabled:
+
+- `allow_live_camera=false`
+- `allow_live_vlm=false`
+- `allow_real_robot_backend=false`
+- `allow_robot_motion=false`
+
+Readiness checks are config-only and shadow-mode oriented. Example safe configs
+are provided in:
+
+- `configs/lab_backend.example.yaml`
+- `configs/camera.example.yaml`
+- `configs/live_vlm.example.yaml`
+
+Local lab configs such as `local.lab_backend.yaml`, `local.camera.yaml`, and
+`local.live_vlm.yaml` must not be committed because they may contain real UR5
+IP addresses, camera serial numbers, tokens, or local paths.
+
+Run a no-motion readiness evidence check:
+
+```bash
+python3 scripts/run_first_simulation_execution.py \
+  --check-lab-readiness \
+  --check-camera-readiness \
+  --check-live-vlm-readiness \
+  --check-shadow-mode-readiness \
+  --lab-readiness-config configs/lab_backend.example.yaml \
+  --output-dir /tmp/teto_v280_readiness
+```
+
+The evidence bundle includes `lab_readiness_result.json`,
+`lab_readiness_report.md`, `camera_readiness_result.json`,
+`live_vlm_readiness_result.json`, `shadow_mode_readiness_result.json`,
+`summary.md`, and `evidence_manifest.json`. V3.0 is the first planned boundary
+where a carefully gated first real UR5 small motion may be considered.
+
 Demo commands accept common image formats directly. TETO automatically
 creates a cached RGB JPEG under `data/processed/auto/`, with EXIF orientation
 applied, long edge resized, animated images reduced to the first frame, and
@@ -1584,4 +1629,5 @@ python3 -m src.cli prepare-images --input-dir data/raw --output-dir data/process
 - V2.6.0 = semantic-to-simulation motion bridge
 - V2.7.0 = safe simulated task execution loop
 - V2.7.1 = execution evidence polish
+- V2.8.0 = lab backend / camera / VLM no-motion readiness
 - Future ROS2 / MoveIt2 / RTDE / URScript / real UR5 controller integration remains outside the current implemented safety boundary

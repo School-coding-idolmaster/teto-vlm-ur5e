@@ -1,0 +1,6 @@
+live_vlm:
+  vlm_backend: qwen_shadow
+  model_name: qwen2.5vl:3b
+  endpoint_configured: true
+  schema_output_supported: true
+  allow_live_vlm: false

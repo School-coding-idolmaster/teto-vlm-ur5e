@@ -10,6 +10,7 @@ from typing import Any, Dict
 from src.articulation_readiness_contract import build_articulation_readiness_report
 from src.articulation_state_observer import build_articulation_state_report, observe_articulation_state as observe_articulation_state_in_world
 from src.evidence_exporter import export_simulation_evidence
+from src.lab_readiness import build_lab_readiness_request, evaluate_lab_readiness
 from src.robot_prim_inspector import (
     UR5E_ARM_JOINT_NAMES,
     build_robot_prim_inspection_report,
@@ -45,7 +46,7 @@ from src.simulated_task_execution import (
 
 
 REPORT_VERSION = "teto_simulation_execution.v1"
-CURRENT_TETO_VERSION = "TETO V2.7.1"
+CURRENT_TETO_VERSION = "TETO V2.8.0"
 DEFAULT_STEPS = 5
 DEFAULT_SIMULATION_OBJECT_TYPE = "cube"
 DEFAULT_CUBE_PRIM_PATH = "/World/TETO_Cube"
@@ -106,6 +107,7 @@ def build_simulation_execution_result(
     simulation_micro_motion_metadata: Dict[str, Any] | None = None,
     semantic_bridge_metadata: Dict[str, Any] | None = None,
     simulated_task_execution_metadata: Dict[str, Any] | None = None,
+    lab_readiness_metadata: Dict[str, Any] | None = None,
     started_at: str | None = None,
     finished_at: str | None = None,
 ) -> Dict[str, Any]:
@@ -144,6 +146,7 @@ def build_simulation_execution_result(
     result.update(simulation_motion_precheck_metadata or _simulation_motion_precheck_report_fields())
     result.update(simulation_micro_motion_metadata or _simulation_micro_motion_report_fields())
     result.update(semantic_bridge_metadata or _semantic_bridge_report_fields())
+    result.update(lab_readiness_metadata or _lab_readiness_report_fields())
     if (
         result.get("semantic_simulation_bridge_requested") is True
         and result.get("semantic_gate_passed") is not True
@@ -220,12 +223,36 @@ def run_first_simulation_execution(
     execution_max_attempts: int = 1,
     execution_enable_retry_recommendation: bool = False,
     execution_enable_fallback_recommendation: bool = False,
+    check_lab_readiness: bool = False,
+    lab_readiness_config: str | Path | None = None,
+    check_camera_readiness: bool = False,
+    check_live_vlm_readiness: bool = False,
+    check_shadow_mode_readiness: bool = False,
     output_dir: str | Path | None = None,
     write_report: bool = False,
     demo_command: str | None = None,
 ) -> Dict[str, Any]:
     task = simulation_task or dict(DEFAULT_SIMULATION_TASK)
     started_at = _timestamp()
+    lab_readiness_requested = (
+        check_lab_readiness
+        or check_camera_readiness
+        or check_live_vlm_readiness
+        or check_shadow_mode_readiness
+    )
+    if lab_readiness_requested and not dry_run:
+        no_isaac = True
+    lab_readiness_request = build_lab_readiness_request(
+        check_lab_backend=check_lab_readiness,
+        check_camera=check_camera_readiness,
+        check_live_vlm=check_live_vlm_readiness,
+        check_shadow_mode=check_shadow_mode_readiness,
+        config_path=lab_readiness_config,
+    )
+    lab_readiness_metadata = _lab_readiness_report_fields(
+        requested=lab_readiness_requested,
+        readiness=evaluate_lab_readiness(lab_readiness_request),
+    )
     effective_move_object = move_object or move_cube
     effective_spawn_cube = spawn_cube or effective_move_object
     effective_semantic_bridge = semantic_simulation_bridge or safe_simulated_task_execution
@@ -339,6 +366,7 @@ def run_first_simulation_execution(
                 ),
                 semantic_bridge_metadata=semantic_bridge_metadata,
                 simulated_task_execution_metadata=simulated_task_execution_metadata,
+                lab_readiness_metadata=lab_readiness_metadata,
                 error_code="E_INVALID_STEPS",
                 error_message="steps must be a positive integer",
                 started_at=started_at,
@@ -385,6 +413,7 @@ def run_first_simulation_execution(
                 ),
                 semantic_bridge_metadata=semantic_bridge_metadata,
                 simulated_task_execution_metadata=simulated_task_execution_metadata,
+                lab_readiness_metadata=lab_readiness_metadata,
                 error_code="E_INVALID_SIMULATION_TASK",
                 error_message=f"missing simulation task fields: {', '.join(missing_fields)}",
                 started_at=started_at,
@@ -470,6 +499,7 @@ def run_first_simulation_execution(
                     simulation_micro_motion_metadata=simulation_micro_motion_metadata,
                     semantic_bridge_metadata=semantic_bridge_metadata,
                     simulated_task_execution_metadata=simulated_task_execution_metadata,
+                    lab_readiness_metadata=lab_readiness_metadata,
                     error_code="E_ROBOT_ASSET_LOAD_FAILED",
                     error_message="robot asset path is unavailable",
                     started_at=started_at,
@@ -502,6 +532,7 @@ def run_first_simulation_execution(
                 simulation_micro_motion_metadata=simulation_micro_motion_metadata,
                 semantic_bridge_metadata=semantic_bridge_metadata,
                 simulated_task_execution_metadata=simulated_task_execution_metadata,
+                lab_readiness_metadata=lab_readiness_metadata,
                 started_at=started_at,
                 finished_at=_timestamp(),
             ),
@@ -1359,6 +1390,50 @@ def verify_robot_prim_exists(world, *, robot_asset_spec: RobotAssetSpec) -> bool
         return False
     prim = stage.GetPrimAtPath(robot_asset_spec.robot_prim_path)
     return bool(prim and hasattr(prim, "IsValid") and prim.IsValid())
+
+
+def _lab_readiness_report_fields(
+    *,
+    requested: bool = False,
+    readiness: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    readiness = readiness if isinstance(readiness, dict) else {}
+    lab = readiness.get("lab_backend") if isinstance(readiness.get("lab_backend"), dict) else {}
+    camera = readiness.get("camera") if isinstance(readiness.get("camera"), dict) else {}
+    live_vlm = readiness.get("live_vlm") if isinstance(readiness.get("live_vlm"), dict) else {}
+    shadow = readiness.get("shadow_mode") if isinstance(readiness.get("shadow_mode"), dict) else {}
+    status = readiness.get("status", "NOT_REQUESTED")
+    return {
+        "lab_readiness_requested": requested,
+        "lab_readiness_status": status,
+        "lab_backend_readiness_status": readiness.get("lab_backend_readiness_status", lab.get("status", "NOT_REQUESTED")),
+        "camera_readiness_status": readiness.get("camera_readiness_status", camera.get("status", "NOT_REQUESTED")),
+        "live_vlm_readiness_status": readiness.get("live_vlm_readiness_status", live_vlm.get("status", "NOT_REQUESTED")),
+        "shadow_mode_readiness_status": readiness.get("shadow_mode_readiness_status", shadow.get("status", "NOT_REQUESTED")),
+        "no_motion_readiness_passed": readiness.get("no_motion_readiness_passed", False) is True,
+        "allow_live_camera": readiness.get("allow_live_camera", False) is True,
+        "allow_live_vlm": readiness.get("allow_live_vlm", False) is True,
+        "real_robot_command_enabled": readiness.get("real_robot_command_enabled", False) is True,
+        "readiness_blocking_reasons": list(readiness.get("blocking_reasons") or []),
+        "next_safe_action": readiness.get("next_safe_action"),
+        "lab_readiness": readiness
+        or {
+            "requested": False,
+            "status": "NOT_REQUESTED",
+            "lab_backend_readiness_status": "NOT_REQUESTED",
+            "camera_readiness_status": "NOT_REQUESTED",
+            "live_vlm_readiness_status": "NOT_REQUESTED",
+            "shadow_mode_readiness_status": "NOT_REQUESTED",
+            "no_motion_readiness_passed": False,
+            "allow_robot_motion": False,
+            "allow_live_camera": False,
+            "allow_live_vlm": False,
+            "real_robot_command_enabled": False,
+            "blocking_reasons": [],
+            "readiness_evidence_files": [],
+            "next_safe_action": None,
+        },
+    }
 
 
 def _simulation_object_report_fields(

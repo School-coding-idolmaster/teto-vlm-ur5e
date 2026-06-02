@@ -13,3 +13,9 @@ data/raw/*
 data/annotations/*
 !data/annotations/.gitkeep
 data/processed/auto/
+local.lab_backend.yaml
+local.camera.yaml
+local.live_vlm.yaml
+configs/local.lab_backend.yaml
+configs/local.camera.yaml
+configs/local.live_vlm.yaml

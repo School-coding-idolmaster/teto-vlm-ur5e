@@ -446,7 +446,7 @@ def format_simulated_task_execution_report(
     )
     return "\n".join(
         [
-            "# TETO V2.7.1 Safe Simulated Task Execution Evidence Report",
+            "# TETO V2.8.0 Safe Simulated Task Execution Evidence Report",
             "",
             "## Execution Attempt Summary",
             "",

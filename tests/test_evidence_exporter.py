@@ -38,7 +38,7 @@ def test_dry_run_execution_writes_evidence_artifacts(tmp_path):
     assert manifest_path.exists()
 
     summary = summary_path.read_text(encoding="utf-8")
-    assert "TETO version: TETO V2.7.1" in summary
+    assert "TETO version: TETO V2.8.0" in summary
     assert f"run_id: {tmp_path.name}" in summary
     assert "mode: dry_run" in summary
     assert "status: PASS" in summary
@@ -77,7 +77,7 @@ def test_dry_run_execution_writes_evidence_artifacts(tmp_path):
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["schema_version"] == EVIDENCE_MANIFEST_SCHEMA_VERSION
     assert manifest["run_id"] == tmp_path.name
-    assert manifest["teto_version"] == "TETO V2.7.1"
+    assert manifest["teto_version"] == "TETO V2.8.0"
     assert manifest["mode"] == "dry_run"
     assert manifest["status"] == "PASS"
     assert manifest["report_path"] == str(report_path)
@@ -152,7 +152,7 @@ def test_evidence_exporter_writes_micro_motion_manifest_and_summary(tmp_path):
     ]
     assert manifest["simulation_micro_motion"]["motion_evidence_files"] == manifest["motion_evidence_files"]
 
-    assert "# TETO V2.7.1 Simulation Micro-Motion Evidence Report" in report
+    assert "# TETO V2.8.0 Simulation Micro-Motion Evidence Report" in report
     assert "## Joint Diff Summary" in report
     assert "## Evidence Files" in report
     assert "simulation_motion_result.json" in report

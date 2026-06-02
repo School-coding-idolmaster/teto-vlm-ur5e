@@ -1,0 +1,9 @@
+camera:
+  camera_backend: realsense_shadow
+  camera_configured: true
+  rgb_stream_configured: true
+  depth_stream_configured: true
+  camera_info_configured: true
+  metadata_configured: true
+  extrinsics_configured: true
+  allow_live_camera: false

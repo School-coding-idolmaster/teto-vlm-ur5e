@@ -18,7 +18,7 @@ from src.simulation_runtime import DEFAULT_SIMULATION_TASK, CURRENT_TETO_VERSION
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run TETO V2.7.1 safe simulated task execution evidence smoke test.")
+    parser = argparse.ArgumentParser(description="Run TETO V2.8.0 lab readiness and safe simulation evidence smoke test.")
     parser.add_argument("--dry-run", action="store_true", help="Do not import Isaac; produce a test execution report.")
     parser.add_argument("--no-isaac", action="store_true", help="Pure Python test mode without Isaac imports.")
     parser.add_argument("--spawn-cube", action="store_true", help="Spawn a visible cube in the Isaac World.")
@@ -118,7 +118,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--execution-max-attempts",
         type=int,
         default=1,
-        help="Maximum attempts metadata. V2.7.1 supports 1 and does not auto-retry.",
+        help="Maximum attempts metadata. V2.8.0 supports 1 and does not auto-retry.",
     )
     parser.add_argument(
         "--execution-enable-retry-recommendation",
@@ -130,13 +130,37 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Generate fallback recommendation metadata.",
     )
+    parser.add_argument(
+        "--check-lab-readiness",
+        action="store_true",
+        help="Evaluate config-only lab backend readiness without connecting to a real robot.",
+    )
+    parser.add_argument(
+        "--lab-readiness-config",
+        help="Path to a local or example lab readiness YAML config. Only fields are inspected.",
+    )
+    parser.add_argument(
+        "--check-camera-readiness",
+        action="store_true",
+        help="Evaluate config-only camera readiness without opening a camera stream.",
+    )
+    parser.add_argument(
+        "--check-live-vlm-readiness",
+        action="store_true",
+        help="Evaluate config-only live VLM readiness without calling a live model.",
+    )
+    parser.add_argument(
+        "--check-shadow-mode-readiness",
+        action="store_true",
+        help="Evaluate no-motion shadow-mode readiness.",
+    )
     return parser
 
 
 def main() -> int:
     args = build_parser().parse_args()
     if args.execution_max_attempts != 1:
-        raise ValueError("--execution-max-attempts currently supports only 1 in TETO V2.7.1")
+        raise ValueError("--execution-max-attempts currently supports only 1 in TETO V2.8.0")
     simulation_task = _load_simulation_task(args.task_json)
     semantic_contract = None
     semantic_contract_path = None
@@ -186,6 +210,11 @@ def main() -> int:
         execution_max_attempts=args.execution_max_attempts,
         execution_enable_retry_recommendation=args.execution_enable_retry_recommendation,
         execution_enable_fallback_recommendation=args.execution_enable_fallback_recommendation,
+        check_lab_readiness=args.check_lab_readiness,
+        lab_readiness_config=args.lab_readiness_config,
+        check_camera_readiness=args.check_camera_readiness,
+        check_live_vlm_readiness=args.check_live_vlm_readiness,
+        check_shadow_mode_readiness=args.check_shadow_mode_readiness,
         output_dir=args.output_dir,
         write_report=True,
         demo_command=shlex.join([sys.executable, *sys.argv]),
@@ -197,7 +226,7 @@ def main() -> int:
 
 def print_summary(result: dict, report_path: Path) -> None:
     print("=" * 50)
-    print(f"{CURRENT_TETO_VERSION} SEMANTIC-TO-SIMULATION MOTION BRIDGE")
+    print(f"{CURRENT_TETO_VERSION} LAB READINESS / SIMULATION EVIDENCE")
     print("=" * 50)
     print(f"Status: {result['status']}")
     print(f"Mode: {result['mode']}")
@@ -325,6 +354,17 @@ def print_summary(result: dict, report_path: Path) -> None:
     print(f"post_motion_state_check_status: {post_check.get('post_motion_state_check_status')}")
     print(f"simulated_task_execution_result_path: {execution.get('simulated_task_execution_result_path')}")
     print(f"simulated_task_execution_report_path: {execution.get('simulated_task_execution_report_path')}")
+    print(f"lab_readiness_requested: {result.get('lab_readiness_requested')}")
+    print(f"lab_backend_readiness_status: {result.get('lab_backend_readiness_status')}")
+    print(f"camera_readiness_status: {result.get('camera_readiness_status')}")
+    print(f"live_vlm_readiness_status: {result.get('live_vlm_readiness_status')}")
+    print(f"shadow_mode_readiness_status: {result.get('shadow_mode_readiness_status')}")
+    print(f"no_motion_readiness_passed: {result.get('no_motion_readiness_passed')}")
+    print(f"allow_live_camera: {result.get('allow_live_camera')}")
+    print(f"allow_live_vlm: {result.get('allow_live_vlm')}")
+    print(f"real_robot_command_enabled: {result.get('real_robot_command_enabled')}")
+    print(f"readiness_blocking_reasons: {result.get('readiness_blocking_reasons')}")
+    print(f"next_safe_action: {result.get('next_safe_action')}")
     print(f"Report: {report_path}")
     if result.get("blocking_reasons"):
         print(f"Blocking reasons: {', '.join(result['blocking_reasons'])}")

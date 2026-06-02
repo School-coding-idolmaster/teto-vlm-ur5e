@@ -9,6 +9,7 @@ from src.simulation_micro_motion import (
     summarize_motion_evidence,
     write_simulation_micro_motion_artifacts,
 )
+from src.lab_readiness import format_lab_readiness_report
 from src.semantic_simulation_bridge import format_semantic_simulation_bridge_report
 from src.simulated_task_execution import format_simulated_task_execution_report
 
@@ -49,6 +50,11 @@ def export_simulation_evidence(
     execution_attempt_record_path = output_dir / "execution_attempt_record.json"
     failure_analysis_path = output_dir / "failure_analysis.json"
     retry_fallback_recommendation_path = output_dir / "retry_fallback_recommendation.json"
+    lab_readiness_result_path = output_dir / "lab_readiness_result.json"
+    lab_readiness_report_path = output_dir / "lab_readiness_report.md"
+    camera_readiness_result_path = output_dir / "camera_readiness_result.json"
+    live_vlm_readiness_result_path = output_dir / "live_vlm_readiness_result.json"
+    shadow_mode_readiness_result_path = output_dir / "shadow_mode_readiness_result.json"
 
     object_info = _simulation_object_info(result)
     robot_asset_info = _robot_asset_info(result)
@@ -59,6 +65,7 @@ def export_simulation_evidence(
     simulation_micro_motion_info = _simulation_micro_motion_info(result)
     semantic_bridge_info = _semantic_bridge_info(result)
     simulated_task_execution_info = _simulated_task_execution_info(result)
+    lab_readiness_info = _lab_readiness_info(result)
     structure_report_requested = bool(robot_prim_inspection_info.get("requested"))
     readiness_requested = bool(articulation_readiness_info.get("requested"))
     state_requested = bool(articulation_state_info.get("requested"))
@@ -68,6 +75,7 @@ def export_simulation_evidence(
     simulated_task_execution_requested = bool(
         simulated_task_execution_info.get("safe_simulated_task_execution_requested")
     )
+    lab_readiness_requested = bool(lab_readiness_info.get("requested"))
     run_id = output_dir.name
     created_at = result.get("finished_at") or result.get("started_at")
     report_path = result.get("report_path")
@@ -85,6 +93,7 @@ def export_simulation_evidence(
             simulation_micro_motion_info=simulation_micro_motion_info,
             semantic_bridge_info=semantic_bridge_info,
             simulated_task_execution_info=simulated_task_execution_info,
+            lab_readiness_info=lab_readiness_info,
             robot_structure_report_path=structure_report_ref,
             run_id=run_id,
             created_at=created_at,
@@ -211,6 +220,18 @@ def export_simulation_evidence(
             ),
             encoding="utf-8",
         )
+    if lab_readiness_requested:
+        lab_readiness_info["lab_readiness_result_path"] = str(lab_readiness_result_path)
+        lab_readiness_info["lab_readiness_report_path"] = str(lab_readiness_report_path)
+        lab_readiness_info["camera_readiness_result_path"] = str(camera_readiness_result_path)
+        lab_readiness_info["live_vlm_readiness_result_path"] = str(live_vlm_readiness_result_path)
+        lab_readiness_info["shadow_mode_readiness_result_path"] = str(shadow_mode_readiness_result_path)
+        lab_readiness_info["readiness_evidence_files"] = _readiness_evidence_files(lab_readiness_info)
+        _write_json_artifact(lab_readiness_result_path, lab_readiness_info)
+        lab_readiness_report_path.write_text(format_lab_readiness_report(lab_readiness_info), encoding="utf-8")
+        _write_json_artifact(camera_readiness_result_path, lab_readiness_info.get("camera", {}))
+        _write_json_artifact(live_vlm_readiness_result_path, lab_readiness_info.get("live_vlm", {}))
+        _write_json_artifact(shadow_mode_readiness_result_path, lab_readiness_info.get("shadow_mode", {}))
     motion_evidence_summary = summarize_motion_evidence(simulation_micro_motion_info)
     execution_evidence_files = (
         _simulated_task_execution_files(simulated_task_execution_info)
@@ -302,6 +323,20 @@ def export_simulation_evidence(
         "latest_execution_summary": latest_execution_summary,
         "safety_boundary_confirmed": safety_boundary_confirmed,
         "no_automatic_retry_executed": no_automatic_retry_executed,
+        "lab_readiness_requested": lab_readiness_requested,
+        "lab_readiness_status": lab_readiness_info.get("status"),
+        "camera_readiness_status": lab_readiness_info.get("camera_readiness_status"),
+        "live_vlm_readiness_status": lab_readiness_info.get("live_vlm_readiness_status"),
+        "shadow_mode_readiness_status": lab_readiness_info.get("shadow_mode_readiness_status"),
+        "no_motion_readiness_passed": lab_readiness_info.get("no_motion_readiness_passed", False),
+        "allow_robot_motion": lab_readiness_info.get("allow_robot_motion", result.get("allow_robot_motion", False)),
+        "allow_live_camera": lab_readiness_info.get("allow_live_camera", False),
+        "allow_live_vlm": lab_readiness_info.get("allow_live_vlm", False),
+        "real_robot_command_enabled": lab_readiness_info.get("real_robot_command_enabled", False),
+        "readiness_evidence_files": (
+            _readiness_evidence_files(lab_readiness_info) if lab_readiness_requested else []
+        ),
+        "next_safe_action": lab_readiness_info.get("next_safe_action"),
         "motion_evidence_available": motion_evidence_summary["motion_evidence_available"],
         "motion_evidence_files": motion_evidence_summary["motion_evidence_files"],
         "motion_diff_summary": motion_evidence_summary["motion_diff_summary"],
@@ -336,6 +371,11 @@ def export_simulation_evidence(
         "retry_fallback_recommendation_path": (
             str(retry_fallback_recommendation_path) if simulated_task_execution_requested else None
         ),
+        "lab_readiness_result_path": str(lab_readiness_result_path) if lab_readiness_requested else None,
+        "lab_readiness_report_path": str(lab_readiness_report_path) if lab_readiness_requested else None,
+        "camera_readiness_result_path": str(camera_readiness_result_path) if lab_readiness_requested else None,
+        "live_vlm_readiness_result_path": str(live_vlm_readiness_result_path) if lab_readiness_requested else None,
+        "shadow_mode_readiness_result_path": str(shadow_mode_readiness_result_path) if lab_readiness_requested else None,
         "screenshot_before_path": None,
         "screenshot_after_path": None,
         "video_path": None,
@@ -369,6 +409,11 @@ def export_simulation_evidence(
         "execution_attempt_record_path": execution_attempt_record_path,
         "failure_analysis_path": failure_analysis_path,
         "retry_fallback_recommendation_path": retry_fallback_recommendation_path,
+        "lab_readiness_result_path": lab_readiness_result_path,
+        "lab_readiness_report_path": lab_readiness_report_path,
+        "camera_readiness_result_path": camera_readiness_result_path,
+        "live_vlm_readiness_result_path": live_vlm_readiness_result_path,
+        "shadow_mode_readiness_result_path": shadow_mode_readiness_result_path,
     }
 
 
@@ -710,6 +755,59 @@ def _simulated_task_execution_files(execution_info: Dict[str, Any]) -> list[Dict
     ]
 
 
+def _lab_readiness_info(result: Dict[str, Any]) -> Dict[str, Any]:
+    readiness = result.get("lab_readiness") if isinstance(result.get("lab_readiness"), dict) else {}
+    return {
+        **readiness,
+        "requested": result.get("lab_readiness_requested", readiness.get("requested", False)) is True,
+        "status": result.get("lab_readiness_status", readiness.get("status", "NOT_REQUESTED")),
+        "lab_backend_readiness_status": result.get(
+            "lab_backend_readiness_status",
+            readiness.get("lab_backend_readiness_status", "NOT_REQUESTED"),
+        ),
+        "camera_readiness_status": result.get(
+            "camera_readiness_status",
+            readiness.get("camera_readiness_status", "NOT_REQUESTED"),
+        ),
+        "live_vlm_readiness_status": result.get(
+            "live_vlm_readiness_status",
+            readiness.get("live_vlm_readiness_status", "NOT_REQUESTED"),
+        ),
+        "shadow_mode_readiness_status": result.get(
+            "shadow_mode_readiness_status",
+            readiness.get("shadow_mode_readiness_status", "NOT_REQUESTED"),
+        ),
+        "no_motion_readiness_passed": result.get(
+            "no_motion_readiness_passed",
+            readiness.get("no_motion_readiness_passed", False),
+        )
+        is True,
+        "allow_robot_motion": result.get("allow_robot_motion", readiness.get("allow_robot_motion", False)) is True,
+        "allow_live_camera": result.get("allow_live_camera", readiness.get("allow_live_camera", False)) is True,
+        "allow_live_vlm": result.get("allow_live_vlm", readiness.get("allow_live_vlm", False)) is True,
+        "real_robot_command_enabled": result.get(
+            "real_robot_command_enabled",
+            readiness.get("real_robot_command_enabled", False),
+        )
+        is True,
+        "blocking_reasons": result.get("readiness_blocking_reasons", readiness.get("blocking_reasons", [])),
+        "next_safe_action": result.get("next_safe_action", readiness.get("next_safe_action")),
+    }
+
+
+def _readiness_evidence_files(lab_readiness_info: Dict[str, Any]) -> list[Dict[str, str | None]]:
+    return [
+        {"name": "lab_readiness_result.json", "path": lab_readiness_info.get("lab_readiness_result_path")},
+        {"name": "lab_readiness_report.md", "path": lab_readiness_info.get("lab_readiness_report_path")},
+        {"name": "camera_readiness_result.json", "path": lab_readiness_info.get("camera_readiness_result_path")},
+        {"name": "live_vlm_readiness_result.json", "path": lab_readiness_info.get("live_vlm_readiness_result_path")},
+        {
+            "name": "shadow_mode_readiness_result.json",
+            "path": lab_readiness_info.get("shadow_mode_readiness_result_path"),
+        },
+    ]
+
+
 def _latest_execution_summary(
     execution_info: Dict[str, Any],
     precheck_info: Dict[str, Any],
@@ -811,6 +909,7 @@ def _build_summary_markdown(
     simulation_micro_motion_info: Dict[str, Any],
     semantic_bridge_info: Dict[str, Any],
     simulated_task_execution_info: Dict[str, Any],
+    lab_readiness_info: Dict[str, Any],
     robot_structure_report_path: str | None,
     run_id: str,
     created_at: str | None,
@@ -940,6 +1039,19 @@ def _build_summary_markdown(
             f"- blocking_reasons: {_format_value(simulation_motion_precheck_info.get('blocking_reasons'))}",
             f"- warnings: {_format_value(simulation_motion_precheck_info.get('warnings'))}",
             f"- errors: {_format_value(simulation_motion_precheck_info.get('errors'))}",
+            "",
+            "## Lab / Camera / VLM No-Motion Readiness Summary",
+            "",
+            f"- lab_backend_readiness_status: {_format_value(lab_readiness_info.get('lab_backend_readiness_status'))}",
+            f"- camera_readiness_status: {_format_value(lab_readiness_info.get('camera_readiness_status'))}",
+            f"- live_vlm_readiness_status: {_format_value(lab_readiness_info.get('live_vlm_readiness_status'))}",
+            f"- shadow_mode_readiness_status: {_format_value(lab_readiness_info.get('shadow_mode_readiness_status'))}",
+            f"- allow_robot_motion: {_format_value(lab_readiness_info.get('allow_robot_motion'))}",
+            f"- allow_live_camera: {_format_value(lab_readiness_info.get('allow_live_camera'))}",
+            f"- allow_live_vlm: {_format_value(lab_readiness_info.get('allow_live_vlm'))}",
+            f"- real_robot_command_enabled: {_format_value(lab_readiness_info.get('real_robot_command_enabled'))}",
+            f"- next_safe_action: {_format_value(lab_readiness_info.get('next_safe_action'))}",
+            "This V2.8.0 readiness section is no-motion evidence only: no real UR5, ROS2, MoveIt, RTDE, URScript, Dashboard, trajectory, tcp_pose_world, live camera capture, or live VLM call is executed.",
             "",
             "## Micro-Motion Evidence Summary",
             "",

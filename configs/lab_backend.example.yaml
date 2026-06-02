@@ -1,0 +1,36 @@
+lab_backend:
+  backend_name: ur5_lab_shadow_backend
+  backend_type: ur5
+  robot_model: UR5
+  robot_ip_configured: true
+  tcp_calibration_configured: true
+  robot_calibration_configured: true
+  camera_extrinsics_configured: true
+  robot_mode_check_available: true
+  safety_status_check_available: true
+  program_state_check_available: true
+  speed_scaling_check_available: true
+  allow_real_robot_backend: false
+  allow_robot_motion: false
+  real_robot_command_enabled: false
+camera:
+  camera_backend: realsense_shadow
+  camera_configured: true
+  rgb_stream_configured: true
+  depth_stream_configured: true
+  camera_info_configured: true
+  metadata_configured: true
+  extrinsics_configured: true
+  allow_live_camera: false
+live_vlm:
+  vlm_backend: qwen_shadow
+  model_name: qwen2.5vl:3b
+  endpoint_configured: true
+  schema_output_supported: true
+  allow_live_vlm: false
+shadow_mode:
+  shadow_mode_enabled: true
+  fake_execution_enabled: true
+  no_motion_enforced: true
+  evidence_export_enabled: true
+  manual_confirmation_required: true
