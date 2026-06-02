@@ -38,10 +38,14 @@ from src.semantic_simulation_bridge import (
     build_semantic_simulation_bridge_result,
     build_simulation_micro_motion_request_from_semantic_contract,
 )
+from src.simulated_task_execution import (
+    SimulatedTaskExecutionRequest,
+    execute_safe_simulated_task,
+)
 
 
 REPORT_VERSION = "teto_simulation_execution.v1"
-CURRENT_TETO_VERSION = "TETO V2.6.0"
+CURRENT_TETO_VERSION = "TETO V2.7.0"
 DEFAULT_STEPS = 5
 DEFAULT_SIMULATION_OBJECT_TYPE = "cube"
 DEFAULT_CUBE_PRIM_PATH = "/World/TETO_Cube"
@@ -101,6 +105,7 @@ def build_simulation_execution_result(
     simulation_motion_precheck_metadata: Dict[str, Any] | None = None,
     simulation_micro_motion_metadata: Dict[str, Any] | None = None,
     semantic_bridge_metadata: Dict[str, Any] | None = None,
+    simulated_task_execution_metadata: Dict[str, Any] | None = None,
     started_at: str | None = None,
     finished_at: str | None = None,
 ) -> Dict[str, Any]:
@@ -147,7 +152,11 @@ def build_simulation_execution_result(
         result["simulation_micro_motion_status"] = "BLOCKED_BY_SEMANTIC_GATE"
     result["semantic_bridge"] = _semantic_bridge_info(result)
     result["motion"] = _motion_info(result)
+    result["precheck"] = _precheck_info(result)
     result["safety"] = _safety_report_fields(result)
+    result.update(_simulated_task_execution_report_fields(result, simulated_task_execution_metadata))
+    result["simulated_task_execution"] = _simulated_task_execution_info(result)
+    result["post_motion_state_check"] = result["simulated_task_execution"].get("post_motion_state_check", {})
     result.setdefault("robot_structure_report_generated", False)
     result.setdefault("robot_structure_report_path", None)
     result.setdefault("articulation_readiness_report_generated", False)
@@ -206,6 +215,11 @@ def run_first_simulation_execution(
     semantic_task_contract: Dict[str, Any] | None = None,
     semantic_task_contract_path: str | None = None,
     semantic_confidence_threshold: float = DEFAULT_SEMANTIC_CONFIDENCE_THRESHOLD,
+    safe_simulated_task_execution: bool = False,
+    execution_attempt_id: str | None = None,
+    execution_max_attempts: int = 1,
+    execution_enable_retry_recommendation: bool = False,
+    execution_enable_fallback_recommendation: bool = False,
     output_dir: str | Path | None = None,
     write_report: bool = False,
     demo_command: str | None = None,
@@ -214,11 +228,19 @@ def run_first_simulation_execution(
     started_at = _timestamp()
     effective_move_object = move_object or move_cube
     effective_spawn_cube = spawn_cube or effective_move_object
-    bridge_contract = semantic_task_contract if semantic_simulation_bridge else None
-    if semantic_simulation_bridge and bridge_contract is None:
+    effective_semantic_bridge = semantic_simulation_bridge or safe_simulated_task_execution
+    bridge_contract = semantic_task_contract if effective_semantic_bridge else None
+    if effective_semantic_bridge and bridge_contract is None:
         bridge_contract = build_demo_semantic_task_contract()
+    simulated_task_execution_metadata = _simulated_task_execution_request_fields(
+        requested=safe_simulated_task_execution,
+        execution_attempt_id=execution_attempt_id,
+        execution_max_attempts=execution_max_attempts,
+        retry_enabled=execution_enable_retry_recommendation,
+        fallback_enabled=execution_enable_fallback_recommendation,
+    )
     semantic_bridge_metadata = _semantic_bridge_report_fields(
-        requested=semantic_simulation_bridge,
+        requested=effective_semantic_bridge,
         contract=bridge_contract,
         contract_path=semantic_task_contract_path,
         confidence_threshold=semantic_confidence_threshold,
@@ -316,6 +338,7 @@ def run_first_simulation_execution(
                     requested=effective_check_simulation_motion_precheck,
                 ),
                 semantic_bridge_metadata=semantic_bridge_metadata,
+                simulated_task_execution_metadata=simulated_task_execution_metadata,
                 error_code="E_INVALID_STEPS",
                 error_message="steps must be a positive integer",
                 started_at=started_at,
@@ -361,6 +384,7 @@ def run_first_simulation_execution(
                     requested=effective_check_simulation_motion_precheck,
                 ),
                 semantic_bridge_metadata=semantic_bridge_metadata,
+                simulated_task_execution_metadata=simulated_task_execution_metadata,
                 error_code="E_INVALID_SIMULATION_TASK",
                 error_message=f"missing simulation task fields: {', '.join(missing_fields)}",
                 started_at=started_at,
@@ -445,6 +469,7 @@ def run_first_simulation_execution(
                     simulation_motion_precheck_metadata=simulation_motion_precheck_metadata,
                     simulation_micro_motion_metadata=simulation_micro_motion_metadata,
                     semantic_bridge_metadata=semantic_bridge_metadata,
+                    simulated_task_execution_metadata=simulated_task_execution_metadata,
                     error_code="E_ROBOT_ASSET_LOAD_FAILED",
                     error_message="robot asset path is unavailable",
                     started_at=started_at,
@@ -476,6 +501,7 @@ def run_first_simulation_execution(
                 simulation_motion_precheck_metadata=simulation_motion_precheck_metadata,
                 simulation_micro_motion_metadata=simulation_micro_motion_metadata,
                 semantic_bridge_metadata=semantic_bridge_metadata,
+                simulated_task_execution_metadata=simulated_task_execution_metadata,
                 started_at=started_at,
                 finished_at=_timestamp(),
             ),
@@ -501,6 +527,7 @@ def run_first_simulation_execution(
         execute_simulation_micro_motion=execute_micro_motion_requested,
         micro_motion_request=micro_motion_request,
         semantic_bridge_metadata=semantic_bridge_metadata,
+        simulated_task_execution_metadata=simulated_task_execution_metadata,
         started_at=started_at,
         output_dir=output_dir,
         write_report=write_report,
@@ -530,6 +557,12 @@ def write_simulation_execution_result(
     semantic_bridge_result_path = run_dir / "semantic_simulation_bridge_result.json"
     semantic_bridge_report_path = run_dir / "semantic_simulation_bridge_report.md"
     semantic_task_contract_copy_path = run_dir / "semantic_task_contract_copy.json"
+    simulated_task_execution_result_path = run_dir / "simulated_task_execution_result.json"
+    simulated_task_execution_report_path = run_dir / "simulated_task_execution_report.md"
+    execution_feedback_path = run_dir / "execution_feedback.json"
+    execution_attempt_record_path = run_dir / "execution_attempt_record.json"
+    failure_analysis_path = run_dir / "failure_analysis.json"
+    retry_fallback_recommendation_path = run_dir / "retry_fallback_recommendation.json"
     result["report_path"] = str(report_path)
     structure_report_requested = bool(result.get("robot_prim_inspection_requested"))
     result["robot_structure_report_generated"] = structure_report_requested
@@ -595,7 +628,19 @@ def write_simulation_execution_result(
     result["semantic_bridge_files"] = _semantic_bridge_file_refs(result)
     result["semantic_bridge"] = _semantic_bridge_info(result)
     result["motion"] = _motion_info(result)
+    result["precheck"] = _precheck_info(result)
     result["safety"] = _safety_report_fields(result)
+    simulated_task_execution_requested = bool(result.get("safe_simulated_task_execution_requested"))
+    if simulated_task_execution_requested:
+        result["simulated_task_execution_result_path"] = str(simulated_task_execution_result_path)
+        result["simulated_task_execution_report_path"] = str(simulated_task_execution_report_path)
+        result["execution_feedback_path"] = str(execution_feedback_path)
+        result["execution_attempt_record_path"] = str(execution_attempt_record_path)
+        result["failure_analysis_path"] = str(failure_analysis_path)
+        result["retry_fallback_recommendation_path"] = str(retry_fallback_recommendation_path)
+        result["simulated_task_execution_files"] = _simulated_task_execution_file_refs(result)
+        result["simulated_task_execution"] = _simulated_task_execution_info(result)
+        result["post_motion_state_check"] = result["simulated_task_execution"].get("post_motion_state_check", {})
     with report_path.open("w", encoding="utf-8") as report_file:
         json.dump(result, report_file, ensure_ascii=False, indent=2)
         report_file.write("\n")
@@ -633,6 +678,7 @@ def _run_true_isaac_runtime(
     execute_simulation_micro_motion: bool,
     micro_motion_request: SimulationMicroMotionRequest,
     semantic_bridge_metadata: Dict[str, Any] | None,
+    simulated_task_execution_metadata: Dict[str, Any] | None,
     started_at: str,
     output_dir: str | Path | None,
     write_report: bool,
@@ -678,6 +724,7 @@ def _run_true_isaac_runtime(
                     requested=execute_simulation_micro_motion,
                 ),
                 semantic_bridge_metadata=semantic_bridge_metadata,
+                simulated_task_execution_metadata=simulated_task_execution_metadata,
                 error_code="E_ISAAC_RUNTIME_FAILED",
                 error_message=str(exc),
                 started_at=started_at,
@@ -707,6 +754,7 @@ def _run_true_isaac_runtime(
         execute_simulation_micro_motion=execute_simulation_micro_motion,
         micro_motion_request=micro_motion_request,
         semantic_bridge_metadata=semantic_bridge_metadata,
+        simulated_task_execution_metadata=simulated_task_execution_metadata,
         started_at=started_at,
         output_dir=output_dir,
         write_report=write_report,
@@ -737,6 +785,7 @@ def _execute_isaac_world(
     execute_simulation_micro_motion: bool = False,
     micro_motion_request: SimulationMicroMotionRequest | None = None,
     semantic_bridge_metadata: Dict[str, Any] | None = None,
+    simulated_task_execution_metadata: Dict[str, Any] | None = None,
     demo_command: str | None = None,
     object_spawner=None,
     object_pose_updater=None,
@@ -835,6 +884,7 @@ def _execute_isaac_world(
                             simulation_motion_precheck_metadata=simulation_motion_precheck_metadata,
                             simulation_micro_motion_metadata=simulation_micro_motion_metadata,
                             semantic_bridge_metadata=semantic_bridge_metadata,
+                            simulated_task_execution_metadata=simulated_task_execution_metadata,
                             error_code="E_ROBOT_ASSET_LOAD_FAILED",
                             error_message="robot asset path is unavailable",
                             started_at=started_at,
@@ -873,6 +923,7 @@ def _execute_isaac_world(
                                 simulation_motion_precheck_metadata=simulation_motion_precheck_metadata,
                                 simulation_micro_motion_metadata=simulation_micro_motion_metadata,
                                 semantic_bridge_metadata=semantic_bridge_metadata,
+                                simulated_task_execution_metadata=simulated_task_execution_metadata,
                                 error_code="E_ROBOT_ASSET_LOAD_FAILED",
                                 error_message="robot prim was not found after loading asset",
                                 started_at=started_at,
@@ -908,6 +959,7 @@ def _execute_isaac_world(
                             simulation_motion_precheck_metadata=simulation_motion_precheck_metadata,
                             simulation_micro_motion_metadata=simulation_micro_motion_metadata,
                             semantic_bridge_metadata=semantic_bridge_metadata,
+                            simulated_task_execution_metadata=simulated_task_execution_metadata,
                             error_code="E_ROBOT_ASSET_LOAD_FAILED",
                             error_message=str(exc),
                             started_at=started_at,
@@ -945,6 +997,7 @@ def _execute_isaac_world(
                         simulation_motion_precheck_metadata=simulation_motion_precheck_metadata,
                         simulation_micro_motion_metadata=simulation_micro_motion_metadata,
                         semantic_bridge_metadata=semantic_bridge_metadata,
+                        simulated_task_execution_metadata=simulated_task_execution_metadata,
                         error_code="E_CUBE_SPAWN_FAILED",
                         error_message=str(exc),
                         started_at=started_at,
@@ -985,6 +1038,7 @@ def _execute_isaac_world(
                         simulation_motion_precheck_metadata=simulation_motion_precheck_metadata,
                         simulation_micro_motion_metadata=simulation_micro_motion_metadata,
                         semantic_bridge_metadata=semantic_bridge_metadata,
+                        simulated_task_execution_metadata=simulated_task_execution_metadata,
                         error_code="E_SIM_OBJECT_MOVE_FAILED",
                         error_message=str(exc),
                         started_at=started_at,
@@ -1080,6 +1134,7 @@ def _execute_isaac_world(
                             semantic_bridge_metadata,
                             simulation_micro_motion_metadata,
                         ),
+                        simulated_task_execution_metadata=simulated_task_execution_metadata,
                         error_code=error_code,
                         error_message=", ".join(
                             simulation_micro_motion_metadata.get("simulation_micro_motion_blocking_reasons") or []
@@ -1116,6 +1171,7 @@ def _execute_isaac_world(
                     semantic_bridge_metadata,
                     simulation_micro_motion_metadata,
                 ),
+                simulated_task_execution_metadata=simulated_task_execution_metadata,
                 started_at=started_at,
                 finished_at=_timestamp(),
             ),
@@ -1139,6 +1195,7 @@ def _execute_isaac_world(
                 simulation_motion_precheck_metadata=simulation_motion_precheck_metadata,
                 simulation_micro_motion_metadata=simulation_micro_motion_metadata,
                 semantic_bridge_metadata=semantic_bridge_metadata,
+                simulated_task_execution_metadata=simulated_task_execution_metadata,
                 error_code="E_ISAAC_RUNTIME_FAILED",
                 error_message=str(exc),
                 started_at=started_at,
@@ -1746,6 +1803,117 @@ def _motion_info(result: Dict[str, Any]) -> Dict[str, Any]:
         "tolerance_rad": motion.get("tolerance_rad"),
         "delta_within_tolerance": motion.get("delta_within_tolerance", False),
     }
+
+
+def _precheck_info(result: Dict[str, Any]) -> Dict[str, Any]:
+    precheck = result.get("simulation_motion_precheck")
+    if not isinstance(precheck, dict):
+        precheck = {}
+    return {
+        "simulation_motion_precheck_status": result.get(
+            "simulation_motion_precheck_status",
+            precheck.get("status", "NOT_REQUESTED"),
+        ),
+        "ready_for_simulation_motion": result.get("ready_for_simulation_motion", precheck.get("ready", False)),
+        "blocking_reasons": precheck.get("blocking_reasons", []),
+        "warnings": precheck.get("warnings", []),
+        "errors": precheck.get("errors", []),
+    }
+
+
+def _simulated_task_execution_request_fields(
+    *,
+    requested: bool = False,
+    execution_attempt_id: str | None = None,
+    execution_max_attempts: int = 1,
+    retry_enabled: bool = False,
+    fallback_enabled: bool = False,
+) -> Dict[str, Any]:
+    return {
+        "safe_simulated_task_execution_requested": requested,
+        "execution_attempt_id": execution_attempt_id,
+        "execution_max_attempts": int(execution_max_attempts or 1),
+        "execution_attempt_index": 1,
+        "execution_retry_recommendation_enabled": retry_enabled,
+        "execution_fallback_recommendation_enabled": fallback_enabled,
+    }
+
+
+def _simulated_task_execution_report_fields(
+    result: Dict[str, Any],
+    request_metadata: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    request_metadata = request_metadata if isinstance(request_metadata, dict) else {}
+    request = SimulatedTaskExecutionRequest(
+        requested=request_metadata.get("safe_simulated_task_execution_requested") is True,
+        execution_attempt_id=request_metadata.get("execution_attempt_id"),
+        execution_max_attempts=int(request_metadata.get("execution_max_attempts") or 1),
+        execution_attempt_index=int(request_metadata.get("execution_attempt_index") or 1),
+        retry_recommendation_enabled=request_metadata.get("execution_retry_recommendation_enabled") is True,
+        fallback_recommendation_enabled=request_metadata.get("execution_fallback_recommendation_enabled") is True,
+    )
+    execution_result = execute_safe_simulated_task(request, result)
+    post_check = execution_result.get("post_motion_state_check") if isinstance(execution_result.get("post_motion_state_check"), dict) else {}
+    flattened = {
+        **execution_result,
+        "simulated_task_execution": execution_result,
+        "post_motion_state_check": post_check,
+        "post_motion_state_check_status": post_check.get("post_motion_state_check_status"),
+        "post_check_passed": post_check.get("post_check_passed", False),
+        "execution_feedback": execution_result.get("execution_feedback", {}),
+        "failure_analysis": execution_result.get("failure_analysis", {}),
+        "retry_fallback_recommendation": execution_result.get("retry_fallback_recommendation", {}),
+        "execution_attempt_record": execution_result.get("execution_attempt_record", {}),
+        "simulated_task_execution_files": [],
+    }
+    return flattened
+
+
+def _simulated_task_execution_info(result: Dict[str, Any]) -> Dict[str, Any]:
+    execution = result.get("simulated_task_execution") if isinstance(result.get("simulated_task_execution"), dict) else {}
+    return {
+        **execution,
+        "safe_simulated_task_execution_requested": result.get(
+            "safe_simulated_task_execution_requested",
+            execution.get("safe_simulated_task_execution_requested", False),
+        )
+        is True,
+        "execution_attempt_id": result.get("execution_attempt_id", execution.get("execution_attempt_id")),
+        "execution_max_attempts": result.get("execution_max_attempts", execution.get("execution_max_attempts", 1)),
+        "execution_attempt_index": result.get("execution_attempt_index", execution.get("execution_attempt_index", 1)),
+        "simulated_task_status": result.get("simulated_task_status", execution.get("simulated_task_status")),
+        "execution_feedback_status": result.get(
+            "execution_feedback_status",
+            execution.get("execution_feedback_status"),
+        ),
+        "failure_reason": result.get("failure_reason", execution.get("failure_reason")),
+        "retry_recommended": result.get("retry_recommended", execution.get("retry_recommended", False)),
+        "fallback_recommended": result.get("fallback_recommended", execution.get("fallback_recommended", False)),
+        "fallback_type": result.get("fallback_type", execution.get("fallback_type")),
+        "replay_ready": result.get("replay_ready", execution.get("replay_ready", False)),
+        "simulated_task_execution_result_path": result.get("simulated_task_execution_result_path"),
+        "simulated_task_execution_report_path": result.get("simulated_task_execution_report_path"),
+        "execution_feedback_path": result.get("execution_feedback_path"),
+        "execution_attempt_record_path": result.get("execution_attempt_record_path"),
+        "failure_analysis_path": result.get("failure_analysis_path"),
+        "retry_fallback_recommendation_path": result.get("retry_fallback_recommendation_path"),
+    }
+
+
+def _simulated_task_execution_file_refs(result: Dict[str, Any]) -> list[Dict[str, str | None]]:
+    if not result.get("safe_simulated_task_execution_requested"):
+        return []
+    return [
+        {"name": "simulated_task_execution_result.json", "path": result.get("simulated_task_execution_result_path")},
+        {"name": "simulated_task_execution_report.md", "path": result.get("simulated_task_execution_report_path")},
+        {"name": "execution_feedback.json", "path": result.get("execution_feedback_path")},
+        {"name": "execution_attempt_record.json", "path": result.get("execution_attempt_record_path")},
+        {"name": "failure_analysis.json", "path": result.get("failure_analysis_path")},
+        {
+            "name": "retry_fallback_recommendation.json",
+            "path": result.get("retry_fallback_recommendation_path"),
+        },
+    ]
 
 
 def _semantic_bridge_file_refs(result: Dict[str, Any]) -> list[Dict[str, str | None]]:

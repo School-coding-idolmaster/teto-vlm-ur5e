@@ -1294,6 +1294,56 @@ triggered the simulation-only micro-motion proof pulse. `summary.md` includes a
 Semantic-to-Simulation Bridge Summary with the bridge status and resulting
 micro-motion status.
 
+## TETO V2.7.0 Safe Simulated Task Execution Loop
+
+TETO V2.7.0 adds a safe simulated task execution lifecycle on top of the
+V2.6.0 semantic-to-simulation bridge. It still does not prove that the robot
+completed a real semantic goal such as moving above a red mug. It proves that
+an eligible semantic contract can enter a safe simulation-only execution
+attempt and produce structured feedback, while blocked contracts produce
+structured failure evidence.
+
+The V2.7.0 lifecycle is:
+
+```text
+semantic task contract
+-> semantic gate
+-> simulation motion precheck
+-> simulation-only micro-motion
+-> post-motion state observation
+-> execution feedback
+-> simulated task status
+-> failure report / retry recommendation / fallback recommendation
+-> replay-ready evidence
+```
+
+V2.7.0 remains simulation-only. It does not call live camera capture, live
+Qwen/VLM inference, ROS2, MoveIt, RTDE, URScript, Dashboard commands, a real
+UR5, a trajectory planner, or `tcp_pose_world` execution. Retry and fallback
+are recommendations only; V2.7.0 does not execute automatic repeated motion.
+
+Run the safe execution dry-run demo:
+
+```bash
+python3 scripts/run_first_simulation_execution.py \
+  --dry-run \
+  --steps 3 \
+  --semantic-simulation-bridge \
+  --semantic-bridge-demo-contract \
+  --safe-simulated-task-execution \
+  --execution-enable-retry-recommendation \
+  --execution-enable-fallback-recommendation
+```
+
+Safe execution evidence includes `simulated_task_execution_result.json`,
+`simulated_task_execution_report.md`, `execution_feedback.json`,
+`execution_attempt_record.json`, `failure_analysis.json`, and
+`retry_fallback_recommendation.json`. `summary.md` includes a Safe Simulated
+Task Execution Summary, and `evidence_manifest.json` records
+`simulated_task_execution_status`, `execution_feedback_status`,
+`failure_reason`, retry/fallback recommendation fields, post-motion state check
+status, and replay readiness.
+
 Demo commands accept common image formats directly. TETO automatically
 creates a cached RGB JPEG under `data/processed/auto/`, with EXIF orientation
 applied, long edge resized, animated images reduced to the first frame, and
@@ -1503,4 +1553,5 @@ python3 -m src.cli prepare-images --input-dir data/raw --output-dir data/process
 - V2.5.0 = first simulation robot micro-motion
 - V2.5.1 = motion evidence polish
 - V2.6.0 = semantic-to-simulation motion bridge
+- V2.7.0 = safe simulated task execution loop
 - Future ROS2 / MoveIt2 / RTDE / URScript / real UR5 controller integration remains outside the current implemented safety boundary

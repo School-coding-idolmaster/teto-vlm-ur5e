@@ -10,6 +10,7 @@ from src.simulation_micro_motion import (
     write_simulation_micro_motion_artifacts,
 )
 from src.semantic_simulation_bridge import format_semantic_simulation_bridge_report
+from src.simulated_task_execution import format_simulated_task_execution_report
 
 
 EVIDENCE_MANIFEST_SCHEMA_VERSION = "teto_evidence_manifest.v1"
@@ -42,6 +43,12 @@ def export_simulation_evidence(
     semantic_bridge_result_path = output_dir / "semantic_simulation_bridge_result.json"
     semantic_bridge_report_path = output_dir / "semantic_simulation_bridge_report.md"
     semantic_task_contract_copy_path = output_dir / "semantic_task_contract_copy.json"
+    simulated_task_execution_result_path = output_dir / "simulated_task_execution_result.json"
+    simulated_task_execution_report_path = output_dir / "simulated_task_execution_report.md"
+    execution_feedback_path = output_dir / "execution_feedback.json"
+    execution_attempt_record_path = output_dir / "execution_attempt_record.json"
+    failure_analysis_path = output_dir / "failure_analysis.json"
+    retry_fallback_recommendation_path = output_dir / "retry_fallback_recommendation.json"
 
     object_info = _simulation_object_info(result)
     robot_asset_info = _robot_asset_info(result)
@@ -51,12 +58,16 @@ def export_simulation_evidence(
     simulation_motion_precheck_info = _simulation_motion_precheck_info(result)
     simulation_micro_motion_info = _simulation_micro_motion_info(result)
     semantic_bridge_info = _semantic_bridge_info(result)
+    simulated_task_execution_info = _simulated_task_execution_info(result)
     structure_report_requested = bool(robot_prim_inspection_info.get("requested"))
     readiness_requested = bool(articulation_readiness_info.get("requested"))
     state_requested = bool(articulation_state_info.get("requested"))
     precheck_requested = bool(simulation_motion_precheck_info.get("requested"))
     micro_motion_requested = bool(simulation_micro_motion_info.get("requested"))
     semantic_bridge_requested = bool(semantic_bridge_info.get("requested"))
+    simulated_task_execution_requested = bool(
+        simulated_task_execution_info.get("safe_simulated_task_execution_requested")
+    )
     run_id = output_dir.name
     created_at = result.get("finished_at") or result.get("started_at")
     report_path = result.get("report_path")
@@ -73,6 +84,7 @@ def export_simulation_evidence(
             simulation_motion_precheck_info=simulation_motion_precheck_info,
             simulation_micro_motion_info=simulation_micro_motion_info,
             semantic_bridge_info=semantic_bridge_info,
+            simulated_task_execution_info=simulated_task_execution_info,
             robot_structure_report_path=structure_report_ref,
             run_id=run_id,
             created_at=created_at,
@@ -157,6 +169,48 @@ def export_simulation_evidence(
             ),
             encoding="utf-8",
         )
+    if simulated_task_execution_requested:
+        simulated_task_execution_info["simulated_task_execution_result_path"] = str(
+            simulated_task_execution_result_path
+        )
+        simulated_task_execution_info["simulated_task_execution_report_path"] = str(
+            simulated_task_execution_report_path
+        )
+        simulated_task_execution_info["execution_feedback_path"] = str(execution_feedback_path)
+        simulated_task_execution_info["execution_attempt_record_path"] = str(execution_attempt_record_path)
+        simulated_task_execution_info["failure_analysis_path"] = str(failure_analysis_path)
+        simulated_task_execution_info["retry_fallback_recommendation_path"] = str(
+            retry_fallback_recommendation_path
+        )
+        simulated_task_execution_info["simulated_task_execution_files"] = _simulated_task_execution_files(
+            simulated_task_execution_info
+        )
+        with simulated_task_execution_result_path.open("w", encoding="utf-8") as execution_file:
+            json.dump(simulated_task_execution_info, execution_file, ensure_ascii=False, indent=2)
+            execution_file.write("\n")
+        _write_json_artifact(execution_feedback_path, simulated_task_execution_info.get("execution_feedback", {}))
+        _write_json_artifact(
+            execution_attempt_record_path,
+            simulated_task_execution_info.get("execution_attempt_record", {}),
+        )
+        _write_json_artifact(failure_analysis_path, simulated_task_execution_info.get("failure_analysis", {}))
+        _write_json_artifact(
+            retry_fallback_recommendation_path,
+            simulated_task_execution_info.get("retry_fallback_recommendation", {}),
+        )
+        simulated_task_execution_report_path.write_text(
+            format_simulated_task_execution_report(
+                _simulated_task_execution_report_context(
+                    result,
+                    simulated_task_execution_info,
+                    simulation_motion_precheck_info,
+                    simulation_micro_motion_info,
+                    semantic_bridge_info,
+                ),
+                evidence_files=simulated_task_execution_info["simulated_task_execution_files"],
+            ),
+            encoding="utf-8",
+        )
     motion_evidence_summary = summarize_motion_evidence(simulation_micro_motion_info)
 
     manifest = {
@@ -198,6 +252,25 @@ def export_simulation_evidence(
         "semantic_gate_passed": semantic_bridge_info.get("gate_passed"),
         "semantic_bridge_blocking_reasons": semantic_bridge_info.get("blocking_reasons", []),
         "triggered_simulation_micro_motion": semantic_bridge_info.get("triggered_simulation_micro_motion", False),
+        "simulated_task_execution_requested": simulated_task_execution_requested,
+        "simulated_task_execution_status": simulated_task_execution_info.get("simulated_task_status"),
+        "execution_attempt_id": simulated_task_execution_info.get("execution_attempt_id"),
+        "execution_feedback_status": simulated_task_execution_info.get("execution_feedback_status"),
+        "failure_reason": simulated_task_execution_info.get("failure_reason"),
+        "retry_recommended": simulated_task_execution_info.get("retry_recommended"),
+        "fallback_recommended": simulated_task_execution_info.get("fallback_recommended"),
+        "fallback_type": simulated_task_execution_info.get("fallback_type"),
+        "post_motion_state_check_status": (
+            (simulated_task_execution_info.get("post_motion_state_check") or {}).get(
+                "post_motion_state_check_status"
+            )
+        ),
+        "simulated_task_execution_files": (
+            _simulated_task_execution_files(simulated_task_execution_info)
+            if simulated_task_execution_requested
+            else []
+        ),
+        "replay_ready": simulated_task_execution_info.get("replay_ready", False),
         "motion_evidence_available": motion_evidence_summary["motion_evidence_available"],
         "motion_evidence_files": motion_evidence_summary["motion_evidence_files"],
         "motion_diff_summary": motion_evidence_summary["motion_diff_summary"],
@@ -217,6 +290,20 @@ def export_simulation_evidence(
             str(semantic_task_contract_copy_path)
             if semantic_bridge_requested and semantic_task_contract_copy_path.exists()
             else None
+        ),
+        "simulated_task_execution_result_path": str(simulated_task_execution_result_path)
+        if simulated_task_execution_requested
+        else None,
+        "simulated_task_execution_report_path": str(simulated_task_execution_report_path)
+        if simulated_task_execution_requested
+        else None,
+        "execution_feedback_path": str(execution_feedback_path) if simulated_task_execution_requested else None,
+        "execution_attempt_record_path": (
+            str(execution_attempt_record_path) if simulated_task_execution_requested else None
+        ),
+        "failure_analysis_path": str(failure_analysis_path) if simulated_task_execution_requested else None,
+        "retry_fallback_recommendation_path": (
+            str(retry_fallback_recommendation_path) if simulated_task_execution_requested else None
         ),
         "screenshot_before_path": None,
         "screenshot_after_path": None,
@@ -245,6 +332,12 @@ def export_simulation_evidence(
         "semantic_simulation_bridge_result_path": semantic_bridge_result_path,
         "semantic_simulation_bridge_report_path": semantic_bridge_report_path,
         "semantic_task_contract_copy_path": semantic_task_contract_copy_path,
+        "simulated_task_execution_result_path": simulated_task_execution_result_path,
+        "simulated_task_execution_report_path": simulated_task_execution_report_path,
+        "execution_feedback_path": execution_feedback_path,
+        "execution_attempt_record_path": execution_attempt_record_path,
+        "failure_analysis_path": failure_analysis_path,
+        "retry_fallback_recommendation_path": retry_fallback_recommendation_path,
     }
 
 
@@ -522,6 +615,95 @@ def _semantic_bridge_files(semantic_bridge_info: Dict[str, Any]) -> list[Dict[st
     ]
 
 
+def _simulated_task_execution_info(result: Dict[str, Any]) -> Dict[str, Any]:
+    execution = (
+        result.get("simulated_task_execution")
+        if isinstance(result.get("simulated_task_execution"), dict)
+        else {}
+    )
+    return {
+        **execution,
+        "safe_simulated_task_execution_requested": result.get(
+            "safe_simulated_task_execution_requested",
+            execution.get("safe_simulated_task_execution_requested", False),
+        )
+        is True,
+        "execution_attempt_id": result.get("execution_attempt_id", execution.get("execution_attempt_id")),
+        "execution_max_attempts": result.get("execution_max_attempts", execution.get("execution_max_attempts", 1)),
+        "execution_attempt_index": result.get("execution_attempt_index", execution.get("execution_attempt_index", 1)),
+        "simulated_task_status": result.get("simulated_task_status", execution.get("simulated_task_status")),
+        "execution_feedback_status": result.get(
+            "execution_feedback_status",
+            execution.get("execution_feedback_status"),
+        ),
+        "failure_reason": result.get("failure_reason", execution.get("failure_reason")),
+        "retry_recommended": result.get("retry_recommended", execution.get("retry_recommended", False)),
+        "fallback_recommended": result.get("fallback_recommended", execution.get("fallback_recommended", False)),
+        "fallback_type": result.get("fallback_type", execution.get("fallback_type")),
+        "replay_ready": result.get("replay_ready", execution.get("replay_ready", False)),
+        "post_motion_state_check": result.get(
+            "post_motion_state_check",
+            execution.get("post_motion_state_check", {}),
+        ),
+        "execution_feedback": result.get("execution_feedback", execution.get("execution_feedback", {})),
+        "execution_attempt_record": result.get(
+            "execution_attempt_record",
+            execution.get("execution_attempt_record", {}),
+        ),
+        "failure_analysis": result.get("failure_analysis", execution.get("failure_analysis", {})),
+        "retry_fallback_recommendation": result.get(
+            "retry_fallback_recommendation",
+            execution.get("retry_fallback_recommendation", {}),
+        ),
+        "simulated_task_execution_result_path": result.get("simulated_task_execution_result_path"),
+        "simulated_task_execution_report_path": result.get("simulated_task_execution_report_path"),
+        "execution_feedback_path": result.get("execution_feedback_path"),
+        "execution_attempt_record_path": result.get("execution_attempt_record_path"),
+        "failure_analysis_path": result.get("failure_analysis_path"),
+        "retry_fallback_recommendation_path": result.get("retry_fallback_recommendation_path"),
+    }
+
+
+def _simulated_task_execution_files(execution_info: Dict[str, Any]) -> list[Dict[str, str | None]]:
+    return [
+        {"name": "simulated_task_execution_result.json", "path": execution_info.get("simulated_task_execution_result_path")},
+        {"name": "simulated_task_execution_report.md", "path": execution_info.get("simulated_task_execution_report_path")},
+        {"name": "execution_feedback.json", "path": execution_info.get("execution_feedback_path")},
+        {"name": "execution_attempt_record.json", "path": execution_info.get("execution_attempt_record_path")},
+        {"name": "failure_analysis.json", "path": execution_info.get("failure_analysis_path")},
+        {
+            "name": "retry_fallback_recommendation.json",
+            "path": execution_info.get("retry_fallback_recommendation_path"),
+        },
+    ]
+
+
+def _write_json_artifact(path: Path, payload: Dict[str, Any]) -> None:
+    with path.open("w", encoding="utf-8") as output_file:
+        json.dump(payload, output_file, ensure_ascii=False, indent=2)
+        output_file.write("\n")
+
+
+def _simulated_task_execution_report_context(
+    result: Dict[str, Any],
+    execution_info: Dict[str, Any],
+    precheck_info: Dict[str, Any],
+    micro_motion_info: Dict[str, Any],
+    semantic_bridge_info: Dict[str, Any],
+) -> Dict[str, Any]:
+    motion = micro_motion_info.get("motion") if isinstance(micro_motion_info.get("motion"), dict) else {}
+    return {
+        **execution_info,
+        "semantic_bridge_status": semantic_bridge_info.get("status"),
+        "semantic_gate_passed": semantic_bridge_info.get("gate_passed"),
+        "simulation_motion_precheck_status": precheck_info.get("status"),
+        "ready_for_simulation_motion": precheck_info.get("ready"),
+        "simulation_micro_motion_status": micro_motion_info.get("simulation_micro_motion_status"),
+        "actual_delta_rad": result.get("actual_delta_rad", motion.get("actual_delta_rad")),
+        "delta_within_tolerance": result.get("delta_within_tolerance", motion.get("delta_within_tolerance")),
+    }
+
+
 def _build_summary_markdown(
     result: Dict[str, Any],
     *,
@@ -533,6 +715,7 @@ def _build_summary_markdown(
     simulation_motion_precheck_info: Dict[str, Any],
     simulation_micro_motion_info: Dict[str, Any],
     semantic_bridge_info: Dict[str, Any],
+    simulated_task_execution_info: Dict[str, Any],
     robot_structure_report_path: str | None,
     run_id: str,
     created_at: str | None,
@@ -697,6 +880,22 @@ def _build_summary_markdown(
             f"- actual_delta_rad: {_format_value((simulation_micro_motion_info.get('motion') or {}).get('actual_delta_rad'))}",
             f"- delta_within_tolerance: {_format_value((simulation_micro_motion_info.get('motion') or {}).get('delta_within_tolerance'))}",
             f"- semantic_bridge_files: {_format_value(_semantic_bridge_files(semantic_bridge_info) if semantic_bridge_info.get('requested') else [])}",
+            "",
+            "## Safe Simulated Task Execution Summary",
+            "",
+            f"- execution_attempt_id: {_format_value(simulated_task_execution_info.get('execution_attempt_id'))}",
+            f"- simulated_task_status: {_format_value(simulated_task_execution_info.get('simulated_task_status'))}",
+            f"- semantic_bridge_status: {_format_value(semantic_bridge_info.get('status'))}",
+            f"- semantic_gate_passed: {_format_value(semantic_bridge_info.get('gate_passed'))}",
+            f"- simulation_motion_precheck_status: {_format_value(simulation_motion_precheck_info.get('status'))}",
+            f"- simulation_micro_motion_status: {_format_value(simulation_micro_motion_info.get('simulation_micro_motion_status'))}",
+            f"- post_motion_state_check_status: {_format_value((simulated_task_execution_info.get('post_motion_state_check') or {}).get('post_motion_state_check_status'))}",
+            f"- execution_feedback_status: {_format_value(simulated_task_execution_info.get('execution_feedback_status'))}",
+            f"- failure_reason: {_format_value(simulated_task_execution_info.get('failure_reason'))}",
+            f"- retry_recommended: {_format_value(simulated_task_execution_info.get('retry_recommended'))}",
+            f"- fallback_recommended: {_format_value(simulated_task_execution_info.get('fallback_recommended'))}",
+            f"- fallback_type: {_format_value(simulated_task_execution_info.get('fallback_type'))}",
+            f"- simulated_task_execution_files: {_format_value(_simulated_task_execution_files(simulated_task_execution_info) if simulated_task_execution_info.get('safe_simulated_task_execution_requested') else [])}",
             "",
         ]
     )

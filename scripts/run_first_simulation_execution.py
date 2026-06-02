@@ -18,7 +18,7 @@ from src.simulation_runtime import DEFAULT_SIMULATION_TASK, CURRENT_TETO_VERSION
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run TETO V2.6.0 semantic-to-simulation bridge smoke test.")
+    parser = argparse.ArgumentParser(description="Run TETO V2.7.0 safe simulated task execution smoke test.")
     parser.add_argument("--dry-run", action="store_true", help="Do not import Isaac; produce a test execution report.")
     parser.add_argument("--no-isaac", action="store_true", help="Pure Python test mode without Isaac imports.")
     parser.add_argument("--spawn-cube", action="store_true", help="Spawn a visible cube in the Isaac World.")
@@ -108,15 +108,40 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_SEMANTIC_CONFIDENCE_THRESHOLD,
         help="Minimum semantic and overall confidence for the bridge gate.",
     )
+    parser.add_argument(
+        "--safe-simulated-task-execution",
+        action="store_true",
+        help="Run the safe simulated task execution lifecycle after the semantic bridge gate.",
+    )
+    parser.add_argument("--execution-attempt-id", help="Optional stable execution attempt id.")
+    parser.add_argument(
+        "--execution-max-attempts",
+        type=int,
+        default=1,
+        help="Maximum attempts metadata. V2.7.0 supports 1 and does not auto-retry.",
+    )
+    parser.add_argument(
+        "--execution-enable-retry-recommendation",
+        action="store_true",
+        help="Generate retry recommendation metadata without executing an automatic retry.",
+    )
+    parser.add_argument(
+        "--execution-enable-fallback-recommendation",
+        action="store_true",
+        help="Generate fallback recommendation metadata.",
+    )
     return parser
 
 
 def main() -> int:
     args = build_parser().parse_args()
+    if args.execution_max_attempts != 1:
+        raise ValueError("--execution-max-attempts currently supports only 1 in TETO V2.7.0")
     simulation_task = _load_simulation_task(args.task_json)
     semantic_contract = None
     semantic_contract_path = None
-    if args.semantic_simulation_bridge:
+    effective_semantic_bridge = args.semantic_simulation_bridge or args.safe_simulated_task_execution
+    if effective_semantic_bridge:
         if args.semantic_task_json and args.semantic_bridge_demo_contract:
             raise ValueError("use either --semantic-task-json or --semantic-bridge-demo-contract, not both")
         if args.semantic_task_json:
@@ -126,7 +151,10 @@ def main() -> int:
             semantic_contract = build_demo_semantic_task_contract()
             semantic_contract_path = "builtin:eligible_demo_semantic_bridge_contract"
         else:
-            raise ValueError("--semantic-simulation-bridge requires --semantic-task-json or --semantic-bridge-demo-contract")
+            raise ValueError(
+                "--semantic-simulation-bridge or --safe-simulated-task-execution requires "
+                "--semantic-task-json or --semantic-bridge-demo-contract"
+            )
     result = run_first_simulation_execution(
         simulation_task,
         dry_run=args.dry_run,
@@ -149,10 +177,15 @@ def main() -> int:
         micro_motion_joint=args.micro_motion_joint,
         micro_motion_delta_rad=args.micro_motion_delta_rad,
         micro_motion_tolerance_rad=args.micro_motion_tolerance_rad,
-        semantic_simulation_bridge=args.semantic_simulation_bridge,
+        semantic_simulation_bridge=effective_semantic_bridge,
         semantic_task_contract=semantic_contract,
         semantic_task_contract_path=semantic_contract_path,
         semantic_confidence_threshold=args.semantic_confidence_threshold,
+        safe_simulated_task_execution=args.safe_simulated_task_execution,
+        execution_attempt_id=args.execution_attempt_id,
+        execution_max_attempts=args.execution_max_attempts,
+        execution_enable_retry_recommendation=args.execution_enable_retry_recommendation,
+        execution_enable_fallback_recommendation=args.execution_enable_fallback_recommendation,
         output_dir=args.output_dir,
         write_report=True,
         demo_command=shlex.join([sys.executable, *sys.argv]),
@@ -279,6 +312,19 @@ def print_summary(result: dict, report_path: Path) -> None:
     print(f"triggered_simulation_micro_motion: {result.get('triggered_simulation_micro_motion')}")
     print(f"semantic_simulation_bridge_result_path: {bridge.get('semantic_simulation_bridge_result_path')}")
     print(f"semantic_simulation_bridge_report_path: {bridge.get('semantic_simulation_bridge_report_path')}")
+    execution = result.get("simulated_task_execution") or {}
+    post_check = result.get("post_motion_state_check") or {}
+    print(f"safe_simulated_task_execution_requested: {result.get('safe_simulated_task_execution_requested')}")
+    print(f"execution_attempt_id: {result.get('execution_attempt_id')}")
+    print(f"simulated_task_status: {result.get('simulated_task_status')}")
+    print(f"execution_feedback_status: {result.get('execution_feedback_status')}")
+    print(f"failure_reason: {result.get('failure_reason')}")
+    print(f"retry_recommended: {result.get('retry_recommended')}")
+    print(f"fallback_recommended: {result.get('fallback_recommended')}")
+    print(f"fallback_type: {result.get('fallback_type')}")
+    print(f"post_motion_state_check_status: {post_check.get('post_motion_state_check_status')}")
+    print(f"simulated_task_execution_result_path: {execution.get('simulated_task_execution_result_path')}")
+    print(f"simulated_task_execution_report_path: {execution.get('simulated_task_execution_report_path')}")
     print(f"Report: {report_path}")
     if result.get("blocking_reasons"):
         print(f"Blocking reasons: {', '.join(result['blocking_reasons'])}")

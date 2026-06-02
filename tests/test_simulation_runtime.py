@@ -242,6 +242,27 @@ def test_cli_semantic_bridge_arguments_parse():
     assert args.semantic_confidence_threshold == 0.7
 
 
+def test_cli_safe_simulated_task_execution_arguments_parse():
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "--safe-simulated-task-execution",
+            "--semantic-bridge-demo-contract",
+            "--execution-attempt-id",
+            "attempt_001",
+            "--execution-enable-retry-recommendation",
+            "--execution-enable-fallback-recommendation",
+        ]
+    )
+
+    assert args.safe_simulated_task_execution is True
+    assert args.semantic_bridge_demo_contract is True
+    assert args.execution_attempt_id == "attempt_001"
+    assert args.execution_max_attempts == 1
+    assert args.execution_enable_retry_recommendation is True
+    assert args.execution_enable_fallback_recommendation is True
+
+
 def test_dry_run_robot_asset_check_passes_with_unavailable_default():
     result = run_first_simulation_execution(VALID_TASK, dry_run=True, steps=1, check_robot_asset=True)
 
