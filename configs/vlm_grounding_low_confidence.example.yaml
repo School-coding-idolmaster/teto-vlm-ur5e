@@ -1,0 +1,10 @@
+vlm_grounding_adapter:
+  adapter_mode: offline_grounding_json
+  grounding_result_path: examples/vlm_grounding/grounding_low_confidence_example.json
+  user_command: hover over the red mug
+  expected_snapshot_id: vlm_grounding_fixture_snapshot_001
+  expected_scene_version: vlm_grounding_fixture_scene_v1
+  overall_confidence_threshold: 0.60
+  allow_live_vlm: false
+  live_vlm_called: false
+

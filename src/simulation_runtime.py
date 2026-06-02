@@ -51,10 +51,11 @@ from src.simulated_task_execution import (
     SimulatedTaskExecutionRequest,
     execute_safe_simulated_task,
 )
+from src.vlm_grounding_adapter import build_vlm_grounding_adapter_request, evaluate_vlm_grounding_adapter
 
 
 REPORT_VERSION = "teto_simulation_execution.v1"
-CURRENT_TETO_VERSION = "TETO V2.9.3"
+CURRENT_TETO_VERSION = "TETO V2.9.4"
 DEFAULT_STEPS = 5
 DEFAULT_SIMULATION_OBJECT_TYPE = "cube"
 DEFAULT_CUBE_PRIM_PATH = "/World/TETO_Cube"
@@ -118,6 +119,7 @@ def build_simulation_execution_result(
     lab_readiness_metadata: Dict[str, Any] | None = None,
     camera_source_metadata: Dict[str, Any] | None = None,
     camera_snapshot_metadata: Dict[str, Any] | None = None,
+    vlm_grounding_metadata: Dict[str, Any] | None = None,
     geometry_validity_metadata: Dict[str, Any] | None = None,
     projector_shadow_metadata: Dict[str, Any] | None = None,
     real_scene_shadow_metadata: Dict[str, Any] | None = None,
@@ -162,6 +164,7 @@ def build_simulation_execution_result(
     result.update(lab_readiness_metadata or _lab_readiness_report_fields())
     result.update(camera_source_metadata or _camera_source_report_fields())
     result.update(camera_snapshot_metadata or _camera_snapshot_report_fields())
+    result.update(vlm_grounding_metadata or _vlm_grounding_report_fields())
     result.update(geometry_validity_metadata or _geometry_validity_report_fields())
     result.update(projector_shadow_metadata or _projector_shadow_report_fields())
     result.update(real_scene_shadow_metadata or _real_scene_shadow_report_fields())
@@ -254,6 +257,11 @@ def run_first_simulation_execution(
     check_camera_snapshot: bool = False,
     camera_snapshot_config: str | Path | None = None,
     camera_snapshot_report: bool = False,
+    check_vlm_grounding_adapter: bool = False,
+    vlm_grounding_config: str | Path | None = None,
+    vlm_grounding_report: bool = False,
+    user_command: str | None = None,
+    allow_live_vlm: bool = False,
     check_geometry_validity: bool = False,
     geometry_validity_config: str | Path | None = None,
     geometry_validity_report: bool = False,
@@ -272,6 +280,7 @@ def run_first_simulation_execution(
     started_at = _timestamp()
     camera_source_requested = check_camera_source_adapter or camera_source_report
     camera_snapshot_requested = check_camera_snapshot or camera_snapshot_report
+    vlm_grounding_requested = check_vlm_grounding_adapter or vlm_grounding_report
     projector_shadow_requested = check_projector_shadow or projector_shadow_report
     geometry_validity_requested = check_geometry_validity or geometry_validity_report
     real_scene_shadow_requested = run_real_scene_shadow or real_scene_shadow_report
@@ -285,6 +294,7 @@ def run_first_simulation_execution(
         lab_readiness_requested
         or camera_source_requested
         or camera_snapshot_requested
+        or vlm_grounding_requested
         or geometry_validity_requested
         or projector_shadow_requested
         or real_scene_shadow_requested
@@ -318,6 +328,16 @@ def run_first_simulation_execution(
     camera_snapshot_metadata = _camera_snapshot_report_fields(
         requested=camera_snapshot_requested,
         snapshot=evaluate_camera_snapshot_contract(camera_snapshot_request),
+    )
+    vlm_grounding_request = build_vlm_grounding_adapter_request(
+        requested=vlm_grounding_requested,
+        config_path=vlm_grounding_config,
+        user_command=user_command,
+        allow_live_vlm=allow_live_vlm,
+    )
+    vlm_grounding_metadata = _vlm_grounding_report_fields(
+        requested=vlm_grounding_requested,
+        grounding=evaluate_vlm_grounding_adapter(vlm_grounding_request),
     )
     projector_shadow_request = build_projector_shadow_request(
         requested=projector_shadow_requested,
@@ -465,6 +485,7 @@ def run_first_simulation_execution(
                 lab_readiness_metadata=lab_readiness_metadata,
                 camera_source_metadata=camera_source_metadata,
                 camera_snapshot_metadata=camera_snapshot_metadata,
+                vlm_grounding_metadata=vlm_grounding_metadata,
                 geometry_validity_metadata=geometry_validity_metadata,
                 projector_shadow_metadata=projector_shadow_metadata,
                 real_scene_shadow_metadata=real_scene_shadow_metadata,
@@ -517,6 +538,7 @@ def run_first_simulation_execution(
                 lab_readiness_metadata=lab_readiness_metadata,
                 camera_source_metadata=camera_source_metadata,
                 camera_snapshot_metadata=camera_snapshot_metadata,
+                vlm_grounding_metadata=vlm_grounding_metadata,
                 geometry_validity_metadata=geometry_validity_metadata,
                 projector_shadow_metadata=projector_shadow_metadata,
                 real_scene_shadow_metadata=real_scene_shadow_metadata,
@@ -608,6 +630,7 @@ def run_first_simulation_execution(
                     lab_readiness_metadata=lab_readiness_metadata,
                     camera_source_metadata=camera_source_metadata,
                     camera_snapshot_metadata=camera_snapshot_metadata,
+                    vlm_grounding_metadata=vlm_grounding_metadata,
                     geometry_validity_metadata=geometry_validity_metadata,
                     projector_shadow_metadata=projector_shadow_metadata,
                     real_scene_shadow_metadata=real_scene_shadow_metadata,
@@ -646,6 +669,7 @@ def run_first_simulation_execution(
                 lab_readiness_metadata=lab_readiness_metadata,
                 camera_source_metadata=camera_source_metadata,
                 camera_snapshot_metadata=camera_snapshot_metadata,
+                vlm_grounding_metadata=vlm_grounding_metadata,
                 geometry_validity_metadata=geometry_validity_metadata,
                 projector_shadow_metadata=projector_shadow_metadata,
                 real_scene_shadow_metadata=real_scene_shadow_metadata,
@@ -710,6 +734,8 @@ def write_simulation_execution_result(
     execution_attempt_record_path = run_dir / "execution_attempt_record.json"
     failure_analysis_path = run_dir / "failure_analysis.json"
     retry_fallback_recommendation_path = run_dir / "retry_fallback_recommendation.json"
+    vlm_grounding_result_path = run_dir / "vlm_grounding_result.json"
+    vlm_grounding_report_path = run_dir / "vlm_grounding_report.md"
     result["report_path"] = str(report_path)
     structure_report_requested = bool(result.get("robot_prim_inspection_requested"))
     result["robot_structure_report_generated"] = structure_report_requested
@@ -773,6 +799,12 @@ def write_simulation_execution_result(
     )
     result["semantic_bridge_evidence_available"] = semantic_bridge_requested
     result["semantic_bridge_files"] = _semantic_bridge_file_refs(result)
+    vlm_grounding_requested = bool(result.get("vlm_grounding_requested"))
+    result["vlm_grounding_result_path"] = str(vlm_grounding_result_path) if vlm_grounding_requested else None
+    result["vlm_grounding_report_path"] = str(vlm_grounding_report_path) if vlm_grounding_requested else None
+    if isinstance(result.get("vlm_grounding"), dict):
+        result["vlm_grounding"]["vlm_grounding_result_path"] = result["vlm_grounding_result_path"]
+        result["vlm_grounding"]["vlm_grounding_report_path"] = result["vlm_grounding_report_path"]
     result["semantic_bridge"] = _semantic_bridge_info(result)
     result["motion"] = _motion_info(result)
     result["precheck"] = _precheck_info(result)
@@ -1622,6 +1654,46 @@ def _camera_source_report_fields(
         "camera_source_warnings": list(camera_source.get("warnings") or []),
         "camera_source_next_safe_action": camera_source.get("next_safe_action"),
         "no_motion_camera_adapter_passed": camera_source.get("no_motion_camera_adapter_passed", False) is True,
+    }
+
+
+def _vlm_grounding_report_fields(
+    *,
+    requested: bool = False,
+    grounding: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    grounding = grounding if isinstance(grounding, dict) else {}
+    return {
+        "vlm_grounding_requested": requested,
+        "vlm_grounding": grounding
+        or {
+            "requested": False,
+            "vlm_grounding_requested": False,
+            "vlm_grounding_status": "NOT_REQUESTED",
+            "blocking_reasons": [],
+            "warnings": [],
+            "no_motion_grounding_passed": False,
+            "live_camera_used": False,
+            "live_vlm_called": False,
+            "real_robot_motion_executed": False,
+            "real_robot_command_enabled": False,
+            "robot_command_generated": False,
+            "trajectory_generated": False,
+            "joint_targets_generated": False,
+            "tcp_pose_world_generated": False,
+        },
+        "vlm_grounding_status": grounding.get("vlm_grounding_status", "NOT_REQUESTED"),
+        "vlm_grounding_id": grounding.get("grounding_id"),
+        "vlm_grounding_snapshot_id": grounding.get("snapshot_id"),
+        "vlm_grounding_scene_version": grounding.get("scene_version"),
+        "vlm_grounding_user_command": grounding.get("user_command"),
+        "vlm_grounding_normalized_command": grounding.get("normalized_command"),
+        "vlm_grounding_adapter_mode": grounding.get("adapter_mode"),
+        "vlm_grounding_target_label": grounding.get("target_label"),
+        "vlm_grounding_blocking_reasons": list(grounding.get("blocking_reasons") or []),
+        "vlm_grounding_warnings": list(grounding.get("warnings") or []),
+        "vlm_grounding_next_safe_action": grounding.get("next_safe_action"),
+        "no_motion_grounding_passed": grounding.get("no_motion_grounding_passed", False) is True,
     }
 
 

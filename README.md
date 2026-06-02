@@ -1713,6 +1713,61 @@ no-real-robot / no-ROS2 / no-MoveIt safety boundary, and
 `live_camera_capture_allowed`, `live_camera_capture_used`, blocking reasons,
 warnings, `next_safe_action`, and no-motion safety flags.
 
+## TETO V2.9.4 Local/Mock VLM Grounding Adapter No-Motion
+
+TETO V2.9.4 adds a local/mock VLM grounding adapter. It converts a text
+command plus a declared camera snapshot into a TETO grounding result contract.
+
+The current implementation is mock/offline/manual by default. It does not call
+live Qwen or any live VLM. `local_vlm_disabled` and
+`future_local_qwen_adapter` are declaration-only modes for documenting the
+boundary without invoking a model.
+
+V2.9.4 is not live camera capture, not real VLM execution, not a ROS2 bridge,
+not MoveIt planning, and not real UR5 execution. It does not generate
+trajectory, `tcp_pose_world`, URScript, joint targets, robot commands,
+automatic retry motion, or any real execution request.
+
+Supported adapter modes:
+
+- `offline_grounding_json`
+- `mock_vlm`
+- `manual_annotation`
+- `local_vlm_disabled`
+- `future_local_qwen_adapter`
+
+Mock VLM grounding smoke:
+
+```bash
+python3 scripts/run_first_simulation_execution.py \
+  --check-vlm-grounding-adapter \
+  --vlm-grounding-config configs/vlm_grounding_mock.example.yaml \
+  --vlm-grounding-report \
+  --user-command "hover over the red mug" \
+  --output-dir /tmp/teto_v294_vlm_grounding_mock
+```
+
+Offline grounding JSON smoke:
+
+```bash
+python3 scripts/run_first_simulation_execution.py \
+  --check-vlm-grounding-adapter \
+  --vlm-grounding-config configs/vlm_grounding_offline.example.yaml \
+  --vlm-grounding-report \
+  --output-dir /tmp/teto_v294_vlm_grounding_offline
+```
+
+The evidence bundle includes `vlm_grounding_result.json`,
+`vlm_grounding_report.md`, `summary.md`, and `evidence_manifest.json`.
+`vlm_grounding_report.md` states the no-motion / no-live-VLM /
+no-real-robot / no-ROS2 / no-MoveIt safety boundary, and
+`evidence_manifest.json` records `vlm_grounding_evidence_available`,
+`vlm_grounding_status`, `grounding_id`, `snapshot_id`, `scene_version`,
+`user_command`, `normalized_command`, `adapter_mode`, target fields, bbox,
+pixel center, confidence fields, rejection fields, blocking reasons, warnings,
+`next_safe_action`, and safety flags proving no live camera, live VLM, real
+robot command, trajectory, joint targets, or `tcp_pose_world` were generated.
+
 Demo commands accept common image formats directly. TETO automatically
 creates a cached RGB JPEG under `data/processed/auto/`, with EXIF orientation
 applied, long edge resized, animated images reduced to the first frame, and
@@ -1931,4 +1986,5 @@ python3 -m src.cli prepare-images --input-dir data/raw --output-dir data/process
 - V2.9.1 = geometry validity contract
 - V2.9.2 = 2D-to-3D projector shadow contract
 - V2.9.3 = camera source adapter / manual snapshot no-motion
+- V2.9.4 = local/mock VLM grounding adapter no-motion
 - Future ROS2 / MoveIt2 / RTDE / URScript / real UR5 controller integration remains outside the current implemented safety boundary

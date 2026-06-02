@@ -19,7 +19,7 @@ from src.simulation_runtime import DEFAULT_SIMULATION_TASK, CURRENT_TETO_VERSION
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run TETO V2.9.3 camera source adapter, projector shadow, geometry validity, real-scene no-motion shadow, and safe simulation evidence smoke test."
+        description="Run TETO V2.9.4 VLM grounding adapter, camera source adapter, projector shadow, geometry validity, real-scene no-motion shadow, and safe simulation evidence smoke test."
     )
     parser.add_argument("--dry-run", action="store_true", help="Do not import Isaac; produce a test execution report.")
     parser.add_argument("--no-isaac", action="store_true", help="Pure Python test mode without Isaac imports.")
@@ -120,7 +120,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--execution-max-attempts",
         type=int,
         default=1,
-        help="Maximum attempts metadata. V2.9.3 supports 1 and does not auto-retry.",
+        help="Maximum attempts metadata. V2.9.4 supports 1 and does not auto-retry.",
     )
     parser.add_argument(
         "--execution-enable-retry-recommendation",
@@ -169,6 +169,26 @@ def build_parser() -> argparse.ArgumentParser:
         "--camera-snapshot-report",
         action="store_true",
         help="Generate camera snapshot evidence report from the supplied manifest.",
+    )
+    parser.add_argument(
+        "--check-vlm-grounding-adapter",
+        action="store_true",
+        help="Generate a no-motion VLM grounding result contract from mock/offline/manual/disabled declarations.",
+    )
+    parser.add_argument(
+        "--vlm-grounding-config",
+        help="Path to VLM grounding adapter YAML/JSON config.",
+    )
+    parser.add_argument(
+        "--vlm-grounding-report",
+        action="store_true",
+        help="Generate VLM grounding adapter evidence report.",
+    )
+    parser.add_argument("--user-command", help="Text command to ground against the declared snapshot.")
+    parser.add_argument(
+        "--allow-live-vlm",
+        action="store_true",
+        help="Declare live VLM allowance metadata only; V2.9.4 still never calls a live model.",
     )
     parser.add_argument(
         "--check-camera-source-adapter",
@@ -246,7 +266,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
     if args.execution_max_attempts != 1:
-        raise ValueError("--execution-max-attempts currently supports only 1 in TETO V2.9.3")
+        raise ValueError("--execution-max-attempts currently supports only 1 in TETO V2.9.4")
     simulation_task = _load_simulation_task(args.task_json)
     semantic_contract = None
     semantic_contract_path = None
@@ -309,6 +329,11 @@ def main() -> int:
         check_camera_snapshot=args.check_camera_snapshot,
         camera_snapshot_config=args.camera_snapshot_config,
         camera_snapshot_report=args.camera_snapshot_report,
+        check_vlm_grounding_adapter=args.check_vlm_grounding_adapter,
+        vlm_grounding_config=args.vlm_grounding_config,
+        vlm_grounding_report=args.vlm_grounding_report,
+        user_command=args.user_command,
+        allow_live_vlm=args.allow_live_vlm,
         check_geometry_validity=args.check_geometry_validity,
         geometry_validity_config=args.geometry_validity_config,
         geometry_validity_report=args.geometry_validity_report,
@@ -482,6 +507,23 @@ def print_summary(result: dict, report_path: Path) -> None:
     print(f"no_motion_snapshot_passed: {result.get('no_motion_snapshot_passed')}")
     print(f"live_capture_used: {result.get('live_capture_used')}")
     print(f"live_camera_enabled: {result.get('live_camera_enabled')}")
+    vlm_grounding = result.get("vlm_grounding") or {}
+    print(f"vlm_grounding_requested: {result.get('vlm_grounding_requested')}")
+    print(f"vlm_grounding_status: {result.get('vlm_grounding_status')}")
+    print(f"vlm_grounding_id: {result.get('vlm_grounding_id')}")
+    print(f"vlm_grounding_snapshot_id: {result.get('vlm_grounding_snapshot_id')}")
+    print(f"vlm_grounding_scene_version: {result.get('vlm_grounding_scene_version')}")
+    print(f"vlm_grounding_user_command: {result.get('vlm_grounding_user_command')}")
+    print(f"vlm_grounding_normalized_command: {result.get('vlm_grounding_normalized_command')}")
+    print(f"vlm_grounding_adapter_mode: {result.get('vlm_grounding_adapter_mode')}")
+    print(f"vlm_grounding_target_label: {result.get('vlm_grounding_target_label')}")
+    print(f"vlm_grounding_bbox_xyxy: {vlm_grounding.get('bbox_xyxy')}")
+    print(f"vlm_grounding_pixel_center: {vlm_grounding.get('pixel_center')}")
+    print(f"no_motion_grounding_passed: {result.get('no_motion_grounding_passed')}")
+    print(f"vlm_grounding_blocking_reasons: {result.get('vlm_grounding_blocking_reasons')}")
+    print(f"vlm_grounding_warnings: {result.get('vlm_grounding_warnings')}")
+    print(f"vlm_grounding_result_path: {result.get('vlm_grounding_result_path')}")
+    print(f"vlm_grounding_report_path: {result.get('vlm_grounding_report_path')}")
     print(f"geometry_validity_requested: {result.get('geometry_validity_requested')}")
     print(f"geometry_validity_snapshot_id: {result.get('geometry_validity_snapshot_id')}")
     print(f"geometry_validity_grounding_id: {result.get('geometry_validity_grounding_id')}")

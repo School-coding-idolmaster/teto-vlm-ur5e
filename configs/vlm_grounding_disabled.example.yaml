@@ -1,0 +1,8 @@
+vlm_grounding_adapter:
+  adapter_mode: local_vlm_disabled
+  snapshot_id: vlm_grounding_disabled_snapshot_001
+  scene_version: vlm_grounding_disabled_scene_v1
+  user_command: hover over the red mug
+  allow_live_vlm: false
+  live_vlm_called: false
+

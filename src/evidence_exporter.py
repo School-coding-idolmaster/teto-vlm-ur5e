@@ -17,6 +17,7 @@ from src.lab_readiness import format_lab_readiness_report
 from src.real_scene_shadow_pipeline import format_real_scene_shadow_report
 from src.semantic_simulation_bridge import format_semantic_simulation_bridge_report
 from src.simulated_task_execution import format_simulated_task_execution_report
+from src.vlm_grounding_adapter import format_vlm_grounding_report
 
 
 EVIDENCE_MANIFEST_SCHEMA_VERSION = "teto_evidence_manifest.v1"
@@ -64,6 +65,8 @@ def export_simulation_evidence(
     camera_source_report_path = output_dir / "camera_source_report.md"
     camera_snapshot_result_path = output_dir / "camera_snapshot_result.json"
     camera_snapshot_report_path = output_dir / "camera_snapshot_report.md"
+    vlm_grounding_result_path = output_dir / "vlm_grounding_result.json"
+    vlm_grounding_report_path = output_dir / "vlm_grounding_report.md"
     geometry_validity_result_path = output_dir / "geometry_validity_result.json"
     geometry_validity_report_path = output_dir / "geometry_validity_report.md"
     projector_shadow_result_path = output_dir / "projector_shadow_result.json"
@@ -83,6 +86,7 @@ def export_simulation_evidence(
     lab_readiness_info = _lab_readiness_info(result)
     camera_source_info = _camera_source_info(result)
     camera_snapshot_info = _camera_snapshot_info(result)
+    vlm_grounding_info = _vlm_grounding_info(result)
     geometry_validity_info = _geometry_validity_info(result)
     projector_shadow_info = _projector_shadow_info(result)
     real_scene_shadow_info = _real_scene_shadow_info(result)
@@ -98,6 +102,7 @@ def export_simulation_evidence(
     lab_readiness_requested = bool(lab_readiness_info.get("requested"))
     camera_source_requested = bool(camera_source_info.get("requested"))
     camera_snapshot_requested = bool(camera_snapshot_info.get("requested"))
+    vlm_grounding_requested = bool(vlm_grounding_info.get("requested"))
     geometry_validity_requested = bool(geometry_validity_info.get("requested"))
     projector_shadow_requested = bool(projector_shadow_info.get("requested"))
     real_scene_shadow_requested = bool(real_scene_shadow_info.get("requested"))
@@ -121,6 +126,7 @@ def export_simulation_evidence(
             lab_readiness_info=lab_readiness_info,
             camera_source_info=camera_source_info,
             camera_snapshot_info=camera_snapshot_info,
+            vlm_grounding_info=vlm_grounding_info,
             geometry_validity_info=geometry_validity_info,
             projector_shadow_info=projector_shadow_info,
             real_scene_shadow_info=real_scene_shadow_info,
@@ -280,6 +286,15 @@ def export_simulation_evidence(
         _write_json_artifact(camera_snapshot_result_path, camera_snapshot_info)
         camera_snapshot_report_path.write_text(
             format_camera_snapshot_report(camera_snapshot_info),
+            encoding="utf-8",
+        )
+    if vlm_grounding_requested:
+        vlm_grounding_info["vlm_grounding_result_path"] = str(vlm_grounding_result_path)
+        vlm_grounding_info["vlm_grounding_report_path"] = str(vlm_grounding_report_path)
+        vlm_grounding_info["vlm_grounding_evidence_files"] = _vlm_grounding_evidence_files(vlm_grounding_info)
+        _write_json_artifact(vlm_grounding_result_path, vlm_grounding_info)
+        vlm_grounding_report_path.write_text(
+            format_vlm_grounding_report(vlm_grounding_info),
             encoding="utf-8",
         )
     if geometry_validity_requested:
@@ -470,6 +485,7 @@ def export_simulation_evidence(
         "live_vlm_called": (
             camera_snapshot_info.get("live_vlm_called", False)
             or camera_source_info.get("live_vlm_called", False)
+            or vlm_grounding_info.get("live_vlm_called", False)
             or lab_readiness_info.get("live_vlm_called", False)
         ),
         "real_robot_motion_executed": (
@@ -525,12 +541,53 @@ def export_simulation_evidence(
         "camera_source_report_path": str(camera_source_report_path) if camera_source_requested else None,
         "camera_snapshot_result_path": str(camera_snapshot_result_path) if camera_snapshot_requested else None,
         "camera_snapshot_report_path": str(camera_snapshot_report_path) if camera_snapshot_requested else None,
+        "vlm_grounding_evidence_available": vlm_grounding_requested,
+        "vlm_grounding_status": vlm_grounding_info.get("vlm_grounding_status"),
+        "vlm_grounding_requested": vlm_grounding_requested,
+        "grounding_id": vlm_grounding_info.get("grounding_id")
+        or geometry_validity_info.get("grounding_id")
+        or real_scene_shadow_info.get("grounding_id"),
+        "snapshot_id": vlm_grounding_info.get("snapshot_id")
+        or geometry_validity_info.get("snapshot_id")
+        or real_scene_shadow_info.get("snapshot_id")
+        or camera_source_info.get("snapshot_id"),
+        "scene_version": vlm_grounding_info.get("scene_version")
+        or geometry_validity_info.get("scene_version")
+        or real_scene_shadow_info.get("scene_version")
+        or camera_snapshot_info.get("scene_version")
+        or camera_source_info.get("scene_version")
+        or result.get("scene_version"),
+        "user_command": vlm_grounding_info.get("user_command"),
+        "normalized_command": vlm_grounding_info.get("normalized_command"),
+        "adapter_mode": vlm_grounding_info.get("adapter_mode"),
+        "target_label": vlm_grounding_info.get("target_label"),
+        "target_object_id": vlm_grounding_info.get("target_object_id"),
+        "bbox_xyxy": vlm_grounding_info.get("bbox_xyxy"),
+        "pixel_center": vlm_grounding_info.get("pixel_center"),
+        "mask_ref": vlm_grounding_info.get("mask_ref"),
+        "semantic_confidence": vlm_grounding_info.get("semantic_confidence"),
+        "grounding_confidence": vlm_grounding_info.get("grounding_confidence"),
+        "overall_confidence": vlm_grounding_info.get("overall_confidence"),
+        "grounded": vlm_grounding_info.get("grounded"),
+        "rejected": vlm_grounding_info.get("rejected"),
+        "rejection_reason": vlm_grounding_info.get("rejection_reason"),
+        "error_code": vlm_grounding_info.get("error_code"),
+        "no_motion_grounding_passed": vlm_grounding_info.get("no_motion_grounding_passed", False),
+        "vlm_grounding_blocking_reasons": vlm_grounding_info.get("blocking_reasons", []),
+        "vlm_grounding_warnings": vlm_grounding_info.get("warnings", []),
+        "vlm_grounding_next_safe_action": vlm_grounding_info.get("next_safe_action"),
+        "vlm_grounding_evidence_files": (
+            _vlm_grounding_evidence_files(vlm_grounding_info) if vlm_grounding_requested else []
+        ),
+        "vlm_grounding_result_path": str(vlm_grounding_result_path) if vlm_grounding_requested else None,
+        "vlm_grounding_report_path": str(vlm_grounding_report_path) if vlm_grounding_requested else None,
         "geometry_validity_evidence_available": geometry_validity_requested,
         "geometry_validity_status": geometry_validity_info.get("geometry_validity_status"),
         "geometry_validity_requested": geometry_validity_requested,
-        "snapshot_id": geometry_validity_info.get("snapshot_id") or real_scene_shadow_info.get("snapshot_id") or camera_source_info.get("snapshot_id"),
-        "grounding_id": geometry_validity_info.get("grounding_id") or real_scene_shadow_info.get("grounding_id"),
+        "snapshot_id": geometry_validity_info.get("snapshot_id") or vlm_grounding_info.get("snapshot_id") or real_scene_shadow_info.get("snapshot_id") or camera_source_info.get("snapshot_id"),
+        "grounding_id": geometry_validity_info.get("grounding_id") or vlm_grounding_info.get("grounding_id") or real_scene_shadow_info.get("grounding_id"),
         "scene_version": geometry_validity_info.get("scene_version")
+        or vlm_grounding_info.get("scene_version")
         or real_scene_shadow_info.get("scene_version")
         or camera_snapshot_info.get("scene_version")
         or camera_source_info.get("scene_version")
@@ -564,18 +621,21 @@ def export_simulation_evidence(
         "projector_status": projector_shadow_info.get("projector_status"),
         "snapshot_id": projector_shadow_info.get("snapshot_id")
         or geometry_validity_info.get("snapshot_id")
+        or vlm_grounding_info.get("snapshot_id")
         or real_scene_shadow_info.get("snapshot_id")
         or camera_source_info.get("snapshot_id"),
         "grounding_id": projector_shadow_info.get("grounding_id")
         or geometry_validity_info.get("grounding_id")
+        or vlm_grounding_info.get("grounding_id")
         or real_scene_shadow_info.get("grounding_id"),
         "scene_version": projector_shadow_info.get("scene_version")
         or geometry_validity_info.get("scene_version")
+        or vlm_grounding_info.get("scene_version")
         or real_scene_shadow_info.get("scene_version")
         or camera_snapshot_info.get("scene_version")
         or camera_source_info.get("scene_version")
         or result.get("scene_version"),
-        "pixel_center": projector_shadow_info.get("pixel_center"),
+        "pixel_center": projector_shadow_info.get("pixel_center") or vlm_grounding_info.get("pixel_center"),
         "depth_value_m": projector_shadow_info.get("depth_value_m"),
         "depth_valid": projector_shadow_info.get("depth_valid"),
         "camera_intrinsics_available": projector_shadow_info.get("camera_intrinsics_available"),
@@ -624,6 +684,8 @@ def export_simulation_evidence(
             if projector_shadow_requested
             else geometry_validity_info.get("blocking_reasons")
             if geometry_validity_requested
+            else vlm_grounding_info.get("blocking_reasons")
+            if vlm_grounding_requested
             else real_scene_shadow_info.get("blocking_reasons")
             if real_scene_shadow_requested
             else camera_source_info.get("blocking_reasons")
@@ -635,6 +697,8 @@ def export_simulation_evidence(
             if projector_shadow_requested
             else geometry_validity_info.get("warnings", [])
             if geometry_validity_requested
+            else vlm_grounding_info.get("warnings", [])
+            if vlm_grounding_requested
             else real_scene_shadow_info.get("warnings", [])
             if real_scene_shadow_requested
             else camera_source_info.get("warnings", [])
@@ -646,6 +710,8 @@ def export_simulation_evidence(
             if projector_shadow_requested
             else geometry_validity_info.get("next_safe_action")
             if geometry_validity_requested
+            else vlm_grounding_info.get("next_safe_action")
+            if vlm_grounding_requested
             else real_scene_shadow_info.get("next_safe_action")
             if real_scene_shadow_requested
             else camera_source_info.get("next_safe_action")
@@ -663,21 +729,25 @@ def export_simulation_evidence(
         ),
         "robot_command_generated": (
             projector_shadow_info.get("robot_command_generated", False)
+            or vlm_grounding_info.get("robot_command_generated", False)
             or camera_source_info.get("robot_command_generated", False)
             or real_scene_shadow_info.get("robot_command_generated", False)
         ),
         "trajectory_generated": (
             projector_shadow_info.get("trajectory_generated", False)
+            or vlm_grounding_info.get("trajectory_generated", False)
             or camera_source_info.get("trajectory_generated", False)
             or real_scene_shadow_info.get("trajectory_generated", False)
         ),
         "joint_targets_generated": (
             projector_shadow_info.get("joint_targets_generated", False)
+            or vlm_grounding_info.get("joint_targets_generated", False)
             or camera_source_info.get("joint_targets_generated", False)
             or real_scene_shadow_info.get("joint_targets_generated", False)
         ),
         "tcp_pose_world_generated": (
             projector_shadow_info.get("tcp_pose_world_generated", False)
+            or vlm_grounding_info.get("tcp_pose_world_generated", False)
             or camera_source_info.get("tcp_pose_world_generated", False)
             or real_scene_shadow_info.get("tcp_pose_world_generated", False)
         ),
@@ -728,6 +798,8 @@ def export_simulation_evidence(
         "camera_source_report_path": camera_source_report_path,
         "camera_snapshot_result_path": camera_snapshot_result_path,
         "camera_snapshot_report_path": camera_snapshot_report_path,
+        "vlm_grounding_result_path": vlm_grounding_result_path,
+        "vlm_grounding_report_path": vlm_grounding_report_path,
         "geometry_validity_result_path": geometry_validity_result_path,
         "geometry_validity_report_path": geometry_validity_report_path,
         "projector_shadow_result_path": projector_shadow_result_path,
@@ -1284,6 +1356,68 @@ def _camera_snapshot_evidence_files(camera_snapshot_info: Dict[str, Any]) -> lis
     ]
 
 
+def _vlm_grounding_info(result: Dict[str, Any]) -> Dict[str, Any]:
+    grounding = result.get("vlm_grounding") if isinstance(result.get("vlm_grounding"), dict) else {}
+    return {
+        **grounding,
+        "requested": result.get("vlm_grounding_requested", grounding.get("requested", False)) is True,
+        "vlm_grounding_requested": result.get(
+            "vlm_grounding_requested",
+            grounding.get("vlm_grounding_requested", False),
+        )
+        is True,
+        "vlm_grounding_status": result.get(
+            "vlm_grounding_status",
+            grounding.get("vlm_grounding_status", "NOT_REQUESTED"),
+        ),
+        "grounding_id": result.get("vlm_grounding_id", grounding.get("grounding_id")),
+        "snapshot_id": result.get("vlm_grounding_snapshot_id", grounding.get("snapshot_id")),
+        "scene_version": result.get("vlm_grounding_scene_version", grounding.get("scene_version")),
+        "user_command": result.get("vlm_grounding_user_command", grounding.get("user_command")),
+        "normalized_command": result.get(
+            "vlm_grounding_normalized_command",
+            grounding.get("normalized_command"),
+        ),
+        "adapter_mode": result.get("vlm_grounding_adapter_mode", grounding.get("adapter_mode")),
+        "target_label": result.get("vlm_grounding_target_label", grounding.get("target_label")),
+        "blocking_reasons": result.get(
+            "vlm_grounding_blocking_reasons",
+            grounding.get("blocking_reasons", []),
+        ),
+        "warnings": result.get("vlm_grounding_warnings", grounding.get("warnings", [])),
+        "next_safe_action": result.get(
+            "vlm_grounding_next_safe_action",
+            grounding.get("next_safe_action"),
+        ),
+        "no_motion_grounding_passed": result.get(
+            "no_motion_grounding_passed",
+            grounding.get("no_motion_grounding_passed", False),
+        )
+        is True,
+        "live_camera_used": grounding.get("live_camera_used", False) is True,
+        "live_vlm_called": grounding.get("live_vlm_called", False) is True,
+        "real_robot_motion_executed": grounding.get("real_robot_motion_executed", False) is True,
+        "real_robot_command_enabled": grounding.get("real_robot_command_enabled", False) is True,
+        "robot_command_generated": grounding.get("robot_command_generated", False) is True,
+        "trajectory_generated": grounding.get("trajectory_generated", False) is True,
+        "joint_targets_generated": grounding.get("joint_targets_generated", False) is True,
+        "tcp_pose_world_generated": grounding.get("tcp_pose_world_generated", False) is True,
+    }
+
+
+def _vlm_grounding_evidence_files(vlm_grounding_info: Dict[str, Any]) -> list[Dict[str, str | None]]:
+    return [
+        {
+            "name": "vlm_grounding_result.json",
+            "path": vlm_grounding_info.get("vlm_grounding_result_path"),
+        },
+        {
+            "name": "vlm_grounding_report.md",
+            "path": vlm_grounding_info.get("vlm_grounding_report_path"),
+        },
+    ]
+
+
 def _geometry_validity_info(result: Dict[str, Any]) -> Dict[str, Any]:
     geometry = result.get("geometry_validity") if isinstance(result.get("geometry_validity"), dict) else {}
     return {
@@ -1544,6 +1678,7 @@ def _build_summary_markdown(
     lab_readiness_info: Dict[str, Any],
     camera_source_info: Dict[str, Any],
     camera_snapshot_info: Dict[str, Any],
+    vlm_grounding_info: Dict[str, Any],
     geometry_validity_info: Dict[str, Any],
     projector_shadow_info: Dict[str, Any],
     real_scene_shadow_info: Dict[str, Any],
@@ -1726,6 +1861,41 @@ def _build_summary_markdown(
             f"- real_robot_motion_executed: {_format_value(camera_snapshot_info.get('real_robot_motion_executed'))}",
             f"- real_robot_command_enabled: {_format_value(camera_snapshot_info.get('real_robot_command_enabled'))}",
             "This V2.8.2 camera snapshot evidence validates a declared offline/manual snapshot manifest only. It does not capture a live camera frame, call live Qwen/VLM, connect to a real UR5, generate trajectory, execute tcp_pose_world, or produce robot control fields.",
+            "",
+            "## VLM Grounding Evidence Summary",
+            "",
+            f"- vlm_grounding_evidence_available: {_format_value(vlm_grounding_info.get('requested'))}",
+            f"- vlm_grounding_status: {_format_value(vlm_grounding_info.get('vlm_grounding_status'))}",
+            f"- grounding_id: {_format_value(vlm_grounding_info.get('grounding_id'))}",
+            f"- snapshot_id: {_format_value(vlm_grounding_info.get('snapshot_id'))}",
+            f"- scene_version: {_format_value(vlm_grounding_info.get('scene_version'))}",
+            f"- user_command: {_format_value(vlm_grounding_info.get('user_command'))}",
+            f"- normalized_command: {_format_value(vlm_grounding_info.get('normalized_command'))}",
+            f"- adapter_mode: {_format_value(vlm_grounding_info.get('adapter_mode'))}",
+            f"- target_label: {_format_value(vlm_grounding_info.get('target_label'))}",
+            f"- target_object_id: {_format_value(vlm_grounding_info.get('target_object_id'))}",
+            f"- bbox_xyxy: {_format_value(vlm_grounding_info.get('bbox_xyxy'))}",
+            f"- pixel_center: {_format_value(vlm_grounding_info.get('pixel_center'))}",
+            f"- semantic_confidence: {_format_value(vlm_grounding_info.get('semantic_confidence'))}",
+            f"- grounding_confidence: {_format_value(vlm_grounding_info.get('grounding_confidence'))}",
+            f"- overall_confidence: {_format_value(vlm_grounding_info.get('overall_confidence'))}",
+            f"- grounded: {_format_value(vlm_grounding_info.get('grounded'))}",
+            f"- rejected: {_format_value(vlm_grounding_info.get('rejected'))}",
+            f"- rejection_reason: {_format_value(vlm_grounding_info.get('rejection_reason'))}",
+            f"- error_code: {_format_value(vlm_grounding_info.get('error_code'))}",
+            f"- no_motion_grounding_passed: {_format_value(vlm_grounding_info.get('no_motion_grounding_passed'))}",
+            f"- blocking_reasons: {_format_value(vlm_grounding_info.get('blocking_reasons'))}",
+            f"- warnings: {_format_value(vlm_grounding_info.get('warnings'))}",
+            f"- next_safe_action: {_format_value(vlm_grounding_info.get('next_safe_action'))}",
+            f"- live_camera_used: {_format_value(vlm_grounding_info.get('live_camera_used'))}",
+            f"- live_vlm_called: {_format_value(vlm_grounding_info.get('live_vlm_called'))}",
+            f"- real_robot_motion_executed: {_format_value(vlm_grounding_info.get('real_robot_motion_executed'))}",
+            f"- real_robot_command_enabled: {_format_value(vlm_grounding_info.get('real_robot_command_enabled'))}",
+            f"- robot_command_generated: {_format_value(vlm_grounding_info.get('robot_command_generated'))}",
+            f"- trajectory_generated: {_format_value(vlm_grounding_info.get('trajectory_generated'))}",
+            f"- joint_targets_generated: {_format_value(vlm_grounding_info.get('joint_targets_generated'))}",
+            f"- tcp_pose_world_generated: {_format_value(vlm_grounding_info.get('tcp_pose_world_generated'))}",
+            "This V2.9.4 VLM grounding adapter converts text command plus declared camera snapshot metadata into offline/mock/manual grounding result evidence. It is not live camera, not real VLM execution, not ROS2 bridge, not MoveIt planning, not real UR5 execution, and it does not generate trajectory, tcp_pose_world, URScript, joint targets, or robot commands.",
             "",
             "## Geometry Validity Evidence Summary",
             "",

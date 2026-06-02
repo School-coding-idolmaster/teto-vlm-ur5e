@@ -1,0 +1,21 @@
+{
+  "grounding_id": "offline_grounding_no_target_001",
+  "snapshot_id": "vlm_grounding_fixture_snapshot_001",
+  "scene_version": "vlm_grounding_fixture_scene_v1",
+  "user_command": "hover over the blue bowl",
+  "target_label": null,
+  "target_object_id": null,
+  "bbox_xyxy": null,
+  "pixel_center": null,
+  "mask_ref": null,
+  "semantic_confidence": 0.0,
+  "grounding_confidence": 0.0,
+  "overall_confidence": 0.0,
+  "grounded": false,
+  "rejected": true,
+  "rejection_reason": "E_NO_TARGET",
+  "error_code": "E_NO_TARGET",
+  "live_vlm_called": false,
+  "live_camera_used": false
+}
+

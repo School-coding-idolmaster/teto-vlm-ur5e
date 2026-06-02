@@ -1,0 +1,19 @@
+{
+  "grounding_id": "offline_grounding_low_confidence_001",
+  "snapshot_id": "vlm_grounding_fixture_snapshot_001",
+  "scene_version": "vlm_grounding_fixture_scene_v1",
+  "user_command": "hover over the red mug",
+  "target_label": "red_mug",
+  "target_object_id": "offline_red_mug_uncertain_001",
+  "bbox_xyxy": [120, 80, 260, 220],
+  "pixel_center": [190, 150],
+  "mask_ref": null,
+  "semantic_confidence": 0.45,
+  "grounding_confidence": 0.4,
+  "overall_confidence": 0.42,
+  "grounded": true,
+  "rejected": false,
+  "live_vlm_called": false,
+  "live_camera_used": false
+}
+
