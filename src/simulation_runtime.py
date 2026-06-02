@@ -13,6 +13,7 @@ from src.camera_snapshot import build_camera_snapshot_request, evaluate_camera_s
 from src.evidence_exporter import export_simulation_evidence
 from src.geometry_validity import build_geometry_validity_request, evaluate_geometry_validity
 from src.lab_readiness import build_lab_readiness_request, evaluate_lab_readiness
+from src.projector_shadow import build_projector_shadow_request, evaluate_projector_shadow
 from src.real_scene_shadow_pipeline import (
     build_real_scene_shadow_request,
     evaluate_real_scene_shadow_pipeline,
@@ -52,7 +53,7 @@ from src.simulated_task_execution import (
 
 
 REPORT_VERSION = "teto_simulation_execution.v1"
-CURRENT_TETO_VERSION = "TETO V2.9.1"
+CURRENT_TETO_VERSION = "TETO V2.9.2"
 DEFAULT_STEPS = 5
 DEFAULT_SIMULATION_OBJECT_TYPE = "cube"
 DEFAULT_CUBE_PRIM_PATH = "/World/TETO_Cube"
@@ -116,6 +117,7 @@ def build_simulation_execution_result(
     lab_readiness_metadata: Dict[str, Any] | None = None,
     camera_snapshot_metadata: Dict[str, Any] | None = None,
     geometry_validity_metadata: Dict[str, Any] | None = None,
+    projector_shadow_metadata: Dict[str, Any] | None = None,
     real_scene_shadow_metadata: Dict[str, Any] | None = None,
     started_at: str | None = None,
     finished_at: str | None = None,
@@ -158,6 +160,7 @@ def build_simulation_execution_result(
     result.update(lab_readiness_metadata or _lab_readiness_report_fields())
     result.update(camera_snapshot_metadata or _camera_snapshot_report_fields())
     result.update(geometry_validity_metadata or _geometry_validity_report_fields())
+    result.update(projector_shadow_metadata or _projector_shadow_report_fields())
     result.update(real_scene_shadow_metadata or _real_scene_shadow_report_fields())
     if (
         result.get("semantic_simulation_bridge_requested") is True
@@ -246,6 +249,9 @@ def run_first_simulation_execution(
     check_geometry_validity: bool = False,
     geometry_validity_config: str | Path | None = None,
     geometry_validity_report: bool = False,
+    check_projector_shadow: bool = False,
+    projector_shadow_config: str | Path | None = None,
+    projector_shadow_report: bool = False,
     run_real_scene_shadow: bool = False,
     real_scene_shadow_config: str | Path | None = None,
     grounding_result: str | Path | None = None,
@@ -257,6 +263,7 @@ def run_first_simulation_execution(
     task = simulation_task or dict(DEFAULT_SIMULATION_TASK)
     started_at = _timestamp()
     camera_snapshot_requested = check_camera_snapshot or camera_snapshot_report
+    projector_shadow_requested = check_projector_shadow or projector_shadow_report
     geometry_validity_requested = check_geometry_validity or geometry_validity_report
     real_scene_shadow_requested = run_real_scene_shadow or real_scene_shadow_report
     lab_readiness_requested = (
@@ -269,6 +276,7 @@ def run_first_simulation_execution(
         lab_readiness_requested
         or camera_snapshot_requested
         or geometry_validity_requested
+        or projector_shadow_requested
         or real_scene_shadow_requested
     ) and not dry_run:
         no_isaac = True
@@ -291,15 +299,26 @@ def run_first_simulation_execution(
         requested=camera_snapshot_requested,
         snapshot=evaluate_camera_snapshot_contract(camera_snapshot_request),
     )
-    geometry_validity_request = build_geometry_validity_request(
-        requested=geometry_validity_requested,
-        config_path=geometry_validity_config,
+    projector_shadow_request = build_projector_shadow_request(
+        requested=projector_shadow_requested,
+        config_path=projector_shadow_config,
         camera_snapshot_config=camera_snapshot_config,
         grounding_result_path=grounding_result,
+        geometry_validity_config=geometry_validity_config,
+    )
+    geometry_validity_request = build_geometry_validity_request(
+        requested=geometry_validity_requested,
+        config_path=geometry_validity_config or projector_shadow_request.geometry_validity_config,
+        camera_snapshot_config=camera_snapshot_config or projector_shadow_request.camera_snapshot_config,
+        grounding_result_path=grounding_result or projector_shadow_request.grounding_result_path,
     )
     geometry_validity_metadata = _geometry_validity_report_fields(
         requested=geometry_validity_requested,
         geometry=evaluate_geometry_validity(geometry_validity_request),
+    )
+    projector_shadow_metadata = _projector_shadow_report_fields(
+        requested=projector_shadow_requested,
+        projector=evaluate_projector_shadow(projector_shadow_request),
     )
     real_scene_shadow_request = build_real_scene_shadow_request(
         requested=real_scene_shadow_requested,
@@ -426,6 +445,7 @@ def run_first_simulation_execution(
                 lab_readiness_metadata=lab_readiness_metadata,
                 camera_snapshot_metadata=camera_snapshot_metadata,
                 geometry_validity_metadata=geometry_validity_metadata,
+                projector_shadow_metadata=projector_shadow_metadata,
                 real_scene_shadow_metadata=real_scene_shadow_metadata,
                 error_code="E_INVALID_STEPS",
                 error_message="steps must be a positive integer",
@@ -476,6 +496,7 @@ def run_first_simulation_execution(
                 lab_readiness_metadata=lab_readiness_metadata,
                 camera_snapshot_metadata=camera_snapshot_metadata,
                 geometry_validity_metadata=geometry_validity_metadata,
+                projector_shadow_metadata=projector_shadow_metadata,
                 real_scene_shadow_metadata=real_scene_shadow_metadata,
                 error_code="E_INVALID_SIMULATION_TASK",
                 error_message=f"missing simulation task fields: {', '.join(missing_fields)}",
@@ -565,6 +586,7 @@ def run_first_simulation_execution(
                     lab_readiness_metadata=lab_readiness_metadata,
                     camera_snapshot_metadata=camera_snapshot_metadata,
                     geometry_validity_metadata=geometry_validity_metadata,
+                    projector_shadow_metadata=projector_shadow_metadata,
                     real_scene_shadow_metadata=real_scene_shadow_metadata,
                     error_code="E_ROBOT_ASSET_LOAD_FAILED",
                     error_message="robot asset path is unavailable",
@@ -601,6 +623,7 @@ def run_first_simulation_execution(
                 lab_readiness_metadata=lab_readiness_metadata,
                 camera_snapshot_metadata=camera_snapshot_metadata,
                 geometry_validity_metadata=geometry_validity_metadata,
+                projector_shadow_metadata=projector_shadow_metadata,
                 real_scene_shadow_metadata=real_scene_shadow_metadata,
                 started_at=started_at,
                 finished_at=_timestamp(),
@@ -1572,6 +1595,45 @@ def _geometry_validity_report_fields(
         "geometry_validity_warnings": list(geometry.get("warnings") or []),
         "geometry_validity_next_safe_action": geometry.get("next_safe_action"),
         "no_motion_geometry_passed": geometry.get("no_motion_geometry_passed", False) is True,
+    }
+
+
+def _projector_shadow_report_fields(
+    *,
+    requested: bool = False,
+    projector: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    projector = projector if isinstance(projector, dict) else {}
+    return {
+        "projector_shadow_requested": requested,
+        "projector_shadow": projector
+        or {
+            "requested": False,
+            "projector_requested": False,
+            "projector_status": "NOT_REQUESTED",
+            "blocking_reasons": [],
+            "warnings": [],
+            "no_motion_projector_passed": False,
+            "real_tf_used": False,
+            "ros2_tf_used": False,
+            "live_camera_used": False,
+            "live_vlm_called": False,
+            "real_robot_motion_executed": False,
+            "real_robot_command_enabled": False,
+            "robot_command_generated": False,
+            "trajectory_generated": False,
+            "joint_targets_generated": False,
+            "tcp_pose_world_generated": False,
+        },
+        "projector_requested": projector.get("projector_requested", False) is True,
+        "projector_status": projector.get("projector_status", "NOT_REQUESTED"),
+        "projector_snapshot_id": projector.get("snapshot_id"),
+        "projector_grounding_id": projector.get("grounding_id"),
+        "projector_scene_version": projector.get("scene_version"),
+        "projector_blocking_reasons": list(projector.get("blocking_reasons") or []),
+        "projector_warnings": list(projector.get("warnings") or []),
+        "projector_next_safe_action": projector.get("next_safe_action"),
+        "no_motion_projector_passed": projector.get("no_motion_projector_passed", False) is True,
     }
 
 

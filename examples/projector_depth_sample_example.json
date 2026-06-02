@@ -1,0 +1,9 @@
+{
+  "depth_sample": {
+    "snapshot_id": "example_offline_snapshot_001",
+    "grounding_id": "example_grounding_001",
+    "pixel_center": [190, 175],
+    "depth_value_m": 0.8,
+    "source": "offline_placeholder_depth_sample"
+  }
+}

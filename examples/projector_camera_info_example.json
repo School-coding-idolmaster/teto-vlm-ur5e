@@ -1,0 +1,14 @@
+{
+  "camera_info": {
+    "camera_model": "pinhole",
+    "image_width": 640,
+    "image_height": 480,
+    "intrinsics": {
+      "fx": 600.0,
+      "fy": 600.0,
+      "cx": 320.0,
+      "cy": 240.0
+    },
+    "source": "offline_placeholder"
+  }
+}

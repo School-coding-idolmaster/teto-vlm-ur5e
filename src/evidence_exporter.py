@@ -6,6 +6,7 @@ from typing import Any, Dict
 
 from src.camera_snapshot import format_camera_snapshot_report
 from src.geometry_validity import format_geometry_validity_report
+from src.projector_shadow import format_projector_shadow_report
 from src.simulation_micro_motion import (
     normalize_motion_evidence_paths,
     summarize_motion_evidence,
@@ -62,6 +63,8 @@ def export_simulation_evidence(
     camera_snapshot_report_path = output_dir / "camera_snapshot_report.md"
     geometry_validity_result_path = output_dir / "geometry_validity_result.json"
     geometry_validity_report_path = output_dir / "geometry_validity_report.md"
+    projector_shadow_result_path = output_dir / "projector_shadow_result.json"
+    projector_shadow_report_path = output_dir / "projector_shadow_report.md"
     real_scene_shadow_result_path = output_dir / "real_scene_shadow_result.json"
     real_scene_shadow_report_path = output_dir / "real_scene_shadow_report.md"
 
@@ -77,6 +80,7 @@ def export_simulation_evidence(
     lab_readiness_info = _lab_readiness_info(result)
     camera_snapshot_info = _camera_snapshot_info(result)
     geometry_validity_info = _geometry_validity_info(result)
+    projector_shadow_info = _projector_shadow_info(result)
     real_scene_shadow_info = _real_scene_shadow_info(result)
     structure_report_requested = bool(robot_prim_inspection_info.get("requested"))
     readiness_requested = bool(articulation_readiness_info.get("requested"))
@@ -90,6 +94,7 @@ def export_simulation_evidence(
     lab_readiness_requested = bool(lab_readiness_info.get("requested"))
     camera_snapshot_requested = bool(camera_snapshot_info.get("requested"))
     geometry_validity_requested = bool(geometry_validity_info.get("requested"))
+    projector_shadow_requested = bool(projector_shadow_info.get("requested"))
     real_scene_shadow_requested = bool(real_scene_shadow_info.get("requested"))
     run_id = output_dir.name
     created_at = result.get("finished_at") or result.get("started_at")
@@ -111,6 +116,7 @@ def export_simulation_evidence(
             lab_readiness_info=lab_readiness_info,
             camera_snapshot_info=camera_snapshot_info,
             geometry_validity_info=geometry_validity_info,
+            projector_shadow_info=projector_shadow_info,
             real_scene_shadow_info=real_scene_shadow_info,
             robot_structure_report_path=structure_report_ref,
             run_id=run_id,
@@ -270,6 +276,17 @@ def export_simulation_evidence(
         _write_json_artifact(geometry_validity_result_path, geometry_validity_info)
         geometry_validity_report_path.write_text(
             format_geometry_validity_report(geometry_validity_info),
+            encoding="utf-8",
+        )
+    if projector_shadow_requested:
+        projector_shadow_info["projector_shadow_result_path"] = str(projector_shadow_result_path)
+        projector_shadow_info["projector_shadow_report_path"] = str(projector_shadow_report_path)
+        projector_shadow_info["projector_shadow_evidence_files"] = _projector_shadow_evidence_files(
+            projector_shadow_info
+        )
+        _write_json_artifact(projector_shadow_result_path, projector_shadow_info)
+        projector_shadow_report_path.write_text(
+            format_projector_shadow_report(projector_shadow_info),
             encoding="utf-8",
         )
     if real_scene_shadow_requested:
@@ -492,6 +509,48 @@ def export_simulation_evidence(
         "geometry_validity_report_path": str(geometry_validity_report_path)
         if geometry_validity_requested
         else None,
+        "projector_shadow_evidence_available": projector_shadow_requested,
+        "projector_requested": projector_shadow_info.get("projector_requested", False),
+        "projector_status": projector_shadow_info.get("projector_status"),
+        "snapshot_id": projector_shadow_info.get("snapshot_id")
+        or geometry_validity_info.get("snapshot_id")
+        or real_scene_shadow_info.get("snapshot_id"),
+        "grounding_id": projector_shadow_info.get("grounding_id")
+        or geometry_validity_info.get("grounding_id")
+        or real_scene_shadow_info.get("grounding_id"),
+        "scene_version": projector_shadow_info.get("scene_version")
+        or geometry_validity_info.get("scene_version")
+        or real_scene_shadow_info.get("scene_version")
+        or camera_snapshot_info.get("scene_version")
+        or result.get("scene_version"),
+        "pixel_center": projector_shadow_info.get("pixel_center"),
+        "depth_value_m": projector_shadow_info.get("depth_value_m"),
+        "depth_valid": projector_shadow_info.get("depth_valid"),
+        "camera_intrinsics_available": projector_shadow_info.get("camera_intrinsics_available"),
+        "camera_frame": projector_shadow_info.get("camera_frame"),
+        "world_frame": projector_shadow_info.get("world_frame"),
+        "camera_point_m": projector_shadow_info.get("camera_point_m"),
+        "world_point_m": projector_shadow_info.get("world_point_m"),
+        "projection_confidence": projector_shadow_info.get("projection_confidence"),
+        "projection_method": projector_shadow_info.get("projection_method"),
+        "tf_available": projector_shadow_info.get("tf_available"),
+        "tf_source": projector_shadow_info.get("tf_source"),
+        "real_tf_used": projector_shadow_info.get("real_tf_used", False),
+        "ros2_tf_used": projector_shadow_info.get("ros2_tf_used", False),
+        "workspace_check_passed": projector_shadow_info.get("workspace_check_passed"),
+        "projector_blocking_reasons": projector_shadow_info.get("blocking_reasons", []),
+        "projector_warnings": projector_shadow_info.get("warnings", []),
+        "projector_next_safe_action": projector_shadow_info.get("next_safe_action"),
+        "no_motion_projector_passed": projector_shadow_info.get("no_motion_projector_passed", False),
+        "projector_shadow_evidence_files": (
+            _projector_shadow_evidence_files(projector_shadow_info) if projector_shadow_requested else []
+        ),
+        "projector_shadow_result_path": str(projector_shadow_result_path)
+        if projector_shadow_requested
+        else None,
+        "projector_shadow_report_path": str(projector_shadow_report_path)
+        if projector_shadow_requested
+        else None,
         "real_scene_shadow_evidence_available": real_scene_shadow_requested,
         "shadow_pipeline_status": real_scene_shadow_info.get("shadow_pipeline_status"),
         "semantic_gate_passed": (
@@ -509,21 +568,27 @@ def export_simulation_evidence(
         "real_scene_shadow_next_safe_action": real_scene_shadow_info.get("next_safe_action"),
         "real_scene_shadow_replay_ready": real_scene_shadow_info.get("replay_ready", False),
         "blocking_reasons": (
-            geometry_validity_info.get("blocking_reasons")
+            projector_shadow_info.get("blocking_reasons")
+            if projector_shadow_requested
+            else geometry_validity_info.get("blocking_reasons")
             if geometry_validity_requested
             else real_scene_shadow_info.get("blocking_reasons")
             if real_scene_shadow_requested
             else list(lab_readiness_info.get("blocking_reasons") or result.get("blocking_reasons") or [])
         ),
         "warnings": (
-            geometry_validity_info.get("warnings", [])
+            projector_shadow_info.get("warnings", [])
+            if projector_shadow_requested
+            else geometry_validity_info.get("warnings", [])
             if geometry_validity_requested
             else real_scene_shadow_info.get("warnings", [])
             if real_scene_shadow_requested
             else []
         ),
         "next_safe_action": (
-            geometry_validity_info.get("next_safe_action")
+            projector_shadow_info.get("next_safe_action")
+            if projector_shadow_requested
+            else geometry_validity_info.get("next_safe_action")
             if geometry_validity_requested
             else real_scene_shadow_info.get("next_safe_action")
             if real_scene_shadow_requested
@@ -538,10 +603,22 @@ def export_simulation_evidence(
             "replay_ready",
             False,
         ),
-        "robot_command_generated": real_scene_shadow_info.get("robot_command_generated", False),
-        "trajectory_generated": real_scene_shadow_info.get("trajectory_generated", False),
-        "joint_targets_generated": real_scene_shadow_info.get("joint_targets_generated", False),
-        "tcp_pose_world_generated": real_scene_shadow_info.get("tcp_pose_world_generated", False),
+        "robot_command_generated": (
+            projector_shadow_info.get("robot_command_generated", False)
+            or real_scene_shadow_info.get("robot_command_generated", False)
+        ),
+        "trajectory_generated": (
+            projector_shadow_info.get("trajectory_generated", False)
+            or real_scene_shadow_info.get("trajectory_generated", False)
+        ),
+        "joint_targets_generated": (
+            projector_shadow_info.get("joint_targets_generated", False)
+            or real_scene_shadow_info.get("joint_targets_generated", False)
+        ),
+        "tcp_pose_world_generated": (
+            projector_shadow_info.get("tcp_pose_world_generated", False)
+            or real_scene_shadow_info.get("tcp_pose_world_generated", False)
+        ),
         "real_scene_shadow_evidence_files": (
             _real_scene_shadow_evidence_files(real_scene_shadow_info) if real_scene_shadow_requested else []
         ),
@@ -589,6 +666,8 @@ def export_simulation_evidence(
         "camera_snapshot_report_path": camera_snapshot_report_path,
         "geometry_validity_result_path": geometry_validity_result_path,
         "geometry_validity_report_path": geometry_validity_report_path,
+        "projector_shadow_result_path": projector_shadow_result_path,
+        "projector_shadow_report_path": projector_shadow_report_path,
         "real_scene_shadow_result_path": real_scene_shadow_result_path,
         "real_scene_shadow_report_path": real_scene_shadow_report_path,
     }
@@ -1138,6 +1217,54 @@ def _geometry_validity_evidence_files(geometry_validity_info: Dict[str, Any]) ->
     ]
 
 
+def _projector_shadow_info(result: Dict[str, Any]) -> Dict[str, Any]:
+    projector = result.get("projector_shadow") if isinstance(result.get("projector_shadow"), dict) else {}
+    return {
+        **projector,
+        "requested": result.get("projector_shadow_requested", projector.get("requested", False)) is True,
+        "projector_requested": result.get("projector_requested", projector.get("projector_requested", False))
+        is True,
+        "projector_status": result.get("projector_status", projector.get("projector_status", "NOT_REQUESTED")),
+        "snapshot_id": result.get("projector_snapshot_id", projector.get("snapshot_id")),
+        "grounding_id": result.get("projector_grounding_id", projector.get("grounding_id")),
+        "scene_version": result.get("projector_scene_version", projector.get("scene_version")),
+        "blocking_reasons": result.get(
+            "projector_blocking_reasons",
+            projector.get("blocking_reasons", []),
+        ),
+        "warnings": result.get("projector_warnings", projector.get("warnings", [])),
+        "next_safe_action": result.get("projector_next_safe_action", projector.get("next_safe_action")),
+        "no_motion_projector_passed": result.get(
+            "no_motion_projector_passed",
+            projector.get("no_motion_projector_passed", False),
+        )
+        is True,
+        "real_tf_used": projector.get("real_tf_used", False) is True,
+        "ros2_tf_used": projector.get("ros2_tf_used", False) is True,
+        "live_camera_used": projector.get("live_camera_used", False) is True,
+        "live_vlm_called": projector.get("live_vlm_called", False) is True,
+        "real_robot_motion_executed": projector.get("real_robot_motion_executed", False) is True,
+        "real_robot_command_enabled": projector.get("real_robot_command_enabled", False) is True,
+        "robot_command_generated": projector.get("robot_command_generated", False) is True,
+        "trajectory_generated": projector.get("trajectory_generated", False) is True,
+        "joint_targets_generated": projector.get("joint_targets_generated", False) is True,
+        "tcp_pose_world_generated": projector.get("tcp_pose_world_generated", False) is True,
+    }
+
+
+def _projector_shadow_evidence_files(projector_shadow_info: Dict[str, Any]) -> list[Dict[str, str | None]]:
+    return [
+        {
+            "name": "projector_shadow_result.json",
+            "path": projector_shadow_info.get("projector_shadow_result_path"),
+        },
+        {
+            "name": "projector_shadow_report.md",
+            "path": projector_shadow_info.get("projector_shadow_report_path"),
+        },
+    ]
+
+
 def _real_scene_shadow_info(result: Dict[str, Any]) -> Dict[str, Any]:
     shadow = result.get("real_scene_shadow") if isinstance(result.get("real_scene_shadow"), dict) else {}
     return {
@@ -1295,6 +1422,7 @@ def _build_summary_markdown(
     lab_readiness_info: Dict[str, Any],
     camera_snapshot_info: Dict[str, Any],
     geometry_validity_info: Dict[str, Any],
+    projector_shadow_info: Dict[str, Any],
     real_scene_shadow_info: Dict[str, Any],
     robot_structure_report_path: str | None,
     run_id: str,
@@ -1471,6 +1599,43 @@ def _build_summary_markdown(
             f"- joint_targets_generated: {_format_value(geometry_validity_info.get('joint_targets_generated'))}",
             f"- tcp_pose_world_generated: {_format_value(geometry_validity_info.get('tcp_pose_world_generated'))}",
             "This V2.9.1 geometry validity evidence checks declared bbox, pixel_center, frame, depth, TTL, and confidence before a future 2D-to-3D projector. It is no-motion, no-live-camera, no-live-VLM, and no-real-robot evidence only; it does not connect to ROS2, MoveIt, RTDE, URScript, Dashboard, or a real UR5, and it does not generate trajectory, tcp_pose_world, joint targets, or robot commands.",
+            "",
+            "## Projector Shadow Evidence Summary",
+            "",
+            f"- projector_shadow_evidence_available: {_format_value(projector_shadow_info.get('requested'))}",
+            f"- projector_requested: {_format_value(projector_shadow_info.get('projector_requested'))}",
+            f"- projector_status: {_format_value(projector_shadow_info.get('projector_status'))}",
+            f"- snapshot_id: {_format_value(projector_shadow_info.get('snapshot_id'))}",
+            f"- grounding_id: {_format_value(projector_shadow_info.get('grounding_id'))}",
+            f"- scene_version: {_format_value(projector_shadow_info.get('scene_version'))}",
+            f"- pixel_center: {_format_value(projector_shadow_info.get('pixel_center'))}",
+            f"- depth_value_m: {_format_value(projector_shadow_info.get('depth_value_m'))}",
+            f"- depth_valid: {_format_value(projector_shadow_info.get('depth_valid'))}",
+            f"- camera_intrinsics_available: {_format_value(projector_shadow_info.get('camera_intrinsics_available'))}",
+            f"- camera_frame: {_format_value(projector_shadow_info.get('camera_frame'))}",
+            f"- world_frame: {_format_value(projector_shadow_info.get('world_frame'))}",
+            f"- camera_point_m: {_format_value(projector_shadow_info.get('camera_point_m'))}",
+            f"- world_point_m: {_format_value(projector_shadow_info.get('world_point_m'))}",
+            f"- projection_confidence: {_format_value(projector_shadow_info.get('projection_confidence'))}",
+            f"- projection_method: {_format_value(projector_shadow_info.get('projection_method'))}",
+            f"- tf_available: {_format_value(projector_shadow_info.get('tf_available'))}",
+            f"- tf_source: {_format_value(projector_shadow_info.get('tf_source'))}",
+            f"- real_tf_used: {_format_value(projector_shadow_info.get('real_tf_used'))}",
+            f"- ros2_tf_used: {_format_value(projector_shadow_info.get('ros2_tf_used'))}",
+            f"- workspace_check_passed: {_format_value(projector_shadow_info.get('workspace_check_passed'))}",
+            f"- no_motion_projector_passed: {_format_value(projector_shadow_info.get('no_motion_projector_passed'))}",
+            f"- blocking_reasons: {_format_value(projector_shadow_info.get('blocking_reasons'))}",
+            f"- warnings: {_format_value(projector_shadow_info.get('warnings'))}",
+            f"- next_safe_action: {_format_value(projector_shadow_info.get('next_safe_action'))}",
+            f"- live_camera_used: {_format_value(projector_shadow_info.get('live_camera_used'))}",
+            f"- live_vlm_called: {_format_value(projector_shadow_info.get('live_vlm_called'))}",
+            f"- real_robot_motion_executed: {_format_value(projector_shadow_info.get('real_robot_motion_executed'))}",
+            f"- real_robot_command_enabled: {_format_value(projector_shadow_info.get('real_robot_command_enabled'))}",
+            f"- robot_command_generated: {_format_value(projector_shadow_info.get('robot_command_generated'))}",
+            f"- trajectory_generated: {_format_value(projector_shadow_info.get('trajectory_generated'))}",
+            f"- joint_targets_generated: {_format_value(projector_shadow_info.get('joint_targets_generated'))}",
+            f"- tcp_pose_world_generated: {_format_value(projector_shadow_info.get('tcp_pose_world_generated'))}",
+            "This V2.9.2 projector shadow evidence converts declared pixel_center, depth, camera intrinsics, and mock/config transform into camera_point_m and world_point_m for V3.0 preparation. It is no-motion, no-live-camera, no-live-VLM, no-real-robot, and no-ROS2-TF evidence only; it is not live camera, not live VLM, not ROS2 tf2, not MoveIt planning, not real UR5 execution, and it does not generate trajectory, tcp_pose_world, URScript, joint targets, or robot commands.",
             "",
             "## Real-Scene Shadow Pipeline Summary",
             "",

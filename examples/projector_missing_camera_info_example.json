@@ -1,0 +1,21 @@
+{
+  "projector_shadow": {
+    "geometry_validity_config": "configs/geometry_validity.example.yaml",
+    "camera_info": null,
+    "depth_sample_ref": "examples/projector_depth_sample_example.json",
+    "mock_tf_ref": "examples/projector_mock_tf_example.json",
+    "camera_frame": "camera_color_optical_frame",
+    "world_frame": "mock_world",
+    "projection_method": "pinhole_mock_tf",
+    "require_world_projection": true,
+    "depth_range_m": {
+      "min": 0.05,
+      "max": 2.0
+    },
+    "workspace_m": {
+      "x": [-1.0, 1.0],
+      "y": [-1.0, 1.0],
+      "z": [0.0, 2.5]
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "mock_tf": {
+    "camera_frame": "camera_color_optical_frame",
+    "world_frame": "mock_world",
+    "tf_source": "mock_or_config",
+    "real_tf_used": false,
+    "ros2_tf_used": false,
+    "translation_m": [0.1, 0.0, 0.2],
+    "rotation_matrix": [
+      [1.0, 0.0, 0.0],
+      [0.0, 1.0, 0.0],
+      [0.0, 0.0, 1.0]
+    ]
+  }
+}

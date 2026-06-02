@@ -1593,6 +1593,61 @@ records `geometry_validity_evidence_available`, `geometry_validity_status`,
 depth/confidence/TTL checks, blocking reasons, warnings, `next_safe_action`,
 and the no-motion safety flags.
 
+## TETO V2.9.2 2D-to-3D Projector Shadow Contract
+
+TETO V2.9.2 adds a 2D-to-3D projector shadow contract. It converts a geometry
+valid `pixel_center` plus depth, camera intrinsics, and a mock/config transform
+into `camera_point_m` and `world_point_m` evidence.
+
+This is the geometric prerequisite for the future V3.0 text-camera-UR5 demo.
+It is shadow projection evidence only.
+
+The projector shadow contract validates declared evidence only:
+
+- `geometry_validity_status=PASS`
+- `pixel_center`
+- camera intrinsics `fx`, `fy`, `cx`, and `cy`
+- `depth_value_m` and configured min/max depth range
+- camera frame and world frame
+- mock/config transform availability with `tf_source=mock_or_config`
+- workspace bounds for the projected point
+- live camera/VLM flags and forbidden robot control fields
+
+V2.9.2 is not live camera capture, not live VLM/Qwen inference, not ROS2 tf2,
+not MoveIt planning, and not real UR5 execution. It does not generate
+trajectory, `tcp_pose_world`, URScript, joint targets, robot commands,
+automatic retry motion, or any real execution request.
+
+Positive projector shadow smoke:
+
+```bash
+python3 scripts/run_first_simulation_execution.py \
+  --check-projector-shadow \
+  --projector-shadow-config configs/projector_shadow.example.yaml \
+  --projector-shadow-report \
+  --output-dir /tmp/teto_v292_projector_shadow_positive
+```
+
+Invalid depth projector shadow smoke:
+
+```bash
+python3 scripts/run_first_simulation_execution.py \
+  --check-projector-shadow \
+  --projector-shadow-config examples/projector_invalid_depth_example.json \
+  --projector-shadow-report \
+  --output-dir /tmp/teto_v292_projector_shadow_invalid_depth
+```
+
+The evidence bundle includes `projector_shadow_result.json`,
+`projector_shadow_report.md`, `summary.md`, and `evidence_manifest.json`.
+`projector_shadow_report.md` states the no-motion / no-live-camera /
+no-live-VLM / no-real-robot / no-ROS2-TF safety boundary, and
+`evidence_manifest.json` records `projector_shadow_evidence_available`,
+`projector_requested`, `projector_status`, `pixel_center`, `depth_value_m`,
+`camera_point_m`, `world_point_m`, `projection_method`, `tf_available`,
+`tf_source`, `real_tf_used=false`, `ros2_tf_used=false`, workspace checks,
+blocking reasons, warnings, `next_safe_action`, and the no-motion safety flags.
+
 Demo commands accept common image formats directly. TETO automatically
 creates a cached RGB JPEG under `data/processed/auto/`, with EXIF orientation
 applied, long edge resized, animated images reduced to the first frame, and
@@ -1809,4 +1864,5 @@ python3 -m src.cli prepare-images --input-dir data/raw --output-dir data/process
 - V2.8.2 = camera snapshot contract
 - V2.9.0 = real-scene no-motion shadow pipeline
 - V2.9.1 = geometry validity contract
+- V2.9.2 = 2D-to-3D projector shadow contract
 - Future ROS2 / MoveIt2 / RTDE / URScript / real UR5 controller integration remains outside the current implemented safety boundary
