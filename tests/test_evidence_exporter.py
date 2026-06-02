@@ -38,7 +38,7 @@ def test_dry_run_execution_writes_evidence_artifacts(tmp_path):
     assert manifest_path.exists()
 
     summary = summary_path.read_text(encoding="utf-8")
-    assert "TETO version: TETO V2.5.1" in summary
+    assert "TETO version: TETO V2.6.0" in summary
     assert f"run_id: {tmp_path.name}" in summary
     assert "mode: dry_run" in summary
     assert "status: PASS" in summary
@@ -77,7 +77,7 @@ def test_dry_run_execution_writes_evidence_artifacts(tmp_path):
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["schema_version"] == EVIDENCE_MANIFEST_SCHEMA_VERSION
     assert manifest["run_id"] == tmp_path.name
-    assert manifest["teto_version"] == "TETO V2.5.1"
+    assert manifest["teto_version"] == "TETO V2.6.0"
     assert manifest["mode"] == "dry_run"
     assert manifest["status"] == "PASS"
     assert manifest["report_path"] == str(report_path)
@@ -152,12 +152,57 @@ def test_evidence_exporter_writes_micro_motion_manifest_and_summary(tmp_path):
     ]
     assert manifest["simulation_micro_motion"]["motion_evidence_files"] == manifest["motion_evidence_files"]
 
-    assert "# TETO V2.5.1 Simulation Micro-Motion Evidence Report" in report
+    assert "# TETO V2.6.0 Simulation Micro-Motion Evidence Report" in report
     assert "## Joint Diff Summary" in report
     assert "## Evidence Files" in report
     assert "simulation_motion_result.json" in report
     assert "before_articulation_state.json" in report
     assert result["robot_motion_executed"] is False
+    assert result["real_robot_motion_executed"] is False
+
+
+def test_evidence_exporter_writes_semantic_bridge_manifest_and_summary(tmp_path):
+    contract_path = "tests/fixtures/semantic_contracts/eligible_hover_to_object.json"
+    with open(contract_path, encoding="utf-8") as contract_file:
+        contract = json.load(contract_file)
+    result = run_first_simulation_execution(
+        VALID_TASK,
+        dry_run=True,
+        steps=3,
+        semantic_simulation_bridge=True,
+        semantic_task_contract=contract,
+        semantic_task_contract_path=contract_path,
+        output_dir=tmp_path,
+        write_report=True,
+        demo_command=(
+            "python3 scripts/run_first_simulation_execution.py --dry-run --steps 3 "
+            "--semantic-simulation-bridge --semantic-task-json tests/fixtures/semantic_contracts/eligible_hover_to_object.json"
+        ),
+    )
+
+    summary = (tmp_path / "summary.md").read_text(encoding="utf-8")
+    manifest = json.loads((tmp_path / "evidence_manifest.json").read_text(encoding="utf-8"))
+    bridge_report = (tmp_path / "semantic_simulation_bridge_report.md").read_text(encoding="utf-8")
+
+    assert "## Semantic-to-Simulation Bridge Summary" in summary
+    assert "semantic_bridge_status: OK" in summary
+    assert "semantic_task_id: fixture_eligible_hover_to_object" in summary
+    assert "triggered_simulation_micro_motion: True" in summary
+    assert manifest["semantic_bridge_requested"] is True
+    assert manifest["semantic_bridge_status"] == "OK"
+    assert manifest["semantic_bridge_evidence_available"] is True
+    assert manifest["semantic_task_id"] == "fixture_eligible_hover_to_object"
+    assert manifest["semantic_intent"] == "hover_to_object"
+    assert manifest["semantic_target_label"] == "red_mug"
+    assert manifest["semantic_gate_passed"] is True
+    assert manifest["triggered_simulation_micro_motion"] is True
+    assert {
+        "name": "semantic_simulation_bridge_report.md",
+        "path": str(tmp_path / "semantic_simulation_bridge_report.md"),
+    } in manifest["semantic_bridge_files"]
+    assert "# TETO V2.6.0 Semantic-to-Simulation Motion Bridge Report" in bridge_report
+    assert "It does not call a live camera or live VLM." in bridge_report
+    assert (tmp_path / "semantic_task_contract_copy.json").exists()
     assert result["real_robot_motion_executed"] is False
 
 

@@ -1,0 +1,29 @@
+{
+  "schema_version": "teto.semantic_task_contract.v1",
+  "task_id": "fixture_stale_scene",
+  "scene_version": "fixture_scene_v1",
+  "scene_status": "stale",
+  "intent": {
+    "name": "hover_to_object",
+    "user_command": "hover over the red mug"
+  },
+  "target": {
+    "label": "red_mug",
+    "bbox_xyxy": [120, 80, 260, 240]
+  },
+  "geometry": {
+    "pixel_center": [190, 160],
+    "grounded": true
+  },
+  "confidence": {
+    "semantic": 0.91,
+    "geometry": 0.86,
+    "overall": 0.88
+  },
+  "error": {
+    "code": "OK",
+    "message": ""
+  },
+  "rejected": false,
+  "unsafe": false
+}

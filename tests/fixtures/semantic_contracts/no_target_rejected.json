@@ -1,0 +1,28 @@
+{
+  "schema_version": "teto.semantic_task_contract.v1",
+  "task_id": "fixture_no_target_rejected",
+  "scene_version": "fixture_scene_v1",
+  "intent": {
+    "name": "hover_to_object",
+    "user_command": "hover over the object"
+  },
+  "target": {
+    "label": "no_target",
+    "bbox_xyxy": null
+  },
+  "geometry": {
+    "pixel_center": null,
+    "grounded": false
+  },
+  "confidence": {
+    "semantic": 0.2,
+    "geometry": 0.1,
+    "overall": 0.1
+  },
+  "error": {
+    "code": "E_NO_TARGET",
+    "message": "no target found"
+  },
+  "rejected": true,
+  "unsafe": false
+}

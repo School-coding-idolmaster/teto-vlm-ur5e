@@ -1,0 +1,26 @@
+{
+  "schema_version": "teto.semantic_task_contract.v1",
+  "task_id": "fixture_invalid_contract",
+  "intent": {
+    "name": "hover_to_object",
+    "user_command": "hover over the red mug"
+  },
+  "target": {
+    "label": "red_mug",
+    "bbox_xyxy": [260, 80, 120, 240]
+  },
+  "geometry": {
+    "grounded": true
+  },
+  "confidence": {
+    "semantic": 0.91,
+    "geometry": 0.86,
+    "overall": 0.88
+  },
+  "error": {
+    "code": "OK",
+    "message": ""
+  },
+  "rejected": false,
+  "unsafe": false
+}

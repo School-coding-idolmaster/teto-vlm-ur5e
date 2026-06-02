@@ -20,7 +20,6 @@ from src.simulation_micro_motion import (
     DEFAULT_MICRO_MOTION_JOINT,
     DEFAULT_MICRO_MOTION_TOLERANCE_RAD,
     MICRO_MOTION_STATUS_BLOCKED_BY_PRECHECK,
-    MICRO_MOTION_STATUS_DRY_RUN_ONLY,
     MICRO_MOTION_STATUS_FAILED,
     MICRO_MOTION_STATUS_NOT_REQUESTED,
     MICRO_MOTION_STATUS_OK,
@@ -29,10 +28,20 @@ from src.simulation_micro_motion import (
     summarize_motion_evidence,
 )
 from src.simulation_motion_precheck import build_simulation_motion_precheck_report
+from src.semantic_simulation_bridge import (
+    DEFAULT_SEMANTIC_CONFIDENCE_THRESHOLD,
+    SEMANTIC_BRIDGE_STATUS_BLOCKED_BY_PRECHECK,
+    SEMANTIC_BRIDGE_STATUS_FAILED,
+    SEMANTIC_BRIDGE_STATUS_NOT_REQUESTED,
+    SemanticSimulationBridgeRequest,
+    build_demo_semantic_task_contract,
+    build_semantic_simulation_bridge_result,
+    build_simulation_micro_motion_request_from_semantic_contract,
+)
 
 
 REPORT_VERSION = "teto_simulation_execution.v1"
-CURRENT_TETO_VERSION = "TETO V2.5.1"
+CURRENT_TETO_VERSION = "TETO V2.6.0"
 DEFAULT_STEPS = 5
 DEFAULT_SIMULATION_OBJECT_TYPE = "cube"
 DEFAULT_CUBE_PRIM_PATH = "/World/TETO_Cube"
@@ -91,6 +100,7 @@ def build_simulation_execution_result(
     articulation_state_metadata: Dict[str, Any] | None = None,
     simulation_motion_precheck_metadata: Dict[str, Any] | None = None,
     simulation_micro_motion_metadata: Dict[str, Any] | None = None,
+    semantic_bridge_metadata: Dict[str, Any] | None = None,
     started_at: str | None = None,
     finished_at: str | None = None,
 ) -> Dict[str, Any]:
@@ -128,6 +138,10 @@ def build_simulation_execution_result(
     result.update(articulation_state_metadata or _articulation_state_report_fields())
     result.update(simulation_motion_precheck_metadata or _simulation_motion_precheck_report_fields())
     result.update(simulation_micro_motion_metadata or _simulation_micro_motion_report_fields())
+    result.update(semantic_bridge_metadata or _semantic_bridge_report_fields())
+    result["semantic_bridge"] = _semantic_bridge_info(result)
+    result["motion"] = _motion_info(result)
+    result["safety"] = _safety_report_fields(result)
     result.setdefault("robot_structure_report_generated", False)
     result.setdefault("robot_structure_report_path", None)
     result.setdefault("articulation_readiness_report_generated", False)
@@ -145,6 +159,11 @@ def build_simulation_execution_result(
     result.setdefault("motion_evidence_available", False)
     result.setdefault("motion_evidence_files", [])
     result.setdefault("motion_diff_summary", {})
+    result.setdefault("robot_motion_executed", False)
+    result.setdefault("real_robot_motion_executed", False)
+    result.setdefault("control_enabled", False)
+    result.setdefault("motion_generated", False)
+    result.setdefault("command_generated", False)
     return result
 
 
@@ -177,6 +196,10 @@ def run_first_simulation_execution(
     micro_motion_joint: str = DEFAULT_MICRO_MOTION_JOINT,
     micro_motion_delta_rad: float = DEFAULT_MICRO_MOTION_DELTA_RAD,
     micro_motion_tolerance_rad: float = DEFAULT_MICRO_MOTION_TOLERANCE_RAD,
+    semantic_simulation_bridge: bool = False,
+    semantic_task_contract: Dict[str, Any] | None = None,
+    semantic_task_contract_path: str | None = None,
+    semantic_confidence_threshold: float = DEFAULT_SEMANTIC_CONFIDENCE_THRESHOLD,
     output_dir: str | Path | None = None,
     write_report: bool = False,
     demo_command: str | None = None,
@@ -185,15 +208,37 @@ def run_first_simulation_execution(
     started_at = _timestamp()
     effective_move_object = move_object or move_cube
     effective_spawn_cube = spawn_cube or effective_move_object
-    effective_inspect_robot_prim = inspect_robot_prim or execute_simulation_micro_motion
-    effective_check_articulation_readiness = check_articulation_readiness or execute_simulation_micro_motion
-    effective_observe_articulation_state = observe_articulation_state or execute_simulation_micro_motion
-    effective_check_simulation_motion_precheck = check_simulation_motion_precheck or execute_simulation_micro_motion
+    bridge_contract = semantic_task_contract if semantic_simulation_bridge else None
+    if semantic_simulation_bridge and bridge_contract is None:
+        bridge_contract = build_demo_semantic_task_contract()
+    semantic_bridge_metadata = _semantic_bridge_report_fields(
+        requested=semantic_simulation_bridge,
+        contract=bridge_contract,
+        contract_path=semantic_task_contract_path,
+        confidence_threshold=semantic_confidence_threshold,
+        joint_name=micro_motion_joint,
+        requested_delta_rad=micro_motion_delta_rad,
+        tolerance_rad=micro_motion_tolerance_rad,
+    )
+    semantic_gate_passed = bool(semantic_bridge_metadata.get("semantic_gate_passed"))
+    execute_micro_motion_requested = execute_simulation_micro_motion or semantic_gate_passed
+    effective_inspect_robot_prim = inspect_robot_prim or execute_micro_motion_requested
+    effective_check_articulation_readiness = check_articulation_readiness or execute_micro_motion_requested
+    effective_observe_articulation_state = observe_articulation_state or execute_micro_motion_requested
+    effective_check_simulation_motion_precheck = check_simulation_motion_precheck or execute_micro_motion_requested
     micro_motion_request = SimulationMicroMotionRequest(
         joint_name=micro_motion_joint,
         requested_delta_rad=micro_motion_delta_rad,
         tolerance_rad=micro_motion_tolerance_rad,
     )
+    if semantic_gate_passed and isinstance(bridge_contract, dict):
+        micro_motion_request = build_simulation_micro_motion_request_from_semantic_contract(
+            bridge_contract,
+            confidence_threshold=semantic_confidence_threshold,
+            joint_name=micro_motion_joint,
+            requested_delta_rad=micro_motion_delta_rad,
+            tolerance_rad=micro_motion_tolerance_rad,
+        )
     simulation_object_spec = object_spec or SimulationObjectSpec(
         object_type=DEFAULT_SIMULATION_OBJECT_TYPE,
         prim_path=cube_prim_path,
@@ -205,7 +250,7 @@ def run_first_simulation_execution(
         robot_asset_path,
         dry_run=dry_run,
         no_isaac=no_isaac,
-        check_robot_asset=check_robot_asset or execute_simulation_micro_motion,
+        check_robot_asset=check_robot_asset or execute_micro_motion_requested,
         load_robot_asset=load_robot_asset,
         inspect_robot_prim=effective_inspect_robot_prim,
         check_articulation_readiness=effective_check_articulation_readiness,
@@ -216,7 +261,7 @@ def run_first_simulation_execution(
         resolved_robot_asset_path
         and not dry_run
         and not no_isaac
-        and (check_robot_asset or execute_simulation_micro_motion)
+        and (check_robot_asset or execute_micro_motion_requested)
         and (
             effective_inspect_robot_prim
             or effective_check_articulation_readiness
@@ -224,7 +269,7 @@ def run_first_simulation_execution(
             or effective_check_simulation_motion_precheck
         )
     )
-    effective_check_robot_asset = check_robot_asset or execute_simulation_micro_motion or effective_load_robot_asset
+    effective_check_robot_asset = check_robot_asset or execute_micro_motion_requested or effective_load_robot_asset
     effective_robot_asset_spec = robot_asset_spec or RobotAssetSpec(
         robot_type=robot_type,
         robot_prim_path=robot_prim_path,
@@ -264,6 +309,7 @@ def run_first_simulation_execution(
                     spec=effective_robot_asset_spec,
                     requested=effective_check_simulation_motion_precheck,
                 ),
+                semantic_bridge_metadata=semantic_bridge_metadata,
                 error_code="E_INVALID_STEPS",
                 error_message="steps must be a positive integer",
                 started_at=started_at,
@@ -308,6 +354,7 @@ def run_first_simulation_execution(
                     spec=effective_robot_asset_spec,
                     requested=effective_check_simulation_motion_precheck,
                 ),
+                semantic_bridge_metadata=semantic_bridge_metadata,
                 error_code="E_INVALID_SIMULATION_TASK",
                 error_message=f"missing simulation task fields: {', '.join(missing_fields)}",
                 started_at=started_at,
@@ -355,7 +402,7 @@ def run_first_simulation_execution(
         )
         simulation_micro_motion_metadata = _simulation_micro_motion_report_fields(
             request=micro_motion_request,
-            requested=execute_simulation_micro_motion,
+            requested=execute_micro_motion_requested,
             dry_run=True,
             precheck=simulation_motion_precheck_metadata.get("simulation_motion_precheck"),
             readiness=articulation_readiness_metadata.get("articulation_readiness"),
@@ -391,6 +438,7 @@ def run_first_simulation_execution(
                     articulation_state_metadata=articulation_state_metadata,
                     simulation_motion_precheck_metadata=simulation_motion_precheck_metadata,
                     simulation_micro_motion_metadata=simulation_micro_motion_metadata,
+                    semantic_bridge_metadata=semantic_bridge_metadata,
                     error_code="E_ROBOT_ASSET_LOAD_FAILED",
                     error_message="robot asset path is unavailable",
                     started_at=started_at,
@@ -421,6 +469,7 @@ def run_first_simulation_execution(
                 articulation_state_metadata=articulation_state_metadata,
                 simulation_motion_precheck_metadata=simulation_motion_precheck_metadata,
                 simulation_micro_motion_metadata=simulation_micro_motion_metadata,
+                semantic_bridge_metadata=semantic_bridge_metadata,
                 started_at=started_at,
                 finished_at=_timestamp(),
             ),
@@ -443,8 +492,9 @@ def run_first_simulation_execution(
         check_articulation_readiness=effective_check_articulation_readiness,
         observe_articulation_state=effective_observe_articulation_state,
         check_simulation_motion_precheck=effective_check_simulation_motion_precheck,
-        execute_simulation_micro_motion=execute_simulation_micro_motion,
+        execute_simulation_micro_motion=execute_micro_motion_requested,
         micro_motion_request=micro_motion_request,
+        semantic_bridge_metadata=semantic_bridge_metadata,
         started_at=started_at,
         output_dir=output_dir,
         write_report=write_report,
@@ -471,6 +521,9 @@ def write_simulation_execution_result(
     simulation_motion_report_path = run_dir / "simulation_motion_report.md"
     before_articulation_state_path = run_dir / "before_articulation_state.json"
     after_articulation_state_path = run_dir / "after_articulation_state.json"
+    semantic_bridge_result_path = run_dir / "semantic_simulation_bridge_result.json"
+    semantic_bridge_report_path = run_dir / "semantic_simulation_bridge_report.md"
+    semantic_task_contract_copy_path = run_dir / "semantic_task_contract_copy.json"
     result["report_path"] = str(report_path)
     structure_report_requested = bool(result.get("robot_prim_inspection_requested"))
     result["robot_structure_report_generated"] = structure_report_requested
@@ -522,6 +575,21 @@ def write_simulation_execution_result(
         result["actual_delta_rad"] = result["motion"].get("actual_delta_rad")
         result["tolerance_rad"] = result["motion"].get("tolerance_rad")
         result["delta_within_tolerance"] = result["motion"].get("delta_within_tolerance")
+    semantic_bridge_requested = bool(result.get("semantic_simulation_bridge_requested"))
+    result["semantic_simulation_bridge_result_path"] = (
+        str(semantic_bridge_result_path) if semantic_bridge_requested else None
+    )
+    result["semantic_simulation_bridge_report_path"] = (
+        str(semantic_bridge_report_path) if semantic_bridge_requested else None
+    )
+    result["semantic_task_contract_copy_path"] = (
+        str(semantic_task_contract_copy_path) if semantic_bridge_requested else None
+    )
+    result["semantic_bridge_evidence_available"] = semantic_bridge_requested
+    result["semantic_bridge_files"] = _semantic_bridge_file_refs(result)
+    result["semantic_bridge"] = _semantic_bridge_info(result)
+    result["motion"] = _motion_info(result)
+    result["safety"] = _safety_report_fields(result)
     with report_path.open("w", encoding="utf-8") as report_file:
         json.dump(result, report_file, ensure_ascii=False, indent=2)
         report_file.write("\n")
@@ -558,6 +626,7 @@ def _run_true_isaac_runtime(
     check_simulation_motion_precheck: bool,
     execute_simulation_micro_motion: bool,
     micro_motion_request: SimulationMicroMotionRequest,
+    semantic_bridge_metadata: Dict[str, Any] | None,
     started_at: str,
     output_dir: str | Path | None,
     write_report: bool,
@@ -602,6 +671,7 @@ def _run_true_isaac_runtime(
                     request=micro_motion_request,
                     requested=execute_simulation_micro_motion,
                 ),
+                semantic_bridge_metadata=semantic_bridge_metadata,
                 error_code="E_ISAAC_RUNTIME_FAILED",
                 error_message=str(exc),
                 started_at=started_at,
@@ -630,6 +700,7 @@ def _run_true_isaac_runtime(
         check_simulation_motion_precheck=check_simulation_motion_precheck,
         execute_simulation_micro_motion=execute_simulation_micro_motion,
         micro_motion_request=micro_motion_request,
+        semantic_bridge_metadata=semantic_bridge_metadata,
         started_at=started_at,
         output_dir=output_dir,
         write_report=write_report,
@@ -659,6 +730,7 @@ def _execute_isaac_world(
     check_simulation_motion_precheck: bool = False,
     execute_simulation_micro_motion: bool = False,
     micro_motion_request: SimulationMicroMotionRequest | None = None,
+    semantic_bridge_metadata: Dict[str, Any] | None = None,
     demo_command: str | None = None,
     object_spawner=None,
     object_pose_updater=None,
@@ -756,6 +828,7 @@ def _execute_isaac_world(
                             articulation_state_metadata=articulation_state_metadata,
                             simulation_motion_precheck_metadata=simulation_motion_precheck_metadata,
                             simulation_micro_motion_metadata=simulation_micro_motion_metadata,
+                            semantic_bridge_metadata=semantic_bridge_metadata,
                             error_code="E_ROBOT_ASSET_LOAD_FAILED",
                             error_message="robot asset path is unavailable",
                             started_at=started_at,
@@ -793,6 +866,7 @@ def _execute_isaac_world(
                                 articulation_state_metadata=articulation_state_metadata,
                                 simulation_motion_precheck_metadata=simulation_motion_precheck_metadata,
                                 simulation_micro_motion_metadata=simulation_micro_motion_metadata,
+                                semantic_bridge_metadata=semantic_bridge_metadata,
                                 error_code="E_ROBOT_ASSET_LOAD_FAILED",
                                 error_message="robot prim was not found after loading asset",
                                 started_at=started_at,
@@ -827,6 +901,7 @@ def _execute_isaac_world(
                             articulation_state_metadata=articulation_state_metadata,
                             simulation_motion_precheck_metadata=simulation_motion_precheck_metadata,
                             simulation_micro_motion_metadata=simulation_micro_motion_metadata,
+                            semantic_bridge_metadata=semantic_bridge_metadata,
                             error_code="E_ROBOT_ASSET_LOAD_FAILED",
                             error_message=str(exc),
                             started_at=started_at,
@@ -863,6 +938,7 @@ def _execute_isaac_world(
                         articulation_state_metadata=articulation_state_metadata,
                         simulation_motion_precheck_metadata=simulation_motion_precheck_metadata,
                         simulation_micro_motion_metadata=simulation_micro_motion_metadata,
+                        semantic_bridge_metadata=semantic_bridge_metadata,
                         error_code="E_CUBE_SPAWN_FAILED",
                         error_message=str(exc),
                         started_at=started_at,
@@ -902,6 +978,7 @@ def _execute_isaac_world(
                         articulation_state_metadata=articulation_state_metadata,
                         simulation_motion_precheck_metadata=simulation_motion_precheck_metadata,
                         simulation_micro_motion_metadata=simulation_micro_motion_metadata,
+                        semantic_bridge_metadata=semantic_bridge_metadata,
                         error_code="E_SIM_OBJECT_MOVE_FAILED",
                         error_message=str(exc),
                         started_at=started_at,
@@ -993,6 +1070,10 @@ def _execute_isaac_world(
                         articulation_state_metadata=articulation_state_metadata,
                         simulation_motion_precheck_metadata=simulation_motion_precheck_metadata,
                         simulation_micro_motion_metadata=simulation_micro_motion_metadata,
+                        semantic_bridge_metadata=_semantic_bridge_status_from_motion(
+                            semantic_bridge_metadata,
+                            simulation_micro_motion_metadata,
+                        ),
                         error_code=error_code,
                         error_message=", ".join(
                             simulation_micro_motion_metadata.get("simulation_micro_motion_blocking_reasons") or []
@@ -1025,6 +1106,10 @@ def _execute_isaac_world(
                 articulation_state_metadata=articulation_state_metadata,
                 simulation_motion_precheck_metadata=simulation_motion_precheck_metadata,
                 simulation_micro_motion_metadata=simulation_micro_motion_metadata,
+                semantic_bridge_metadata=_semantic_bridge_status_from_motion(
+                    semantic_bridge_metadata,
+                    simulation_micro_motion_metadata,
+                ),
                 started_at=started_at,
                 finished_at=_timestamp(),
             ),
@@ -1047,6 +1132,7 @@ def _execute_isaac_world(
                 articulation_state_metadata=articulation_state_metadata,
                 simulation_motion_precheck_metadata=simulation_motion_precheck_metadata,
                 simulation_micro_motion_metadata=simulation_micro_motion_metadata,
+                semantic_bridge_metadata=semantic_bridge_metadata,
                 error_code="E_ISAAC_RUNTIME_FAILED",
                 error_message=str(exc),
                 started_at=started_at,
@@ -1478,6 +1564,218 @@ def _simulation_micro_motion_report_fields(
         "simulation_micro_motion_blocking_reasons": motion_result.get("blocking_reasons", []),
         "simulation_micro_motion_warnings": motion_result.get("warnings", []),
         "simulation_micro_motion_errors": motion_result.get("errors", []),
+    }
+
+
+def _semantic_bridge_report_fields(
+    *,
+    requested: bool = False,
+    contract: Dict[str, Any] | None = None,
+    contract_path: str | None = None,
+    confidence_threshold: float = DEFAULT_SEMANTIC_CONFIDENCE_THRESHOLD,
+    joint_name: str = DEFAULT_MICRO_MOTION_JOINT,
+    requested_delta_rad: float = DEFAULT_MICRO_MOTION_DELTA_RAD,
+    tolerance_rad: float = DEFAULT_MICRO_MOTION_TOLERANCE_RAD,
+) -> Dict[str, Any]:
+    if not requested:
+        bridge = {
+            "requested": False,
+            "status": SEMANTIC_BRIDGE_STATUS_NOT_REQUESTED,
+            "gate_passed": False,
+            "blocking_reasons": [],
+            "semantic_task_contract_path": None,
+            "semantic_task_id": None,
+            "semantic_scene_version": None,
+            "semantic_intent": None,
+            "semantic_user_command": None,
+            "semantic_target_label": None,
+            "semantic_confidence_overall": None,
+            "semantic_confidence_semantic": None,
+            "semantic_bbox_xyxy": None,
+            "semantic_pixel_center": None,
+            "audited_non_executable_fields": [],
+            "triggered_simulation_micro_motion": False,
+            "simulation_micro_motion_request": None,
+            "simulation_only": True,
+            "real_robot_allowed": False,
+            "safety_boundary": _safety_report_fields({}),
+            "semantic_gate": {
+                "passed": False,
+                "status": SEMANTIC_BRIDGE_STATUS_NOT_REQUESTED,
+                "blocking_reasons": [],
+            },
+        }
+    else:
+        bridge = build_semantic_simulation_bridge_result(
+            request=SemanticSimulationBridgeRequest(
+                semantic_task_contract=contract if isinstance(contract, dict) else {},
+                semantic_task_contract_path=contract_path,
+                confidence_threshold=confidence_threshold,
+                joint_name=joint_name,
+                requested_delta_rad=requested_delta_rad,
+                tolerance_rad=tolerance_rad,
+            )
+        )
+    return _flatten_semantic_bridge_fields(bridge, contract)
+
+
+def _semantic_bridge_status_from_motion(
+    semantic_bridge_metadata: Dict[str, Any] | None,
+    simulation_micro_motion_metadata: Dict[str, Any] | None,
+) -> Dict[str, Any] | None:
+    if not semantic_bridge_metadata or not semantic_bridge_metadata.get("semantic_simulation_bridge_requested"):
+        return semantic_bridge_metadata
+    if semantic_bridge_metadata.get("semantic_gate_passed") is not True:
+        return semantic_bridge_metadata
+
+    status = (simulation_micro_motion_metadata or {}).get("simulation_micro_motion_status")
+    if status == MICRO_MOTION_STATUS_BLOCKED_BY_PRECHECK:
+        bridge_status = SEMANTIC_BRIDGE_STATUS_BLOCKED_BY_PRECHECK
+        reasons = _unique(
+            list(semantic_bridge_metadata.get("semantic_bridge_blocking_reasons") or [])
+            + list((simulation_micro_motion_metadata or {}).get("simulation_micro_motion_blocking_reasons") or [])
+        )
+    elif status == MICRO_MOTION_STATUS_FAILED:
+        bridge_status = SEMANTIC_BRIDGE_STATUS_FAILED
+        reasons = _unique(
+            list(semantic_bridge_metadata.get("semantic_bridge_blocking_reasons") or [])
+            + list((simulation_micro_motion_metadata or {}).get("simulation_micro_motion_blocking_reasons") or [])
+        )
+    else:
+        bridge_status = semantic_bridge_metadata.get("semantic_bridge_status")
+        reasons = list(semantic_bridge_metadata.get("semantic_bridge_blocking_reasons") or [])
+    bridge = dict(semantic_bridge_metadata)
+    bridge["semantic_bridge_status"] = bridge_status
+    bridge["semantic_bridge_blocking_reasons"] = reasons
+    if isinstance(bridge.get("semantic_bridge"), dict):
+        bridge["semantic_bridge"] = {
+            **bridge["semantic_bridge"],
+            "status": bridge_status,
+            "blocking_reasons": reasons,
+        }
+    return bridge
+
+
+def _flatten_semantic_bridge_fields(
+    bridge: Dict[str, Any],
+    contract: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    contract_copy = contract if isinstance(contract, dict) and bridge.get("requested") else None
+    status = bridge.get("status", SEMANTIC_BRIDGE_STATUS_NOT_REQUESTED)
+    return {
+        "semantic_simulation_bridge_requested": bridge.get("requested") is True,
+        "semantic_bridge_requested": bridge.get("requested") is True,
+        "semantic_bridge_status": status,
+        "semantic_task_contract_path": bridge.get("semantic_task_contract_path"),
+        "semantic_task_id": bridge.get("semantic_task_id"),
+        "semantic_scene_version": bridge.get("semantic_scene_version"),
+        "semantic_intent": bridge.get("semantic_intent"),
+        "semantic_user_command": bridge.get("semantic_user_command"),
+        "semantic_target_label": bridge.get("semantic_target_label"),
+        "semantic_confidence_overall": bridge.get("semantic_confidence_overall"),
+        "semantic_confidence_semantic": bridge.get("semantic_confidence_semantic"),
+        "semantic_gate_passed": bridge.get("gate_passed") is True,
+        "semantic_bridge_blocking_reasons": list(bridge.get("blocking_reasons") or []),
+        "triggered_simulation_micro_motion": bridge.get("triggered_simulation_micro_motion") is True,
+        "semantic_audited_non_executable_fields": list(bridge.get("audited_non_executable_fields") or []),
+        "semantic_contract_copy": contract_copy,
+        "semantic_bridge": bridge,
+        "semantic_simulation_bridge_result_path": None,
+        "semantic_simulation_bridge_report_path": None,
+        "semantic_task_contract_copy_path": None,
+        "semantic_bridge_evidence_available": False,
+        "semantic_bridge_files": [],
+    }
+
+
+def _semantic_bridge_info(result: Dict[str, Any]) -> Dict[str, Any]:
+    bridge = result.get("semantic_bridge") if isinstance(result.get("semantic_bridge"), dict) else {}
+    info = {
+        **bridge,
+        "requested": result.get("semantic_simulation_bridge_requested", bridge.get("requested", False)) is True,
+        "status": result.get("semantic_bridge_status", bridge.get("status", SEMANTIC_BRIDGE_STATUS_NOT_REQUESTED)),
+        "gate_passed": result.get("semantic_gate_passed", bridge.get("gate_passed", False)) is True,
+        "blocking_reasons": result.get("semantic_bridge_blocking_reasons", bridge.get("blocking_reasons", [])),
+        "semantic_task_contract_path": result.get(
+            "semantic_task_contract_path",
+            bridge.get("semantic_task_contract_path"),
+        ),
+        "semantic_task_id": result.get("semantic_task_id", bridge.get("semantic_task_id")),
+        "semantic_scene_version": result.get("semantic_scene_version", bridge.get("semantic_scene_version")),
+        "semantic_intent": result.get("semantic_intent", bridge.get("semantic_intent")),
+        "semantic_user_command": result.get("semantic_user_command", bridge.get("semantic_user_command")),
+        "semantic_target_label": result.get("semantic_target_label", bridge.get("semantic_target_label")),
+        "semantic_confidence_overall": result.get(
+            "semantic_confidence_overall",
+            bridge.get("semantic_confidence_overall"),
+        ),
+        "triggered_simulation_micro_motion": result.get(
+            "triggered_simulation_micro_motion",
+            bridge.get("triggered_simulation_micro_motion", False),
+        )
+        is True,
+        "semantic_simulation_bridge_result_path": result.get("semantic_simulation_bridge_result_path"),
+        "semantic_simulation_bridge_report_path": result.get("semantic_simulation_bridge_report_path"),
+        "semantic_task_contract_copy_path": result.get("semantic_task_contract_copy_path"),
+    }
+    return info
+
+
+def _motion_info(result: Dict[str, Any]) -> Dict[str, Any]:
+    motion = result.get("motion") if isinstance(result.get("motion"), dict) else {}
+    return {
+        **motion,
+        "simulation_micro_motion_requested": result.get("simulation_micro_motion_requested", False),
+        "simulation_micro_motion_status": result.get(
+            "simulation_micro_motion_status",
+            MICRO_MOTION_STATUS_NOT_REQUESTED,
+        ),
+        "simulation_only": result.get("simulation_only", True),
+        "real_robot_allowed": result.get("real_robot_allowed", False),
+        "real_robot_motion_executed": result.get("real_robot_motion_executed", False),
+        "command_type": motion.get("command_type"),
+        "joint_name": motion.get("joint_name"),
+        "requested_delta_rad": motion.get("requested_delta_rad"),
+        "actual_delta_rad": motion.get("actual_delta_rad"),
+        "tolerance_rad": motion.get("tolerance_rad"),
+        "delta_within_tolerance": motion.get("delta_within_tolerance", False),
+    }
+
+
+def _semantic_bridge_file_refs(result: Dict[str, Any]) -> list[Dict[str, str | None]]:
+    if not result.get("semantic_simulation_bridge_requested"):
+        return []
+    return [
+        {
+            "name": "semantic_simulation_bridge_result.json",
+            "path": result.get("semantic_simulation_bridge_result_path"),
+        },
+        {
+            "name": "semantic_simulation_bridge_report.md",
+            "path": result.get("semantic_simulation_bridge_report_path"),
+        },
+        {
+            "name": "semantic_task_contract_copy.json",
+            "path": result.get("semantic_task_contract_copy_path"),
+        },
+    ]
+
+
+def _safety_report_fields(result: Dict[str, Any]) -> Dict[str, bool]:
+    return {
+        "no_live_camera_used": True,
+        "no_live_vlm_used": True,
+        "no_ros2_used": True,
+        "no_moveit_used": True,
+        "no_rtde_used": True,
+        "no_urscript_used": True,
+        "no_dashboard_used": True,
+        "no_real_ur5_used": True,
+        "no_trajectory_generated": result.get("trajectory_generated", False) is not True,
+        "no_tcp_pose_world_executed": True,
+        "simulation_only": result.get("simulation_only", True) is True,
+        "real_robot_allowed": False,
+        "real_robot_motion_executed": False,
     }
 
 

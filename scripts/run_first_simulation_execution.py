@@ -9,11 +9,16 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.simulation_runtime import DEFAULT_SIMULATION_TASK, run_first_simulation_execution
+from src.semantic_simulation_bridge import (
+    DEFAULT_SEMANTIC_CONFIDENCE_THRESHOLD,
+    build_demo_semantic_task_contract,
+    load_semantic_task_contract,
+)
+from src.simulation_runtime import DEFAULT_SIMULATION_TASK, CURRENT_TETO_VERSION, run_first_simulation_execution
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run TETO V2.5.1 simulation-only micro-motion evidence smoke test.")
+    parser = argparse.ArgumentParser(description="Run TETO V2.6.0 semantic-to-simulation bridge smoke test.")
     parser.add_argument("--dry-run", action="store_true", help="Do not import Isaac; produce a test execution report.")
     parser.add_argument("--no-isaac", action="store_true", help="Pure Python test mode without Isaac imports.")
     parser.add_argument("--spawn-cube", action="store_true", help="Spawn a visible cube in the Isaac World.")
@@ -86,12 +91,42 @@ def build_parser() -> argparse.ArgumentParser:
         default=0.005,
         help="Allowed absolute error for the observed simulation joint delta.",
     )
+    parser.add_argument(
+        "--semantic-simulation-bridge",
+        action="store_true",
+        help="Gate an existing semantic task contract into the simulation-only micro-motion proof path.",
+    )
+    parser.add_argument("--semantic-task-json", help="Path to a semantic task contract JSON file.")
+    parser.add_argument(
+        "--semantic-bridge-demo-contract",
+        action="store_true",
+        help="Use the built-in eligible semantic bridge demo contract.",
+    )
+    parser.add_argument(
+        "--semantic-confidence-threshold",
+        type=float,
+        default=DEFAULT_SEMANTIC_CONFIDENCE_THRESHOLD,
+        help="Minimum semantic and overall confidence for the bridge gate.",
+    )
     return parser
 
 
 def main() -> int:
     args = build_parser().parse_args()
     simulation_task = _load_simulation_task(args.task_json)
+    semantic_contract = None
+    semantic_contract_path = None
+    if args.semantic_simulation_bridge:
+        if args.semantic_task_json and args.semantic_bridge_demo_contract:
+            raise ValueError("use either --semantic-task-json or --semantic-bridge-demo-contract, not both")
+        if args.semantic_task_json:
+            semantic_contract_path = str(Path(args.semantic_task_json).expanduser())
+            semantic_contract = load_semantic_task_contract(semantic_contract_path)
+        elif args.semantic_bridge_demo_contract:
+            semantic_contract = build_demo_semantic_task_contract()
+            semantic_contract_path = "builtin:eligible_demo_semantic_bridge_contract"
+        else:
+            raise ValueError("--semantic-simulation-bridge requires --semantic-task-json or --semantic-bridge-demo-contract")
     result = run_first_simulation_execution(
         simulation_task,
         dry_run=args.dry_run,
@@ -114,6 +149,10 @@ def main() -> int:
         micro_motion_joint=args.micro_motion_joint,
         micro_motion_delta_rad=args.micro_motion_delta_rad,
         micro_motion_tolerance_rad=args.micro_motion_tolerance_rad,
+        semantic_simulation_bridge=args.semantic_simulation_bridge,
+        semantic_task_contract=semantic_contract,
+        semantic_task_contract_path=semantic_contract_path,
+        semantic_confidence_threshold=args.semantic_confidence_threshold,
         output_dir=args.output_dir,
         write_report=True,
         demo_command=shlex.join([sys.executable, *sys.argv]),
@@ -125,7 +164,7 @@ def main() -> int:
 
 def print_summary(result: dict, report_path: Path) -> None:
     print("=" * 50)
-    print("TETO V2.5.1 SIMULATION-ONLY MICRO-MOTION EVIDENCE")
+    print(f"{CURRENT_TETO_VERSION} SEMANTIC-TO-SIMULATION MOTION BRIDGE")
     print("=" * 50)
     print(f"Status: {result['status']}")
     print(f"Mode: {result['mode']}")
@@ -229,6 +268,17 @@ def print_summary(result: dict, report_path: Path) -> None:
     print(f"after_joint_state_path: {motion.get('after_joint_state_path')}")
     print(f"simulation_motion_result_path: {motion.get('simulation_motion_result_path')}")
     print(f"simulation_motion_report_path: {motion.get('simulation_motion_report_path')}")
+    bridge = result.get("semantic_bridge") or {}
+    print(f"semantic_simulation_bridge_requested: {result.get('semantic_simulation_bridge_requested')}")
+    print(f"semantic_bridge_status: {result.get('semantic_bridge_status')}")
+    print(f"semantic_gate_passed: {result.get('semantic_gate_passed')}")
+    print(f"semantic_task_id: {result.get('semantic_task_id')}")
+    print(f"semantic_intent: {result.get('semantic_intent')}")
+    print(f"semantic_target_label: {result.get('semantic_target_label')}")
+    print(f"semantic_bridge_blocking_reasons: {result.get('semantic_bridge_blocking_reasons')}")
+    print(f"triggered_simulation_micro_motion: {result.get('triggered_simulation_micro_motion')}")
+    print(f"semantic_simulation_bridge_result_path: {bridge.get('semantic_simulation_bridge_result_path')}")
+    print(f"semantic_simulation_bridge_report_path: {bridge.get('semantic_simulation_bridge_report_path')}")
     print(f"Report: {report_path}")
     if result.get("blocking_reasons"):
         print(f"Blocking reasons: {', '.join(result['blocking_reasons'])}")

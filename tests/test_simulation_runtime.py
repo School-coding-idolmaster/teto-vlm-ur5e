@@ -225,6 +225,23 @@ def test_cli_simulation_micro_motion_arguments_parse():
     assert args.micro_motion_tolerance_rad == 0.005
 
 
+def test_cli_semantic_bridge_arguments_parse():
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "--semantic-simulation-bridge",
+            "--semantic-task-json",
+            "tests/fixtures/semantic_contracts/eligible_hover_to_object.json",
+            "--semantic-confidence-threshold",
+            "0.7",
+        ]
+    )
+
+    assert args.semantic_simulation_bridge is True
+    assert args.semantic_task_json == "tests/fixtures/semantic_contracts/eligible_hover_to_object.json"
+    assert args.semantic_confidence_threshold == 0.7
+
+
 def test_dry_run_robot_asset_check_passes_with_unavailable_default():
     result = run_first_simulation_execution(VALID_TASK, dry_run=True, steps=1, check_robot_asset=True)
 

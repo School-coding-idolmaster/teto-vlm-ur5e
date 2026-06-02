@@ -1235,6 +1235,65 @@ V2.5.1 remains simulation-only. No real robot command is generated. No ROS2 /
 MoveIt / RTDE / URScript / Dashboard / real UR5 control chain, trajectory
 planner, or `tcp_pose_world` control path is used.
 
+## TETO V2.6.0 Semantic-to-Simulation Motion Bridge
+
+TETO V2.6.0 adds a semantic-to-simulation-motion bridge. It consumes an
+existing semantic task contract JSON, runs a semantic eligibility gate, then
+connects only eligible contracts to the already-validated V2.4.0 simulation
+motion precheck and V2.5.x simulation-only micro-motion proof pulse.
+
+V2.6.0 does not make the robot execute a semantic target pose. It does not use
+live camera capture, live VLM/Qwen inference, ROS2, MoveIt, RTDE, URScript,
+Dashboard, a real UR5, a trajectory planner, or `tcp_pose_world` execution.
+If a semantic contract contains fields such as `world_point`, `pose_candidates`,
+or `tcp_pose_world`, those fields are copied and audited as non-executable
+contract evidence only.
+
+The bridge flow is:
+
+```text
+semantic task contract
+-> semantic bridge eligibility check
+-> simulation motion precheck
+-> Isaac simulation-only micro-motion
+-> semantic bridge evidence + motion evidence
+```
+
+The bridge proof pulse is fixed to a local Isaac simulation API request such as
+`joint_name=wrist_3_joint`, `requested_delta_rad=0.01`, and
+`command_type=ISAAC_SIMULATION_API_LOCAL_ONLY`. It proves that a semantic task
+can safely enter the simulation motion gate; it does not prove semantic task
+completion.
+
+Run the dry-run demo bridge:
+
+```bash
+python3 scripts/run_first_simulation_execution.py \
+  --dry-run \
+  --steps 3 \
+  --semantic-simulation-bridge \
+  --semantic-bridge-demo-contract
+```
+
+Run with a fixture semantic contract:
+
+```bash
+python3 scripts/run_first_simulation_execution.py \
+  --dry-run \
+  --steps 3 \
+  --semantic-simulation-bridge \
+  --semantic-task-json tests/fixtures/semantic_contracts/eligible_hover_to_object.json
+```
+
+Bridge evidence includes `semantic_simulation_bridge_result.json`,
+`semantic_simulation_bridge_report.md`, and `semantic_task_contract_copy.json`.
+`evidence_manifest.json` records `semantic_bridge_status`,
+`semantic_gate_passed`, `semantic_task_id`, `semantic_intent`,
+`semantic_target_label`, `semantic_bridge_files`, and whether the bridge
+triggered the simulation-only micro-motion proof pulse. `summary.md` includes a
+Semantic-to-Simulation Bridge Summary with the bridge status and resulting
+micro-motion status.
+
 Demo commands accept common image formats directly. TETO automatically
 creates a cached RGB JPEG under `data/processed/auto/`, with EXIF orientation
 applied, long edge resized, animated images reduced to the first frame, and
@@ -1443,4 +1502,5 @@ python3 -m src.cli prepare-images --input-dir data/raw --output-dir data/process
 - V2.4.0 = simulation-only motion precheck contract
 - V2.5.0 = first simulation robot micro-motion
 - V2.5.1 = motion evidence polish
+- V2.6.0 = semantic-to-simulation motion bridge
 - Future ROS2 / MoveIt2 / RTDE / URScript / real UR5 controller integration remains outside the current implemented safety boundary
