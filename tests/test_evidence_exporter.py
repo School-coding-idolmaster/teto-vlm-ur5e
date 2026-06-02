@@ -38,7 +38,7 @@ def test_dry_run_execution_writes_evidence_artifacts(tmp_path):
     assert manifest_path.exists()
 
     summary = summary_path.read_text(encoding="utf-8")
-    assert "TETO version: TETO V2.7.0" in summary
+    assert "TETO version: TETO V2.7.1" in summary
     assert f"run_id: {tmp_path.name}" in summary
     assert "mode: dry_run" in summary
     assert "status: PASS" in summary
@@ -77,7 +77,7 @@ def test_dry_run_execution_writes_evidence_artifacts(tmp_path):
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["schema_version"] == EVIDENCE_MANIFEST_SCHEMA_VERSION
     assert manifest["run_id"] == tmp_path.name
-    assert manifest["teto_version"] == "TETO V2.7.0"
+    assert manifest["teto_version"] == "TETO V2.7.1"
     assert manifest["mode"] == "dry_run"
     assert manifest["status"] == "PASS"
     assert manifest["report_path"] == str(report_path)
@@ -152,7 +152,7 @@ def test_evidence_exporter_writes_micro_motion_manifest_and_summary(tmp_path):
     ]
     assert manifest["simulation_micro_motion"]["motion_evidence_files"] == manifest["motion_evidence_files"]
 
-    assert "# TETO V2.7.0 Simulation Micro-Motion Evidence Report" in report
+    assert "# TETO V2.7.1 Simulation Micro-Motion Evidence Report" in report
     assert "## Joint Diff Summary" in report
     assert "## Evidence Files" in report
     assert "simulation_motion_result.json" in report
@@ -203,6 +203,53 @@ def test_evidence_exporter_writes_semantic_bridge_manifest_and_summary(tmp_path)
     assert "# TETO V2.6.0 Semantic-to-Simulation Motion Bridge Report" in bridge_report
     assert "It does not call a live camera or live VLM." in bridge_report
     assert (tmp_path / "semantic_task_contract_copy.json").exists()
+    assert result["real_robot_motion_executed"] is False
+
+
+def test_evidence_exporter_writes_safe_execution_polish_fields(tmp_path):
+    contract_path = "tests/fixtures/semantic_contracts/eligible_hover_to_object.json"
+    with open(contract_path, encoding="utf-8") as contract_file:
+        contract = json.load(contract_file)
+
+    result = run_first_simulation_execution(
+        VALID_TASK,
+        dry_run=True,
+        steps=3,
+        semantic_simulation_bridge=True,
+        semantic_task_contract=contract,
+        semantic_task_contract_path=contract_path,
+        safe_simulated_task_execution=True,
+        execution_enable_retry_recommendation=True,
+        execution_enable_fallback_recommendation=True,
+        output_dir=tmp_path,
+        write_report=True,
+    )
+
+    summary = (tmp_path / "summary.md").read_text(encoding="utf-8")
+    manifest = json.loads((tmp_path / "evidence_manifest.json").read_text(encoding="utf-8"))
+    failure = json.loads((tmp_path / "failure_analysis.json").read_text(encoding="utf-8"))
+    recommendation = json.loads((tmp_path / "retry_fallback_recommendation.json").read_text(encoding="utf-8"))
+
+    assert "### Human-readable conclusion" in summary
+    assert "DRY_RUN_ONLY" in summary
+    assert "### Evidence Files" in summary
+    assert manifest["execution_evidence_available"] is True
+    assert manifest["replay_ready"] is True
+    assert manifest["safety_boundary_confirmed"] is True
+    assert manifest["no_automatic_retry_executed"] is True
+    assert manifest["latest_execution_summary"]["execution_feedback_status"] == "WARNING"
+    assert manifest["latest_execution_summary"]["fallback_type"] == "RECHECK_SIMULATION_PRECHECK"
+    assert "simulated_task_execution_report.md" in [
+        item["name"] for item in manifest["replay_bundle_files"]
+    ]
+    assert failure["failure_reason"] == "E_DRY_RUN_ONLY"
+    assert failure["failure_category"] == "DRY_RUN"
+    assert failure["blocking_stage"] == "DRY_RUN"
+    assert failure["next_safe_action"]
+    assert recommendation["automatic_retry_executed"] is False
+    assert recommendation["recommendation_reason"]
+    assert recommendation["next_safe_action"]
+    assert result["robot_motion_executed"] is False
     assert result["real_robot_motion_executed"] is False
 
 

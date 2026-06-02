@@ -1344,6 +1344,35 @@ Task Execution Summary, and `evidence_manifest.json` records
 `failure_reason`, retry/fallback recommendation fields, post-motion state check
 status, and replay readiness.
 
+## TETO V2.7.1 Execution Evidence Polish
+
+TETO V2.7.1 does not add new robot motion capability and does not change the
+V2.7.0 safe simulated task execution loop. It polishes the execution evidence
+bundle so that each run is easier to inspect, replay, and audit.
+
+V2.7.1 improves:
+
+- `simulated_task_execution_report.md` with lifecycle, gate decision, motion
+  verification, failure/retry/fallback, replay readiness, and safety boundary
+  tables.
+- `summary.md` with a human-readable execution conclusion and a dedicated
+  execution evidence file list.
+- `evidence_manifest.json` with `execution_evidence_available`,
+  `execution_evidence_files`, `replay_ready`, `replay_bundle_files`,
+  `latest_execution_summary`, `safety_boundary_confirmed`, and
+  `no_automatic_retry_executed`.
+- `failure_analysis.json` with `failure_category`, `blocking_stage`,
+  `human_readable_message`, recommendation flags, fallback type, and
+  `next_safe_action`.
+- `retry_fallback_recommendation.json` with `recommendation_reason`,
+  `automatic_retry_executed=false`, and `next_safe_action`.
+
+V2.7.1 remains simulation-only. It does not call a live camera or live VLM, does
+not generate real robot commands, and does not use a ROS2, MoveIt, RTDE,
+URScript, Dashboard, real UR5, trajectory, or `tcp_pose_world` control chain.
+Retry and fallback remain recommendations only; no automatic retry motion is
+executed.
+
 Demo commands accept common image formats directly. TETO automatically
 creates a cached RGB JPEG under `data/processed/auto/`, with EXIF orientation
 applied, long edge resized, animated images reduced to the first frame, and
@@ -1554,4 +1583,5 @@ python3 -m src.cli prepare-images --input-dir data/raw --output-dir data/process
 - V2.5.1 = motion evidence polish
 - V2.6.0 = semantic-to-simulation motion bridge
 - V2.7.0 = safe simulated task execution loop
+- V2.7.1 = execution evidence polish
 - Future ROS2 / MoveIt2 / RTDE / URScript / real UR5 controller integration remains outside the current implemented safety boundary

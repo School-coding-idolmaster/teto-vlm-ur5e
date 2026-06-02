@@ -212,6 +212,34 @@ def export_simulation_evidence(
             encoding="utf-8",
         )
     motion_evidence_summary = summarize_motion_evidence(simulation_micro_motion_info)
+    execution_evidence_files = (
+        _simulated_task_execution_files(simulated_task_execution_info)
+        if simulated_task_execution_requested
+        else []
+    )
+    latest_execution_summary = _latest_execution_summary(
+        simulated_task_execution_info,
+        simulation_motion_precheck_info,
+        simulation_micro_motion_info,
+        semantic_bridge_info,
+    )
+    replay_bundle_files = (
+        _replay_bundle_files(
+            execution_evidence_files=execution_evidence_files,
+            motion_evidence_files=motion_evidence_summary["motion_evidence_files"],
+            semantic_bridge_files=_semantic_bridge_files(semantic_bridge_info) if semantic_bridge_requested else [],
+        )
+        if simulated_task_execution_requested
+        else []
+    )
+    safety_boundary_confirmed = _safety_boundary_confirmed(result, simulated_task_execution_info)
+    no_automatic_retry_executed = (
+        (simulated_task_execution_info.get("retry_fallback_recommendation") or {}).get(
+            "automatic_retry_executed",
+            False,
+        )
+        is False
+    )
 
     manifest = {
         "schema_version": EVIDENCE_MANIFEST_SCHEMA_VERSION,
@@ -265,12 +293,15 @@ def export_simulation_evidence(
                 "post_motion_state_check_status"
             )
         ),
-        "simulated_task_execution_files": (
-            _simulated_task_execution_files(simulated_task_execution_info)
-            if simulated_task_execution_requested
-            else []
-        ),
+        "simulated_task_execution_files": execution_evidence_files,
+        "execution_evidence_available": simulated_task_execution_requested and bool(execution_evidence_files),
+        "execution_evidence_files": execution_evidence_files,
         "replay_ready": simulated_task_execution_info.get("replay_ready", False),
+        "replay_index_hint": "Use replay_bundle_files to inspect semantic, motion, and execution evidence in order.",
+        "replay_bundle_files": replay_bundle_files,
+        "latest_execution_summary": latest_execution_summary,
+        "safety_boundary_confirmed": safety_boundary_confirmed,
+        "no_automatic_retry_executed": no_automatic_retry_executed,
         "motion_evidence_available": motion_evidence_summary["motion_evidence_available"],
         "motion_evidence_files": motion_evidence_summary["motion_evidence_files"],
         "motion_diff_summary": motion_evidence_summary["motion_diff_summary"],
@@ -655,6 +686,7 @@ def _simulated_task_execution_info(result: Dict[str, Any]) -> Dict[str, Any]:
             "retry_fallback_recommendation",
             execution.get("retry_fallback_recommendation", {}),
         ),
+        "safety_boundary": result.get("safety_boundary", execution.get("safety_boundary", {})),
         "simulated_task_execution_result_path": result.get("simulated_task_execution_result_path"),
         "simulated_task_execution_report_path": result.get("simulated_task_execution_report_path"),
         "execution_feedback_path": result.get("execution_feedback_path"),
@@ -676,6 +708,69 @@ def _simulated_task_execution_files(execution_info: Dict[str, Any]) -> list[Dict
             "path": execution_info.get("retry_fallback_recommendation_path"),
         },
     ]
+
+
+def _latest_execution_summary(
+    execution_info: Dict[str, Any],
+    precheck_info: Dict[str, Any],
+    micro_motion_info: Dict[str, Any],
+    semantic_bridge_info: Dict[str, Any],
+) -> Dict[str, Any]:
+    post_check = execution_info.get("post_motion_state_check") or {}
+    return {
+        "execution_attempt_id": execution_info.get("execution_attempt_id"),
+        "semantic_bridge_status": semantic_bridge_info.get("status"),
+        "semantic_gate_passed": semantic_bridge_info.get("gate_passed"),
+        "simulation_motion_precheck_status": precheck_info.get("status"),
+        "simulation_micro_motion_status": micro_motion_info.get("simulation_micro_motion_status"),
+        "post_motion_state_check_status": post_check.get("post_motion_state_check_status"),
+        "simulated_task_status": execution_info.get("simulated_task_status"),
+        "execution_feedback_status": execution_info.get("execution_feedback_status"),
+        "failure_reason": execution_info.get("failure_reason"),
+        "retry_recommended": execution_info.get("retry_recommended"),
+        "fallback_recommended": execution_info.get("fallback_recommended"),
+        "fallback_type": execution_info.get("fallback_type"),
+        "replay_ready": execution_info.get("replay_ready", False),
+    }
+
+
+def _replay_bundle_files(
+    *,
+    execution_evidence_files: list[Dict[str, str | None]],
+    motion_evidence_files: list[Dict[str, str | None]],
+    semantic_bridge_files: list[Dict[str, str | None]],
+) -> list[Dict[str, str | None]]:
+    return [
+        *semantic_bridge_files,
+        *motion_evidence_files,
+        *execution_evidence_files,
+    ]
+
+
+def _safety_boundary_confirmed(result: Dict[str, Any], execution_info: Dict[str, Any]) -> bool:
+    safety = result.get("safety") if isinstance(result.get("safety"), dict) else {}
+    execution_safety = (
+        execution_info.get("safety_boundary")
+        if isinstance(execution_info.get("safety_boundary"), dict)
+        else {}
+    )
+    return all(
+        [
+            result.get("simulation_only", safety.get("simulation_only", True)) is True,
+            result.get("real_robot_motion_executed", safety.get("real_robot_motion_executed", False)) is False,
+            safety.get("no_live_camera_used", execution_safety.get("no_live_camera_used", True)) is True,
+            safety.get("no_live_vlm_used", execution_safety.get("no_live_vlm_used", True)) is True,
+            safety.get("no_ros2_used", execution_safety.get("no_ros2_used", True)) is True,
+            safety.get("no_moveit_used", execution_safety.get("no_moveit_used", True)) is True,
+            safety.get("no_rtde_used", execution_safety.get("no_rtde_used", True)) is True,
+            safety.get("no_urscript_used", execution_safety.get("no_urscript_used", True)) is True,
+            safety.get("no_dashboard_used", execution_safety.get("no_dashboard_used", True)) is True,
+            safety.get("no_real_ur5_used", execution_safety.get("no_real_ur5_used", True)) is True,
+            safety.get("no_trajectory_generated", execution_safety.get("no_trajectory_generated", True)) is True,
+            safety.get("no_tcp_pose_world_executed", execution_safety.get("no_tcp_pose_world_executed", True)) is True,
+            execution_safety.get("automatic_retry_executed", False) is False,
+        ]
+    )
 
 
 def _write_json_artifact(path: Path, payload: Dict[str, Any]) -> None:
@@ -883,6 +978,14 @@ def _build_summary_markdown(
             "",
             "## Safe Simulated Task Execution Summary",
             "",
+            "### Human-readable conclusion",
+            "",
+            _human_readable_execution_conclusion(
+                simulated_task_execution_info,
+                simulation_micro_motion_info,
+                semantic_bridge_info,
+            ),
+            "",
             f"- execution_attempt_id: {_format_value(simulated_task_execution_info.get('execution_attempt_id'))}",
             f"- simulated_task_status: {_format_value(simulated_task_execution_info.get('simulated_task_status'))}",
             f"- semantic_bridge_status: {_format_value(semantic_bridge_info.get('status'))}",
@@ -895,10 +998,58 @@ def _build_summary_markdown(
             f"- retry_recommended: {_format_value(simulated_task_execution_info.get('retry_recommended'))}",
             f"- fallback_recommended: {_format_value(simulated_task_execution_info.get('fallback_recommended'))}",
             f"- fallback_type: {_format_value(simulated_task_execution_info.get('fallback_type'))}",
-            f"- simulated_task_execution_files: {_format_value(_simulated_task_execution_files(simulated_task_execution_info) if simulated_task_execution_info.get('safe_simulated_task_execution_requested') else [])}",
+            f"- replay_ready: {_format_value(simulated_task_execution_info.get('replay_ready'))}",
+            "",
+            "### Evidence Files",
+            "",
+            *[
+                f"- {item.get('name')}: {_format_value(item.get('path'))}"
+                for item in (
+                    _simulated_task_execution_files(simulated_task_execution_info)
+                    if simulated_task_execution_info.get("safe_simulated_task_execution_requested")
+                    else []
+                )
+            ],
             "",
         ]
     )
+
+
+def _human_readable_execution_conclusion(
+    execution_info: Dict[str, Any],
+    micro_motion_info: Dict[str, Any],
+    semantic_bridge_info: Dict[str, Any],
+) -> str:
+    status = execution_info.get("simulated_task_status")
+    fallback_type = execution_info.get("fallback_type")
+    if status == "SUCCEEDED":
+        return (
+            "SUCCEEDED: semantic gate and simulation precheck passed, the local Isaac Sim "
+            "micro-motion evidence was verified, and the replay-ready bundle is complete."
+        )
+    if status == "DRY_RUN_ONLY":
+        return (
+            "DRY_RUN_ONLY: this run generated replay-ready dry-run evidence only; it does not "
+            "claim a true Isaac joint state change or real robot motion."
+        )
+    if status == "BLOCKED_BY_SEMANTIC_GATE":
+        return (
+            "BLOCKED_BY_SEMANTIC_GATE: the semantic gate blocked execution before motion; "
+            f"fallback_type={_format_value(fallback_type)}."
+        )
+    if status == "BLOCKED_BY_PRECHECK":
+        return (
+            "BLOCKED_BY_PRECHECK: simulation motion precheck was not ready, so no simulated "
+            "micro-motion should be treated as accepted evidence."
+        )
+    if status in {"MOTION_FAILED", "POST_CHECK_FAILED"}:
+        return (
+            f"{_format_value(status)}: execution evidence was incomplete or outside tolerance; "
+            "manual review is required before any further simulated attempt."
+        )
+    if semantic_bridge_info.get("requested") or micro_motion_info.get("requested"):
+        return "Execution evidence is present but did not reach a recognized accepted status."
+    return "Safe simulated task execution was not requested for this run."
 
 
 def _build_robot_structure_report_markdown(

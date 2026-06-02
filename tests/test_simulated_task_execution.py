@@ -120,7 +120,13 @@ def test_semantic_gate_blocked_contracts_produce_blocked_status(tmp_path):
         assert result["simulated_task_status"] == "BLOCKED_BY_SEMANTIC_GATE"
         assert result["execution_feedback_status"] == "BLOCKED"
         assert result["failure_reason"] == FAILURE_REASON_SEMANTIC_GATE_BLOCKED
-        assert result["fallback_recommended"] is True
+    assert result["fallback_recommended"] is True
+
+    blocked_report = tmp_path / "no_target_rejected.json" / "simulated_task_execution_report.md"
+    blocked_manifest = tmp_path / "no_target_rejected.json" / "evidence_manifest.json"
+    assert blocked_report.exists()
+    assert blocked_manifest.exists()
+    assert "BLOCKED_BY_SEMANTIC_GATE" in blocked_report.read_text(encoding="utf-8")
 
 
 def test_precheck_not_ready_produces_blocked_by_precheck():
@@ -204,12 +210,44 @@ def test_evidence_files_are_written_for_safe_execution(tmp_path):
     manifest = json.loads((tmp_path / "evidence_manifest.json").read_text(encoding="utf-8"))
     summary = (tmp_path / "summary.md").read_text(encoding="utf-8")
     report = (tmp_path / "simulated_task_execution_report.md").read_text(encoding="utf-8")
+    failure = json.loads((tmp_path / "failure_analysis.json").read_text(encoding="utf-8"))
+    recommendation = json.loads((tmp_path / "retry_fallback_recommendation.json").read_text(encoding="utf-8"))
 
     assert manifest["simulated_task_execution_requested"] is True
+    assert manifest["execution_evidence_available"] is True
+    assert manifest["replay_ready"] is True
+    assert manifest["safety_boundary_confirmed"] is True
+    assert manifest["no_automatic_retry_executed"] is True
+    assert manifest["latest_execution_summary"]["simulated_task_status"] == "DRY_RUN_ONLY"
+    assert "simulated_task_execution_report.md" in [
+        item["name"] for item in manifest["execution_evidence_files"]
+    ]
     assert "simulated_task_execution_result.json" in [
         item["name"] for item in manifest["simulated_task_execution_files"]
     ]
     assert "## Safe Simulated Task Execution Summary" in summary
-    assert "# TETO V2.7.0 Safe Simulated Task Execution Report" in report
+    assert "### Human-readable conclusion" in summary
+    assert "DRY_RUN_ONLY: this run generated replay-ready dry-run evidence only" in summary
+    assert "### Evidence Files" in summary
+    assert "# TETO V2.7.1 Safe Simulated Task Execution Evidence Report" in report
+    assert "## Execution Lifecycle Table" in report
+    assert "## Gate Decision Table" in report
+    assert "## Motion Verification Table" in report
+    assert "## Failure / Retry / Fallback Table" in report
+    assert "## Replay Readiness Summary" in report
+    assert "This is a safe simulated task execution evidence report." in report
     assert "It does not call a live camera or live VLM." in report
-    assert "Retry and fallback are recommendations only" in report
+    assert "It does not execute target poses, tcp_pose_world, trajectories, MoveIt goals, URScript, Dashboard commands, or real robot commands." in report
+    assert "Retry and fallback are recommendations only; no automatic repeated motion is executed." in report
+    assert failure["next_safe_action"]
+    assert failure["failure_category"] == "DRY_RUN"
+    assert failure["blocking_stage"] == "DRY_RUN"
+    assert failure["human_readable_message"] == "Dry-run only; no real Isaac state change is claimed."
+    assert failure["retry_recommended"] is True
+    assert failure["fallback_recommended"] is True
+    assert failure["fallback_type"] == "RECHECK_SIMULATION_PRECHECK"
+    assert recommendation["automatic_retry_executed"] is False
+    assert recommendation["recommendation_reason"]
+    assert recommendation["next_safe_action"]
+    assert "real_robot_motion_executed: True" not in report
+    assert "robot_motion_executed: True" not in summary

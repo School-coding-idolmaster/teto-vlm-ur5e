@@ -75,7 +75,14 @@ class ExecutionFeedback:
 @dataclass(frozen=True)
 class FailureAnalysis:
     failure_reason: str
+    failure_category: str
+    blocking_stage: str
+    human_readable_message: str
     failure_summary: str
+    retry_recommended: bool
+    fallback_recommended: bool
+    fallback_type: str
+    next_safe_action: str
     semantic_blocking_reasons: list[str]
     precheck_blocking_reasons: list[str]
     motion_blocking_reasons: list[str]
@@ -90,8 +97,10 @@ class RetryFallbackRecommendation:
     retry_recommended: bool
     fallback_recommended: bool
     fallback_type: str
+    recommendation_reason: str
     recommendation_summary: str
     automatic_retry_executed: bool
+    next_safe_action: str
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -175,6 +184,13 @@ def execute_safe_simulated_task(
         retry_enabled=normalized_request.retry_recommendation_enabled,
         fallback_enabled=normalized_request.fallback_recommendation_enabled,
     )
+    failure_analysis = {
+        **failure_analysis,
+        "retry_recommended": recommendation["retry_recommended"],
+        "fallback_recommended": recommendation["fallback_recommended"],
+        "fallback_type": recommendation["fallback_type"],
+        "next_safe_action": recommendation["next_safe_action"],
+    }
     feedback = _build_execution_feedback(simulated_status, failure_analysis, post_check)
     attempt = ExecutionAttemptRecord(
         execution_attempt_id=str(normalized_request.execution_attempt_id),
@@ -295,15 +311,23 @@ def analyze_execution_failure(
     if simulated_task_status == SIMULATED_TASK_STATUS_SUCCEEDED:
         reason = FAILURE_REASON_NONE
         summary = "The simulated execution attempt succeeded."
+        category = "NONE"
+        stage = "NONE"
     elif simulated_task_status == SIMULATED_TASK_STATUS_DRY_RUN_ONLY:
         reason = FAILURE_REASON_DRY_RUN_ONLY
         summary = "Dry-run only; no real Isaac state change is claimed."
+        category = "DRY_RUN"
+        stage = "DRY_RUN"
     elif simulated_task_status == SIMULATED_TASK_STATUS_BLOCKED_BY_SEMANTIC_GATE:
         reason = FAILURE_REASON_SEMANTIC_GATE_BLOCKED
         summary = "The semantic gate blocked the simulated execution attempt."
+        category = "SEMANTIC_GATE"
+        stage = "SEMANTIC_GATE"
     elif simulated_task_status == SIMULATED_TASK_STATUS_BLOCKED_BY_PRECHECK:
         reason = FAILURE_REASON_PRECHECK_NOT_READY
         summary = "The simulation motion precheck was not ready."
+        category = "SIMULATION_PRECHECK"
+        stage = "SIMULATION_MOTION_PRECHECK"
     elif simulated_task_status == SIMULATED_TASK_STATUS_MOTION_FAILED:
         reason = (
             FAILURE_REASON_DELTA_OUT_OF_TOLERANCE
@@ -311,15 +335,28 @@ def analyze_execution_failure(
             else FAILURE_REASON_MICRO_MOTION_FAILED
         )
         summary = "The simulation-only micro-motion did not produce acceptable evidence."
+        category = "SIMULATION_MOTION"
+        stage = "SIMULATION_MICRO_MOTION"
     elif simulated_task_status == SIMULATED_TASK_STATUS_POST_CHECK_FAILED:
         reason = FAILURE_REASON_POST_STATE_MISSING
         summary = "Post-motion state evidence was missing or incomplete."
+        category = "POST_MOTION_STATE"
+        stage = "POST_MOTION_STATE_CHECK"
     else:
         reason = FAILURE_REASON_UNEXPECTED_STATE
         summary = "The simulated execution attempt ended in an unexpected state."
+        category = "UNEXPECTED"
+        stage = "EXECUTION_CLASSIFICATION"
     return FailureAnalysis(
         failure_reason=reason,
+        failure_category=category,
+        blocking_stage=stage,
+        human_readable_message=summary,
         failure_summary=summary,
+        retry_recommended=False,
+        fallback_recommended=False,
+        fallback_type=FALLBACK_TYPE_NONE,
+        next_safe_action=_next_safe_action(reason, FALLBACK_TYPE_NONE),
         semantic_blocking_reasons=semantic_reasons,
         precheck_blocking_reasons=_list(precheck.get("blocking_reasons")),
         motion_blocking_reasons=motion_reasons,
@@ -338,6 +375,7 @@ def recommend_retry_or_fallback(
     fallback = False
     fallback_type = FALLBACK_TYPE_NONE
     summary = "No retry or fallback is recommended."
+    reason_text = summary
     if reason == FAILURE_REASON_NONE:
         pass
     elif reason == FAILURE_REASON_DRY_RUN_ONLY:
@@ -345,6 +383,7 @@ def recommend_retry_or_fallback(
         fallback = bool(fallback_enabled)
         fallback_type = FALLBACK_TYPE_RECHECK_SIMULATION_PRECHECK if fallback else FALLBACK_TYPE_NONE
         summary = "Dry-run evidence is replay-ready; run Isaac validation for state-change evidence."
+        reason_text = summary
     elif reason == FAILURE_REASON_SEMANTIC_GATE_BLOCKED:
         semantic_reasons = set(failure_analysis.get("semantic_blocking_reasons") or [])
         retry = bool(retry_enabled and ("E_STATE_STALE" in semantic_reasons or "E_LOW_CONFIDENCE" in semantic_reasons))
@@ -356,27 +395,33 @@ def recommend_retry_or_fallback(
         else:
             fallback_type = FALLBACK_TYPE_REVALIDATE_SEMANTIC_CONTRACT
         summary = "Semantic evidence should be reobserved or revalidated before another execution attempt."
+        reason_text = summary
     elif reason == FAILURE_REASON_PRECHECK_NOT_READY:
         retry = bool(retry_enabled)
         fallback = bool(fallback_enabled)
         fallback_type = FALLBACK_TYPE_RECHECK_SIMULATION_PRECHECK
         summary = "Recheck robot asset, articulation readiness, and observed state before another attempt."
+        reason_text = summary
     elif reason in {FAILURE_REASON_MICRO_MOTION_FAILED, FAILURE_REASON_DELTA_OUT_OF_TOLERANCE}:
         retry = bool(retry_enabled)
         fallback = bool(fallback_enabled)
         fallback_type = FALLBACK_TYPE_MANUAL_REVIEW
         summary = "Manual review is recommended before retrying simulation motion."
+        reason_text = summary
     else:
         retry = False
         fallback = bool(fallback_enabled)
         fallback_type = FALLBACK_TYPE_MANUAL_REVIEW
         summary = "Manual review is recommended."
+        reason_text = summary
     return RetryFallbackRecommendation(
         retry_recommended=retry,
         fallback_recommended=fallback,
         fallback_type=fallback_type,
+        recommendation_reason=reason_text,
         recommendation_summary=summary,
         automatic_retry_executed=False,
+        next_safe_action=_next_safe_action(str(reason), fallback_type),
     ).to_dict()
 
 
@@ -394,15 +439,70 @@ def format_simulated_task_execution_report(
         if isinstance(result.get("retry_fallback_recommendation"), dict)
         else {}
     )
+    attempt = (
+        result.get("execution_attempt_record")
+        if isinstance(result.get("execution_attempt_record"), dict)
+        else {}
+    )
     return "\n".join(
         [
-            "# TETO V2.7.0 Safe Simulated Task Execution Report",
+            "# TETO V2.7.1 Safe Simulated Task Execution Evidence Report",
             "",
             "## Execution Attempt Summary",
             "",
             f"- execution_attempt_id: {_format_value(result.get('execution_attempt_id'))}",
             f"- simulated_task_status: {_format_value(result.get('simulated_task_status'))}",
             f"- replay_ready: {_format_value(result.get('replay_ready'))}",
+            "",
+            "## Execution Lifecycle Table",
+            "",
+            "| Step | Status | Evidence |",
+            "| --- | --- | --- |",
+            f"| semantic gate | {_format_value(result.get('semantic_bridge_status'))} | semantic_gate_passed={_format_value(result.get('semantic_gate_passed'))} |",
+            f"| simulation precheck | {_format_value(result.get('simulation_motion_precheck_status'))} | ready_for_simulation_motion={_format_value(result.get('ready_for_simulation_motion'))} |",
+            f"| simulation micro-motion | {_format_value(result.get('simulation_micro_motion_status'))} | robot_motion_executed={_format_value(attempt.get('robot_motion_executed'))}; real_robot_motion_executed={_format_value(attempt.get('real_robot_motion_executed'))} |",
+            f"| post-motion state check | {_format_value(post_check.get('post_motion_state_check_status'))} | post_check_passed={_format_value(post_check.get('post_check_passed'))} |",
+            f"| execution feedback | {_format_value(feedback.get('execution_feedback_status'))} | simulated_task_status={_format_value(result.get('simulated_task_status'))} |",
+            "",
+            "## Gate Decision Table",
+            "",
+            "| Gate | Decision | Blocking Reasons |",
+            "| --- | --- | --- |",
+            f"| semantic gate | {_format_value(result.get('semantic_gate_passed'))} | {_format_value(failure.get('semantic_blocking_reasons'))} |",
+            f"| simulation precheck | {_format_value(result.get('ready_for_simulation_motion'))} | {_format_value(failure.get('precheck_blocking_reasons'))} |",
+            "",
+            "## Motion Verification Table",
+            "",
+            "| Metric | Value |",
+            "| --- | --- |",
+            f"| simulation_micro_motion_status | {_format_value(result.get('simulation_micro_motion_status'))} |",
+            f"| actual_delta_rad | {_format_value(result.get('actual_delta_rad'))} |",
+            f"| delta_within_tolerance | {_format_value(result.get('delta_within_tolerance'))} |",
+            f"| post_motion_state_check_status | {_format_value(post_check.get('post_motion_state_check_status'))} |",
+            f"| before_state_available | {_format_value(post_check.get('before_state_available'))} |",
+            f"| after_state_available | {_format_value(post_check.get('after_state_available'))} |",
+            f"| actual_delta_available | {_format_value(post_check.get('actual_delta_available'))} |",
+            "",
+            "## Failure / Retry / Fallback Table",
+            "",
+            "| Field | Value |",
+            "| --- | --- |",
+            f"| failure_reason | {_format_value(failure.get('failure_reason'))} |",
+            f"| failure_category | {_format_value(failure.get('failure_category'))} |",
+            f"| blocking_stage | {_format_value(failure.get('blocking_stage'))} |",
+            f"| human_readable_message | {_format_value(failure.get('human_readable_message'))} |",
+            f"| retry_recommended | {_format_value(recommendation.get('retry_recommended'))} |",
+            f"| fallback_recommended | {_format_value(recommendation.get('fallback_recommended'))} |",
+            f"| fallback_type | {_format_value(recommendation.get('fallback_type'))} |",
+            f"| automatic_retry_executed | {_format_value(recommendation.get('automatic_retry_executed'))} |",
+            f"| next_safe_action | {_format_value(recommendation.get('next_safe_action'))} |",
+            "",
+            "## Replay Readiness Summary",
+            "",
+            f"- replay_ready: {_format_value(result.get('replay_ready'))}",
+            f"- execution_attempt_id: {_format_value(result.get('execution_attempt_id'))}",
+            f"- evidence_file_count: {_format_value(len(evidence_files))}",
+            "- replay scope: semantic contract, gate outcome, simulation precheck, micro-motion evidence, post-motion check, feedback, failure analysis, retry/fallback recommendation",
             "",
             "## Semantic Gate Summary",
             "",
@@ -436,14 +536,20 @@ def format_simulated_task_execution_report(
             "## Failure Analysis",
             "",
             f"- failure_reason: {_format_value(failure.get('failure_reason'))}",
+            f"- failure_category: {_format_value(failure.get('failure_category'))}",
+            f"- blocking_stage: {_format_value(failure.get('blocking_stage'))}",
+            f"- human_readable_message: {_format_value(failure.get('human_readable_message'))}",
             f"- failure_summary: {_format_value(failure.get('failure_summary'))}",
+            f"- next_safe_action: {_format_value(failure.get('next_safe_action'))}",
             "",
             "## Retry / Fallback Recommendation",
             "",
             f"- retry_recommended: {_format_value(recommendation.get('retry_recommended'))}",
             f"- fallback_recommended: {_format_value(recommendation.get('fallback_recommended'))}",
             f"- fallback_type: {_format_value(recommendation.get('fallback_type'))}",
+            f"- recommendation_reason: {_format_value(recommendation.get('recommendation_reason'))}",
             f"- automatic_retry_executed: {_format_value(recommendation.get('automatic_retry_executed'))}",
+            f"- next_safe_action: {_format_value(recommendation.get('next_safe_action'))}",
             "",
             "## Evidence Files",
             "",
@@ -451,12 +557,12 @@ def format_simulated_task_execution_report(
             "",
             "## Safety Boundary",
             "",
-            "This is a safe simulated task execution loop.",
+            "This is a safe simulated task execution evidence report.",
             "It consumes an existing semantic task contract.",
             "It does not call a live camera or live VLM.",
             "It does not execute target poses, tcp_pose_world, trajectories, MoveIt goals, URScript, Dashboard commands, or real robot commands.",
             "It only performs a local Isaac Sim simulation-only micro-motion proof pulse after semantic gate and simulation precheck pass.",
-            "Retry and fallback are recommendations only; no automatic repeated motion is executed in V2.7.0.",
+            "Retry and fallback are recommendations only; no automatic repeated motion is executed.",
             "",
         ]
     )
@@ -524,6 +630,24 @@ def _safety_boundary() -> Dict[str, bool]:
         "no_tcp_pose_world_executed": True,
         "automatic_retry_executed": False,
     }
+
+
+def _next_safe_action(reason: str, fallback_type: str) -> str:
+    if reason == FAILURE_REASON_NONE:
+        return "Archive the replay-ready evidence bundle; no retry or fallback is needed."
+    if reason == FAILURE_REASON_DRY_RUN_ONLY:
+        return "Run true Isaac validation if state-change evidence is required; do not claim real joint motion from dry-run evidence."
+    if fallback_type == FALLBACK_TYPE_REOBSERVE:
+        return "Reobserve or refresh the semantic task contract, then rerun the safety gates."
+    if fallback_type == FALLBACK_TYPE_REVALIDATE_SEMANTIC_CONTRACT:
+        return "Revalidate the semantic contract before considering another simulated attempt."
+    if fallback_type == FALLBACK_TYPE_RECHECK_SIMULATION_PRECHECK:
+        return "Recheck simulation robot asset, articulation readiness, and observed state before another simulated attempt."
+    if fallback_type == FALLBACK_TYPE_BLOCK_EXECUTION:
+        return "Keep execution blocked and perform manual safety review."
+    if fallback_type == FALLBACK_TYPE_MANUAL_REVIEW:
+        return "Perform manual review of the evidence bundle before any further simulated attempt."
+    return "Keep the evidence bundle for review; no automatic retry motion is permitted."
 
 
 def _list(value: Any) -> list[str]:
