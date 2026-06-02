@@ -1648,6 +1648,71 @@ no-live-VLM / no-real-robot / no-ROS2-TF safety boundary, and
 `tf_source`, `real_tf_used=false`, `ros2_tf_used=false`, workspace checks,
 blocking reasons, warnings, `next_safe_action`, and the no-motion safety flags.
 
+## TETO V2.9.3 Camera Source Adapter / Manual Snapshot No-Motion
+
+TETO V2.9.3 adds a camera source adapter. It converts offline file,
+manual snapshot, live-disabled, and future explicitly allowed one-shot camera
+source declarations into a TETO camera snapshot contract.
+
+V2.9.3 is snapshot acquisition contract evidence only. It is not a continuous
+live camera loop, not live VLM/Qwen inference, not a ROS2 bridge, not MoveIt
+planning, and not real UR5 execution. It does not generate trajectory,
+`tcp_pose_world`, URScript, joint targets, robot commands, automatic retry
+motion, or any real execution request.
+
+Optional live capture is disabled by default and must be explicitly enabled
+with `--allow-live-camera-capture`. Even then, V2.9.3 only allows a bounded
+one-shot snapshot evidence path and does not send frames to a VLM or robot
+control path.
+
+Supported source modes:
+
+- `offline_file`
+- `manual_snapshot`
+- `live_disabled`
+- `optional_realsense_one_shot`
+
+Offline camera source smoke:
+
+```bash
+python3 scripts/run_first_simulation_execution.py \
+  --check-camera-source-adapter \
+  --camera-source-config configs/camera_source_offline.example.yaml \
+  --camera-source-report \
+  --output-dir /tmp/teto_v293_camera_source_offline
+```
+
+Manual snapshot smoke:
+
+```bash
+python3 scripts/run_first_simulation_execution.py \
+  --check-camera-source-adapter \
+  --camera-source-config configs/camera_source_manual.example.yaml \
+  --camera-source-report \
+  --output-dir /tmp/teto_v293_camera_source_manual
+```
+
+Live capture remains blocked unless explicitly allowed:
+
+```bash
+python3 scripts/run_first_simulation_execution.py \
+  --check-camera-source-adapter \
+  --camera-source-config configs/camera_source_offline.example.yaml \
+  --camera-source-mode optional_realsense_one_shot \
+  --camera-source-report \
+  --output-dir /tmp/teto_v293_camera_source_live_blocked
+```
+
+The evidence bundle includes `camera_source_result.json`,
+`camera_source_report.md`, `summary.md`, and `evidence_manifest.json`.
+`camera_source_report.md` states the no-motion / no-live-VLM /
+no-real-robot / no-ROS2 / no-MoveIt safety boundary, and
+`evidence_manifest.json` records `camera_source_evidence_available`,
+`camera_source_status`, `source_mode`, snapshot IDs and refs,
+`one_shot_capture_used`, `continuous_capture_used=false`,
+`live_camera_capture_allowed`, `live_camera_capture_used`, blocking reasons,
+warnings, `next_safe_action`, and no-motion safety flags.
+
 Demo commands accept common image formats directly. TETO automatically
 creates a cached RGB JPEG under `data/processed/auto/`, with EXIF orientation
 applied, long edge resized, animated images reduced to the first frame, and
@@ -1865,4 +1930,5 @@ python3 -m src.cli prepare-images --input-dir data/raw --output-dir data/process
 - V2.9.0 = real-scene no-motion shadow pipeline
 - V2.9.1 = geometry validity contract
 - V2.9.2 = 2D-to-3D projector shadow contract
+- V2.9.3 = camera source adapter / manual snapshot no-motion
 - Future ROS2 / MoveIt2 / RTDE / URScript / real UR5 controller integration remains outside the current implemented safety boundary

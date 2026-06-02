@@ -1,0 +1,9 @@
+{
+  "extrinsics": {
+    "source": "offline_placeholder",
+    "camera_frame": "camera_color_optical_frame",
+    "world_frame": "mock_world",
+    "translation_m": [0.0, 0.0, 0.0],
+    "rotation_quat_xyzw": [0.0, 0.0, 0.0, 1.0]
+  }
+}

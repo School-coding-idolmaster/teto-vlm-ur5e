@@ -1,0 +1,9 @@
+{
+  "image_ref": {
+    "path": "data/processed/examples/offline_rgb_placeholder.jpg",
+    "encoding": "rgb8",
+    "width": 640,
+    "height": 480,
+    "source": "offline_placeholder"
+  }
+}

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from src.camera_snapshot import format_camera_snapshot_report
+from src.camera_source_adapter import format_camera_source_report
 from src.geometry_validity import format_geometry_validity_report
 from src.projector_shadow import format_projector_shadow_report
 from src.simulation_micro_motion import (
@@ -59,6 +60,8 @@ def export_simulation_evidence(
     camera_readiness_result_path = output_dir / "camera_readiness_result.json"
     live_vlm_readiness_result_path = output_dir / "live_vlm_readiness_result.json"
     shadow_mode_readiness_result_path = output_dir / "shadow_mode_readiness_result.json"
+    camera_source_result_path = output_dir / "camera_source_result.json"
+    camera_source_report_path = output_dir / "camera_source_report.md"
     camera_snapshot_result_path = output_dir / "camera_snapshot_result.json"
     camera_snapshot_report_path = output_dir / "camera_snapshot_report.md"
     geometry_validity_result_path = output_dir / "geometry_validity_result.json"
@@ -78,6 +81,7 @@ def export_simulation_evidence(
     semantic_bridge_info = _semantic_bridge_info(result)
     simulated_task_execution_info = _simulated_task_execution_info(result)
     lab_readiness_info = _lab_readiness_info(result)
+    camera_source_info = _camera_source_info(result)
     camera_snapshot_info = _camera_snapshot_info(result)
     geometry_validity_info = _geometry_validity_info(result)
     projector_shadow_info = _projector_shadow_info(result)
@@ -92,6 +96,7 @@ def export_simulation_evidence(
         simulated_task_execution_info.get("safe_simulated_task_execution_requested")
     )
     lab_readiness_requested = bool(lab_readiness_info.get("requested"))
+    camera_source_requested = bool(camera_source_info.get("requested"))
     camera_snapshot_requested = bool(camera_snapshot_info.get("requested"))
     geometry_validity_requested = bool(geometry_validity_info.get("requested"))
     projector_shadow_requested = bool(projector_shadow_info.get("requested"))
@@ -114,6 +119,7 @@ def export_simulation_evidence(
             semantic_bridge_info=semantic_bridge_info,
             simulated_task_execution_info=simulated_task_execution_info,
             lab_readiness_info=lab_readiness_info,
+            camera_source_info=camera_source_info,
             camera_snapshot_info=camera_snapshot_info,
             geometry_validity_info=geometry_validity_info,
             projector_shadow_info=projector_shadow_info,
@@ -256,6 +262,15 @@ def export_simulation_evidence(
         _write_json_artifact(camera_readiness_result_path, lab_readiness_info.get("camera", {}))
         _write_json_artifact(live_vlm_readiness_result_path, lab_readiness_info.get("live_vlm", {}))
         _write_json_artifact(shadow_mode_readiness_result_path, lab_readiness_info.get("shadow_mode", {}))
+    if camera_source_requested:
+        camera_source_info["camera_source_result_path"] = str(camera_source_result_path)
+        camera_source_info["camera_source_report_path"] = str(camera_source_report_path)
+        camera_source_info["camera_source_evidence_files"] = _camera_source_evidence_files(camera_source_info)
+        _write_json_artifact(camera_source_result_path, camera_source_info)
+        camera_source_report_path.write_text(
+            format_camera_source_report(camera_source_info),
+            encoding="utf-8",
+        )
     if camera_snapshot_requested:
         camera_snapshot_info["camera_snapshot_result_path"] = str(camera_snapshot_result_path)
         camera_snapshot_info["camera_snapshot_report_path"] = str(camera_snapshot_report_path)
@@ -409,6 +424,32 @@ def export_simulation_evidence(
             _readiness_evidence_files(lab_readiness_info) if lab_readiness_requested else []
         ),
         "next_safe_action": lab_readiness_info.get("next_safe_action"),
+        "camera_source_evidence_available": camera_source_requested,
+        "camera_source_status": camera_source_info.get("camera_source_status"),
+        "source_mode": camera_source_info.get("source_mode"),
+        "snapshot_id": camera_source_info.get("snapshot_id"),
+        "scene_version": camera_source_info.get("scene_version") or result.get("scene_version"),
+        "capture_timestamp": camera_source_info.get("capture_timestamp"),
+        "frame_id": camera_source_info.get("frame_id"),
+        "camera_frame": camera_source_info.get("camera_frame"),
+        "image_ref": camera_source_info.get("image_ref"),
+        "depth_ref": camera_source_info.get("depth_ref"),
+        "camera_info_ref": camera_source_info.get("camera_info_ref"),
+        "metadata_ref": camera_source_info.get("metadata_ref"),
+        "extrinsics_ref": camera_source_info.get("extrinsics_ref"),
+        "depth_available": camera_source_info.get("depth_available"),
+        "camera_info_available": camera_source_info.get("camera_info_available"),
+        "one_shot_capture_used": camera_source_info.get("one_shot_capture_used", False),
+        "continuous_capture_used": camera_source_info.get("continuous_capture_used", False),
+        "live_camera_capture_allowed": camera_source_info.get("live_camera_capture_allowed", False),
+        "live_camera_capture_used": camera_source_info.get("live_camera_capture_used", False),
+        "no_motion_camera_adapter_passed": camera_source_info.get("no_motion_camera_adapter_passed", False),
+        "camera_source_blocking_reasons": camera_source_info.get("blocking_reasons", []),
+        "camera_source_warnings": camera_source_info.get("warnings", []),
+        "camera_source_next_safe_action": camera_source_info.get("next_safe_action"),
+        "camera_source_evidence_files": (
+            _camera_source_evidence_files(camera_source_info) if camera_source_requested else []
+        ),
         "camera_snapshot_evidence_available": camera_snapshot_requested,
         "camera_snapshot_id": camera_snapshot_info.get("snapshot_id"),
         "scene_version": camera_snapshot_info.get("scene_version") or result.get("scene_version"),
@@ -423,19 +464,23 @@ def export_simulation_evidence(
         "live_camera_enabled": camera_snapshot_info.get("live_camera_enabled", False),
         "live_camera_used": (
             camera_snapshot_info.get("live_capture_used", False)
+            or camera_source_info.get("live_camera_capture_used", False)
             or lab_readiness_info.get("live_camera_used", False)
         ),
         "live_vlm_called": (
             camera_snapshot_info.get("live_vlm_called", False)
+            or camera_source_info.get("live_vlm_called", False)
             or lab_readiness_info.get("live_vlm_called", False)
         ),
         "real_robot_motion_executed": (
             camera_snapshot_info.get("real_robot_motion_executed", False)
+            or camera_source_info.get("real_robot_motion_executed", False)
             or lab_readiness_info.get("real_robot_motion_executed", False)
             or result.get("real_robot_motion_executed", False)
         ),
         "real_robot_command_enabled": (
             camera_snapshot_info.get("real_robot_command_enabled", False)
+            or camera_source_info.get("real_robot_command_enabled", False)
             or lab_readiness_info.get("real_robot_command_enabled", False)
         ),
         "motion_evidence_available": motion_evidence_summary["motion_evidence_available"],
@@ -476,16 +521,19 @@ def export_simulation_evidence(
         "camera_readiness_result_path": str(camera_readiness_result_path) if lab_readiness_requested else None,
         "live_vlm_readiness_result_path": str(live_vlm_readiness_result_path) if lab_readiness_requested else None,
         "shadow_mode_readiness_result_path": str(shadow_mode_readiness_result_path) if lab_readiness_requested else None,
+        "camera_source_result_path": str(camera_source_result_path) if camera_source_requested else None,
+        "camera_source_report_path": str(camera_source_report_path) if camera_source_requested else None,
         "camera_snapshot_result_path": str(camera_snapshot_result_path) if camera_snapshot_requested else None,
         "camera_snapshot_report_path": str(camera_snapshot_report_path) if camera_snapshot_requested else None,
         "geometry_validity_evidence_available": geometry_validity_requested,
         "geometry_validity_status": geometry_validity_info.get("geometry_validity_status"),
         "geometry_validity_requested": geometry_validity_requested,
-        "snapshot_id": geometry_validity_info.get("snapshot_id") or real_scene_shadow_info.get("snapshot_id"),
+        "snapshot_id": geometry_validity_info.get("snapshot_id") or real_scene_shadow_info.get("snapshot_id") or camera_source_info.get("snapshot_id"),
         "grounding_id": geometry_validity_info.get("grounding_id") or real_scene_shadow_info.get("grounding_id"),
         "scene_version": geometry_validity_info.get("scene_version")
         or real_scene_shadow_info.get("scene_version")
         or camera_snapshot_info.get("scene_version")
+        or camera_source_info.get("scene_version")
         or result.get("scene_version"),
         "bbox_valid": geometry_validity_info.get("bbox_valid"),
         "pixel_center_valid": geometry_validity_info.get("pixel_center_valid"),
@@ -494,7 +542,9 @@ def export_simulation_evidence(
         "confidence_check_passed": geometry_validity_info.get("confidence_check_passed"),
         "ttl_check_passed": geometry_validity_info.get("ttl_check_passed"),
         "depth_required": geometry_validity_info.get("depth_required"),
-        "depth_available": geometry_validity_info.get("depth_available"),
+        "depth_available": geometry_validity_info.get("depth_available")
+        if geometry_validity_requested
+        else camera_source_info.get("depth_available"),
         "camera_frame_available": geometry_validity_info.get("camera_frame_available"),
         "geometry_validity_blocking_reasons": geometry_validity_info.get("blocking_reasons", []),
         "geometry_validity_warnings": geometry_validity_info.get("warnings", []),
@@ -514,7 +564,8 @@ def export_simulation_evidence(
         "projector_status": projector_shadow_info.get("projector_status"),
         "snapshot_id": projector_shadow_info.get("snapshot_id")
         or geometry_validity_info.get("snapshot_id")
-        or real_scene_shadow_info.get("snapshot_id"),
+        or real_scene_shadow_info.get("snapshot_id")
+        or camera_source_info.get("snapshot_id"),
         "grounding_id": projector_shadow_info.get("grounding_id")
         or geometry_validity_info.get("grounding_id")
         or real_scene_shadow_info.get("grounding_id"),
@@ -522,12 +573,13 @@ def export_simulation_evidence(
         or geometry_validity_info.get("scene_version")
         or real_scene_shadow_info.get("scene_version")
         or camera_snapshot_info.get("scene_version")
+        or camera_source_info.get("scene_version")
         or result.get("scene_version"),
         "pixel_center": projector_shadow_info.get("pixel_center"),
         "depth_value_m": projector_shadow_info.get("depth_value_m"),
         "depth_valid": projector_shadow_info.get("depth_valid"),
         "camera_intrinsics_available": projector_shadow_info.get("camera_intrinsics_available"),
-        "camera_frame": projector_shadow_info.get("camera_frame"),
+        "camera_frame": projector_shadow_info.get("camera_frame") or camera_source_info.get("camera_frame"),
         "world_frame": projector_shadow_info.get("world_frame"),
         "camera_point_m": projector_shadow_info.get("camera_point_m"),
         "world_point_m": projector_shadow_info.get("world_point_m"),
@@ -574,6 +626,8 @@ def export_simulation_evidence(
             if geometry_validity_requested
             else real_scene_shadow_info.get("blocking_reasons")
             if real_scene_shadow_requested
+            else camera_source_info.get("blocking_reasons")
+            if camera_source_requested
             else list(lab_readiness_info.get("blocking_reasons") or result.get("blocking_reasons") or [])
         ),
         "warnings": (
@@ -583,6 +637,8 @@ def export_simulation_evidence(
             if geometry_validity_requested
             else real_scene_shadow_info.get("warnings", [])
             if real_scene_shadow_requested
+            else camera_source_info.get("warnings", [])
+            if camera_source_requested
             else []
         ),
         "next_safe_action": (
@@ -592,6 +648,8 @@ def export_simulation_evidence(
             if geometry_validity_requested
             else real_scene_shadow_info.get("next_safe_action")
             if real_scene_shadow_requested
+            else camera_source_info.get("next_safe_action")
+            if camera_source_requested
             else lab_readiness_info.get("next_safe_action")
         ),
         "replay_ready": real_scene_shadow_info.get(
@@ -605,18 +663,22 @@ def export_simulation_evidence(
         ),
         "robot_command_generated": (
             projector_shadow_info.get("robot_command_generated", False)
+            or camera_source_info.get("robot_command_generated", False)
             or real_scene_shadow_info.get("robot_command_generated", False)
         ),
         "trajectory_generated": (
             projector_shadow_info.get("trajectory_generated", False)
+            or camera_source_info.get("trajectory_generated", False)
             or real_scene_shadow_info.get("trajectory_generated", False)
         ),
         "joint_targets_generated": (
             projector_shadow_info.get("joint_targets_generated", False)
+            or camera_source_info.get("joint_targets_generated", False)
             or real_scene_shadow_info.get("joint_targets_generated", False)
         ),
         "tcp_pose_world_generated": (
             projector_shadow_info.get("tcp_pose_world_generated", False)
+            or camera_source_info.get("tcp_pose_world_generated", False)
             or real_scene_shadow_info.get("tcp_pose_world_generated", False)
         ),
         "real_scene_shadow_evidence_files": (
@@ -662,6 +724,8 @@ def export_simulation_evidence(
         "camera_readiness_result_path": camera_readiness_result_path,
         "live_vlm_readiness_result_path": live_vlm_readiness_result_path,
         "shadow_mode_readiness_result_path": shadow_mode_readiness_result_path,
+        "camera_source_result_path": camera_source_result_path,
+        "camera_source_report_path": camera_source_report_path,
         "camera_snapshot_result_path": camera_snapshot_result_path,
         "camera_snapshot_report_path": camera_snapshot_report_path,
         "geometry_validity_result_path": geometry_validity_result_path,
@@ -1108,6 +1172,64 @@ def _readiness_safety_flags(lab_readiness_info: Dict[str, Any]) -> Dict[str, boo
     }
 
 
+def _camera_source_info(result: Dict[str, Any]) -> Dict[str, Any]:
+    camera_source = result.get("camera_source") if isinstance(result.get("camera_source"), dict) else {}
+    return {
+        **camera_source,
+        "requested": result.get("camera_source_requested", camera_source.get("requested", False)) is True,
+        "camera_source_requested": result.get(
+            "camera_source_requested",
+            camera_source.get("camera_source_requested", False),
+        )
+        is True,
+        "camera_source_status": result.get(
+            "camera_source_status",
+            camera_source.get("camera_source_status", "NOT_REQUESTED"),
+        ),
+        "source_mode": result.get("camera_source_mode", camera_source.get("source_mode")),
+        "snapshot_id": result.get("camera_source_snapshot_id", camera_source.get("snapshot_id")),
+        "scene_version": result.get("camera_source_scene_version", camera_source.get("scene_version")),
+        "blocking_reasons": result.get(
+            "camera_source_blocking_reasons",
+            camera_source.get("blocking_reasons", []),
+        ),
+        "warnings": result.get("camera_source_warnings", camera_source.get("warnings", [])),
+        "next_safe_action": result.get(
+            "camera_source_next_safe_action",
+            camera_source.get("next_safe_action"),
+        ),
+        "no_motion_camera_adapter_passed": result.get(
+            "no_motion_camera_adapter_passed",
+            camera_source.get("no_motion_camera_adapter_passed", False),
+        )
+        is True,
+        "one_shot_capture_used": camera_source.get("one_shot_capture_used", False) is True,
+        "continuous_capture_used": camera_source.get("continuous_capture_used", False) is True,
+        "live_camera_capture_allowed": camera_source.get("live_camera_capture_allowed", False) is True,
+        "live_camera_capture_used": camera_source.get("live_camera_capture_used", False) is True,
+        "live_vlm_called": camera_source.get("live_vlm_called", False) is True,
+        "real_robot_motion_executed": camera_source.get("real_robot_motion_executed", False) is True,
+        "real_robot_command_enabled": camera_source.get("real_robot_command_enabled", False) is True,
+        "robot_command_generated": camera_source.get("robot_command_generated", False) is True,
+        "trajectory_generated": camera_source.get("trajectory_generated", False) is True,
+        "joint_targets_generated": camera_source.get("joint_targets_generated", False) is True,
+        "tcp_pose_world_generated": camera_source.get("tcp_pose_world_generated", False) is True,
+    }
+
+
+def _camera_source_evidence_files(camera_source_info: Dict[str, Any]) -> list[Dict[str, str | None]]:
+    return [
+        {
+            "name": "camera_source_result.json",
+            "path": camera_source_info.get("camera_source_result_path"),
+        },
+        {
+            "name": "camera_source_report.md",
+            "path": camera_source_info.get("camera_source_report_path"),
+        },
+    ]
+
+
 def _camera_snapshot_info(result: Dict[str, Any]) -> Dict[str, Any]:
     snapshot = result.get("camera_snapshot") if isinstance(result.get("camera_snapshot"), dict) else {}
     return {
@@ -1420,6 +1542,7 @@ def _build_summary_markdown(
     semantic_bridge_info: Dict[str, Any],
     simulated_task_execution_info: Dict[str, Any],
     lab_readiness_info: Dict[str, Any],
+    camera_source_info: Dict[str, Any],
     camera_snapshot_info: Dict[str, Any],
     geometry_validity_info: Dict[str, Any],
     projector_shadow_info: Dict[str, Any],
@@ -1553,6 +1676,40 @@ def _build_summary_markdown(
             f"- blocking_reasons: {_format_value(simulation_motion_precheck_info.get('blocking_reasons'))}",
             f"- warnings: {_format_value(simulation_motion_precheck_info.get('warnings'))}",
             f"- errors: {_format_value(simulation_motion_precheck_info.get('errors'))}",
+            "",
+            "## Camera Source Evidence Summary",
+            "",
+            f"- camera_source_evidence_available: {_format_value(camera_source_info.get('requested'))}",
+            f"- camera_source_status: {_format_value(camera_source_info.get('camera_source_status'))}",
+            f"- source_mode: {_format_value(camera_source_info.get('source_mode'))}",
+            f"- snapshot_id: {_format_value(camera_source_info.get('snapshot_id'))}",
+            f"- scene_version: {_format_value(camera_source_info.get('scene_version'))}",
+            f"- capture_timestamp: {_format_value(camera_source_info.get('capture_timestamp'))}",
+            f"- frame_id: {_format_value(camera_source_info.get('frame_id'))}",
+            f"- camera_frame: {_format_value(camera_source_info.get('camera_frame'))}",
+            f"- image_ref: {_format_value(camera_source_info.get('image_ref'))}",
+            f"- depth_ref: {_format_value(camera_source_info.get('depth_ref'))}",
+            f"- camera_info_ref: {_format_value(camera_source_info.get('camera_info_ref'))}",
+            f"- metadata_ref: {_format_value(camera_source_info.get('metadata_ref'))}",
+            f"- extrinsics_ref: {_format_value(camera_source_info.get('extrinsics_ref'))}",
+            f"- depth_available: {_format_value(camera_source_info.get('depth_available'))}",
+            f"- camera_info_available: {_format_value(camera_source_info.get('camera_info_available'))}",
+            f"- one_shot_capture_used: {_format_value(camera_source_info.get('one_shot_capture_used'))}",
+            f"- continuous_capture_used: {_format_value(camera_source_info.get('continuous_capture_used'))}",
+            f"- live_camera_capture_allowed: {_format_value(camera_source_info.get('live_camera_capture_allowed'))}",
+            f"- live_camera_capture_used: {_format_value(camera_source_info.get('live_camera_capture_used'))}",
+            f"- no_motion_camera_adapter_passed: {_format_value(camera_source_info.get('no_motion_camera_adapter_passed'))}",
+            f"- blocking_reasons: {_format_value(camera_source_info.get('blocking_reasons'))}",
+            f"- warnings: {_format_value(camera_source_info.get('warnings'))}",
+            f"- next_safe_action: {_format_value(camera_source_info.get('next_safe_action'))}",
+            f"- live_vlm_called: {_format_value(camera_source_info.get('live_vlm_called'))}",
+            f"- real_robot_motion_executed: {_format_value(camera_source_info.get('real_robot_motion_executed'))}",
+            f"- real_robot_command_enabled: {_format_value(camera_source_info.get('real_robot_command_enabled'))}",
+            f"- robot_command_generated: {_format_value(camera_source_info.get('robot_command_generated'))}",
+            f"- trajectory_generated: {_format_value(camera_source_info.get('trajectory_generated'))}",
+            f"- joint_targets_generated: {_format_value(camera_source_info.get('joint_targets_generated'))}",
+            f"- tcp_pose_world_generated: {_format_value(camera_source_info.get('tcp_pose_world_generated'))}",
+            "This V2.9.3 camera source adapter evidence converts offline/manual/live-disabled declarations, and future explicitly allowed one-shot capture declarations, into a TETO camera snapshot contract. It is no-motion, no-live-VLM, no-real-robot, no-ROS2, and no-MoveIt evidence only; it is not a continuous live camera loop and does not generate trajectory, tcp_pose_world, joint targets, or robot commands.",
             "",
             "## Camera Snapshot Evidence Summary",
             "",

@@ -1,0 +1,7 @@
+{
+  "depth_ref": {
+    "path": "data/processed/examples/offline_depth_placeholder.png",
+    "encoding": "uint16_mm",
+    "source": "offline_placeholder"
+  }
+}

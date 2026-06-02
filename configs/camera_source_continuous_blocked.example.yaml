@@ -1,0 +1,24 @@
+camera_source_adapter:
+  source_mode: offline_file
+  snapshot_id: camera_source_continuous_blocked_snapshot_001
+  scene_version: camera_source_continuous_blocked_scene_v1
+  capture_timestamp: "2099-01-01T00:00:00Z"
+  frame_id: camera_source_continuous_blocked_frame_001
+  camera_frame: camera_color_optical_frame
+  image_ref: examples/camera_source/sample_image_ref.json
+  camera_info_ref: examples/camera_source/sample_camera_info.json
+  width: 640
+  height: 480
+  color_encoding: rgb8
+  depth_available: false
+  camera_info_available: true
+  metadata_available: false
+  extrinsics_available: false
+  depth_required: false
+  alignment_status: offline_declared
+  sync_status: offline_manifest
+  capture_backend: offline_file
+  capture_method: declared_snapshot_manifest
+  allow_live_camera_capture: false
+  continuous_capture_enabled: true
+  live_vlm_called: false

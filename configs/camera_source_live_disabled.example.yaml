@@ -1,0 +1,24 @@
+camera_source_adapter:
+  source_mode: live_disabled
+  snapshot_id: camera_source_live_disabled_snapshot_001
+  scene_version: camera_source_live_disabled_scene_v1
+  capture_timestamp: "2099-01-01T00:00:00Z"
+  frame_id: camera_source_live_disabled_frame_001
+  camera_frame: camera_color_optical_frame
+  image_ref: examples/camera_source/sample_image_ref.json
+  camera_info_ref: examples/camera_source/sample_camera_info.json
+  width: 640
+  height: 480
+  color_encoding: rgb8
+  depth_available: false
+  camera_info_available: true
+  metadata_available: false
+  extrinsics_available: false
+  depth_required: false
+  alignment_status: live_disabled_no_capture
+  sync_status: disabled
+  capture_backend: live_disabled
+  capture_method: disabled_no_capture
+  allow_live_camera_capture: false
+  continuous_capture_enabled: false
+  live_vlm_called: false

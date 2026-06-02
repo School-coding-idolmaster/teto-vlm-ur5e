@@ -19,7 +19,7 @@ from src.simulation_runtime import DEFAULT_SIMULATION_TASK, CURRENT_TETO_VERSION
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run TETO V2.9.2 projector shadow, geometry validity, real-scene no-motion shadow, and safe simulation evidence smoke test."
+        description="Run TETO V2.9.3 camera source adapter, projector shadow, geometry validity, real-scene no-motion shadow, and safe simulation evidence smoke test."
     )
     parser.add_argument("--dry-run", action="store_true", help="Do not import Isaac; produce a test execution report.")
     parser.add_argument("--no-isaac", action="store_true", help="Pure Python test mode without Isaac imports.")
@@ -120,7 +120,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--execution-max-attempts",
         type=int,
         default=1,
-        help="Maximum attempts metadata. V2.9.2 supports 1 and does not auto-retry.",
+        help="Maximum attempts metadata. V2.9.3 supports 1 and does not auto-retry.",
     )
     parser.add_argument(
         "--execution-enable-retry-recommendation",
@@ -169,6 +169,30 @@ def build_parser() -> argparse.ArgumentParser:
         "--camera-snapshot-report",
         action="store_true",
         help="Generate camera snapshot evidence report from the supplied manifest.",
+    )
+    parser.add_argument(
+        "--check-camera-source-adapter",
+        action="store_true",
+        help="Validate camera source adapter evidence and generate a no-motion snapshot contract.",
+    )
+    parser.add_argument(
+        "--camera-source-config",
+        help="Path to camera source adapter YAML/JSON config.",
+    )
+    parser.add_argument(
+        "--camera-source-report",
+        action="store_true",
+        help="Generate camera source adapter evidence report.",
+    )
+    parser.add_argument(
+        "--allow-live-camera-capture",
+        action="store_true",
+        help="Explicitly allow optional one-shot camera capture if a safe backend is available.",
+    )
+    parser.add_argument(
+        "--camera-source-mode",
+        choices=["offline_file", "manual_snapshot", "live_disabled", "optional_realsense_one_shot"],
+        help="Override the camera source mode declared in the adapter config.",
     )
     parser.add_argument(
         "--check-geometry-validity",
@@ -222,7 +246,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
     if args.execution_max_attempts != 1:
-        raise ValueError("--execution-max-attempts currently supports only 1 in TETO V2.9.2")
+        raise ValueError("--execution-max-attempts currently supports only 1 in TETO V2.9.3")
     simulation_task = _load_simulation_task(args.task_json)
     semantic_contract = None
     semantic_contract_path = None
@@ -277,6 +301,11 @@ def main() -> int:
         check_camera_readiness=args.check_camera_readiness,
         check_live_vlm_readiness=args.check_live_vlm_readiness,
         check_shadow_mode_readiness=args.check_shadow_mode_readiness,
+        check_camera_source_adapter=args.check_camera_source_adapter,
+        camera_source_config=args.camera_source_config,
+        camera_source_report=args.camera_source_report,
+        allow_live_camera_capture=args.allow_live_camera_capture,
+        camera_source_mode=args.camera_source_mode,
         check_camera_snapshot=args.check_camera_snapshot,
         camera_snapshot_config=args.camera_snapshot_config,
         camera_snapshot_report=args.camera_snapshot_report,
@@ -440,6 +469,12 @@ def print_summary(result: dict, report_path: Path) -> None:
     print(f"real_robot_command_enabled: {result.get('real_robot_command_enabled')}")
     print(f"readiness_blocking_reasons: {result.get('readiness_blocking_reasons')}")
     print(f"next_safe_action: {result.get('next_safe_action')}")
+    print(f"camera_source_requested: {result.get('camera_source_requested')}")
+    print(f"camera_source_status: {result.get('camera_source_status')}")
+    print(f"camera_source_mode: {result.get('camera_source_mode')}")
+    print(f"camera_source_snapshot_id: {result.get('camera_source_snapshot_id')}")
+    print(f"no_motion_camera_adapter_passed: {result.get('no_motion_camera_adapter_passed')}")
+    print(f"camera_source_blocking_reasons: {result.get('camera_source_blocking_reasons')}")
     print(f"camera_snapshot_requested: {result.get('camera_snapshot_requested')}")
     print(f"camera_snapshot_id: {result.get('camera_snapshot_id')}")
     print(f"camera_snapshot_validity_status: {result.get('camera_snapshot_validity_status')}")

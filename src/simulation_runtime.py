@@ -10,6 +10,7 @@ from typing import Any, Dict
 from src.articulation_readiness_contract import build_articulation_readiness_report
 from src.articulation_state_observer import build_articulation_state_report, observe_articulation_state as observe_articulation_state_in_world
 from src.camera_snapshot import build_camera_snapshot_request, evaluate_camera_snapshot_contract
+from src.camera_source_adapter import build_camera_source_adapter_request, evaluate_camera_source_adapter
 from src.evidence_exporter import export_simulation_evidence
 from src.geometry_validity import build_geometry_validity_request, evaluate_geometry_validity
 from src.lab_readiness import build_lab_readiness_request, evaluate_lab_readiness
@@ -53,7 +54,7 @@ from src.simulated_task_execution import (
 
 
 REPORT_VERSION = "teto_simulation_execution.v1"
-CURRENT_TETO_VERSION = "TETO V2.9.2"
+CURRENT_TETO_VERSION = "TETO V2.9.3"
 DEFAULT_STEPS = 5
 DEFAULT_SIMULATION_OBJECT_TYPE = "cube"
 DEFAULT_CUBE_PRIM_PATH = "/World/TETO_Cube"
@@ -115,6 +116,7 @@ def build_simulation_execution_result(
     semantic_bridge_metadata: Dict[str, Any] | None = None,
     simulated_task_execution_metadata: Dict[str, Any] | None = None,
     lab_readiness_metadata: Dict[str, Any] | None = None,
+    camera_source_metadata: Dict[str, Any] | None = None,
     camera_snapshot_metadata: Dict[str, Any] | None = None,
     geometry_validity_metadata: Dict[str, Any] | None = None,
     projector_shadow_metadata: Dict[str, Any] | None = None,
@@ -158,6 +160,7 @@ def build_simulation_execution_result(
     result.update(simulation_micro_motion_metadata or _simulation_micro_motion_report_fields())
     result.update(semantic_bridge_metadata or _semantic_bridge_report_fields())
     result.update(lab_readiness_metadata or _lab_readiness_report_fields())
+    result.update(camera_source_metadata or _camera_source_report_fields())
     result.update(camera_snapshot_metadata or _camera_snapshot_report_fields())
     result.update(geometry_validity_metadata or _geometry_validity_report_fields())
     result.update(projector_shadow_metadata or _projector_shadow_report_fields())
@@ -243,6 +246,11 @@ def run_first_simulation_execution(
     check_camera_readiness: bool = False,
     check_live_vlm_readiness: bool = False,
     check_shadow_mode_readiness: bool = False,
+    check_camera_source_adapter: bool = False,
+    camera_source_config: str | Path | None = None,
+    camera_source_report: bool = False,
+    allow_live_camera_capture: bool = False,
+    camera_source_mode: str | None = None,
     check_camera_snapshot: bool = False,
     camera_snapshot_config: str | Path | None = None,
     camera_snapshot_report: bool = False,
@@ -262,6 +270,7 @@ def run_first_simulation_execution(
 ) -> Dict[str, Any]:
     task = simulation_task or dict(DEFAULT_SIMULATION_TASK)
     started_at = _timestamp()
+    camera_source_requested = check_camera_source_adapter or camera_source_report
     camera_snapshot_requested = check_camera_snapshot or camera_snapshot_report
     projector_shadow_requested = check_projector_shadow or projector_shadow_report
     geometry_validity_requested = check_geometry_validity or geometry_validity_report
@@ -274,6 +283,7 @@ def run_first_simulation_execution(
     )
     if (
         lab_readiness_requested
+        or camera_source_requested
         or camera_snapshot_requested
         or geometry_validity_requested
         or projector_shadow_requested
@@ -290,6 +300,16 @@ def run_first_simulation_execution(
     lab_readiness_metadata = _lab_readiness_report_fields(
         requested=lab_readiness_requested,
         readiness=evaluate_lab_readiness(lab_readiness_request),
+    )
+    camera_source_request = build_camera_source_adapter_request(
+        requested=camera_source_requested,
+        config_path=camera_source_config,
+        source_mode=camera_source_mode,
+        allow_live_camera_capture=allow_live_camera_capture,
+    )
+    camera_source_metadata = _camera_source_report_fields(
+        requested=camera_source_requested,
+        camera_source=evaluate_camera_source_adapter(camera_source_request),
     )
     camera_snapshot_request = build_camera_snapshot_request(
         requested=camera_snapshot_requested,
@@ -443,6 +463,7 @@ def run_first_simulation_execution(
                 semantic_bridge_metadata=semantic_bridge_metadata,
                 simulated_task_execution_metadata=simulated_task_execution_metadata,
                 lab_readiness_metadata=lab_readiness_metadata,
+                camera_source_metadata=camera_source_metadata,
                 camera_snapshot_metadata=camera_snapshot_metadata,
                 geometry_validity_metadata=geometry_validity_metadata,
                 projector_shadow_metadata=projector_shadow_metadata,
@@ -494,6 +515,7 @@ def run_first_simulation_execution(
                 semantic_bridge_metadata=semantic_bridge_metadata,
                 simulated_task_execution_metadata=simulated_task_execution_metadata,
                 lab_readiness_metadata=lab_readiness_metadata,
+                camera_source_metadata=camera_source_metadata,
                 camera_snapshot_metadata=camera_snapshot_metadata,
                 geometry_validity_metadata=geometry_validity_metadata,
                 projector_shadow_metadata=projector_shadow_metadata,
@@ -584,6 +606,7 @@ def run_first_simulation_execution(
                     semantic_bridge_metadata=semantic_bridge_metadata,
                     simulated_task_execution_metadata=simulated_task_execution_metadata,
                     lab_readiness_metadata=lab_readiness_metadata,
+                    camera_source_metadata=camera_source_metadata,
                     camera_snapshot_metadata=camera_snapshot_metadata,
                     geometry_validity_metadata=geometry_validity_metadata,
                     projector_shadow_metadata=projector_shadow_metadata,
@@ -621,6 +644,7 @@ def run_first_simulation_execution(
                 semantic_bridge_metadata=semantic_bridge_metadata,
                 simulated_task_execution_metadata=simulated_task_execution_metadata,
                 lab_readiness_metadata=lab_readiness_metadata,
+                camera_source_metadata=camera_source_metadata,
                 camera_snapshot_metadata=camera_snapshot_metadata,
                 geometry_validity_metadata=geometry_validity_metadata,
                 projector_shadow_metadata=projector_shadow_metadata,
@@ -1559,6 +1583,45 @@ def _camera_snapshot_report_fields(
         "live_camera_enabled": snapshot.get("live_camera_enabled", False) is True,
         "live_vlm_called": snapshot.get("live_vlm_called", False) is True,
         "real_robot_command_enabled": snapshot.get("real_robot_command_enabled", False) is True,
+    }
+
+
+def _camera_source_report_fields(
+    *,
+    requested: bool = False,
+    camera_source: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    camera_source = camera_source if isinstance(camera_source, dict) else {}
+    return {
+        "camera_source_requested": requested,
+        "camera_source": camera_source
+        or {
+            "requested": False,
+            "camera_source_requested": False,
+            "camera_source_status": "NOT_REQUESTED",
+            "blocking_reasons": [],
+            "warnings": [],
+            "no_motion_camera_adapter_passed": False,
+            "one_shot_capture_used": False,
+            "continuous_capture_used": False,
+            "live_camera_capture_allowed": False,
+            "live_camera_capture_used": False,
+            "live_vlm_called": False,
+            "real_robot_motion_executed": False,
+            "real_robot_command_enabled": False,
+            "robot_command_generated": False,
+            "trajectory_generated": False,
+            "joint_targets_generated": False,
+            "tcp_pose_world_generated": False,
+        },
+        "camera_source_status": camera_source.get("camera_source_status", "NOT_REQUESTED"),
+        "camera_source_mode": camera_source.get("source_mode"),
+        "camera_source_snapshot_id": camera_source.get("snapshot_id"),
+        "camera_source_scene_version": camera_source.get("scene_version"),
+        "camera_source_blocking_reasons": list(camera_source.get("blocking_reasons") or []),
+        "camera_source_warnings": list(camera_source.get("warnings") or []),
+        "camera_source_next_safe_action": camera_source.get("next_safe_action"),
+        "no_motion_camera_adapter_passed": camera_source.get("no_motion_camera_adapter_passed", False) is True,
     }
 
 
