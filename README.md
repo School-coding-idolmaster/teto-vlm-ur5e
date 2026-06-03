@@ -1887,6 +1887,44 @@ reasons, warnings, and safety flags proving no ROS2 publish, MoveIt call,
 trajectory, `tcp_pose_world`, joint target, robot command, or real robot motion
 occurred.
 
+## TETO V2.10.2 ROS2 Message Export / Fake Publish Dry-Run
+
+TETO V2.10.2 adds a ROS2 Message Export / Fake Publish Dry-Run. It converts an
+already validated Planner Gateway shadow input plus a READY_FOR_SHADOW_BRIDGE
+ROS2 interface declaration into a deterministic ROS2-compatible
+`PlannerRequest` JSON artifact.
+
+The generated artifact is fake-publish evidence only. V2.10.2 does not publish
+ROS2 messages, does not call `rclpy` publish, does not call MoveIt, does not
+generate trajectory or `tcp_pose_world`, does not create joint targets or robot
+commands, and does not control a real UR5.
+
+ROS2 message export positive smoke:
+
+```bash
+python3 scripts/run_first_simulation_execution.py \
+  --check-planner-gateway-shadow \
+  --planner-gateway-shadow-config configs/planner_gateway_shadow_positive.example.yaml \
+  --planner-gateway-shadow-report \
+  --perception-shadow-result examples/planner_gateway_shadow/perception_positive_result.json \
+  --check-ros2-interface-readiness \
+  --ros2-interface-config configs/ros2_interface.example.yaml \
+  --ros2-interface-report \
+  --check-ros2-message-export \
+  --ros2-message-export-config configs/ros2_message_export.example.yaml \
+  --ros2-message-export-report \
+  --output-dir /tmp/teto_v2102_ros2_message_export_positive
+```
+
+The evidence bundle includes `ros2_message_export_result.json`,
+`ros2_message_export_report.md`, `summary.md`, and `evidence_manifest.json`.
+`summary.md` includes a `ROS2 Message Export / Fake Publish Summary`, and the
+manifest records `message_id`, `message_schema`, fake-publish flags, Planner
+Gateway interface endpoint, frame names, bounded target point, blocking
+reasons, warnings, and safety flags proving no ROS2 publish, MoveIt call,
+trajectory, `tcp_pose_world`, joint target, robot command, or real robot motion
+occurred.
+
 Demo commands accept common image formats directly. TETO automatically
 creates a cached RGB JPEG under `data/processed/auto/`, with EXIF orientation
 applied, long edge resized, animated images reduced to the first frame, and
@@ -2109,4 +2147,5 @@ python3 -m src.cli prepare-images --input-dir data/raw --output-dir data/process
 - V2.9.5 = full perception shadow pipeline
 - V2.10.0 = planner gateway shadow contract
 - V2.10.1 = ROS2 environment / interface readiness check
+- V2.10.2 = ROS2 message export / fake publish dry-run
 - Future ROS2 / MoveIt2 / RTDE / URScript / real UR5 controller integration remains outside the current implemented safety boundary

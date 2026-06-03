@@ -1,0 +1,9 @@
+ros2_message_export:
+  message_schema: teto_planner_gateway/PlannerRequest.v1
+  ttl_ms: 500
+  fake_publish_only: true
+  ros2_publish_enabled: false
+  ros2_publish_attempted: false
+  execution_allowed: false
+  moveit_enabled: false
+  real_robot_enabled: false

@@ -31,6 +31,10 @@ from src.ros2_interface_readiness import (
     build_ros2_interface_readiness_request,
     evaluate_ros2_interface_readiness,
 )
+from src.ros2_message_exporter import (
+    build_ros2_message_export_request,
+    evaluate_ros2_message_export,
+)
 from src.robot_prim_inspector import (
     UR5E_ARM_JOINT_NAMES,
     build_robot_prim_inspection_report,
@@ -67,7 +71,7 @@ from src.vlm_grounding_adapter import build_vlm_grounding_adapter_request, evalu
 
 
 REPORT_VERSION = "teto_simulation_execution.v1"
-CURRENT_TETO_VERSION = "TETO V2.10.1"
+CURRENT_TETO_VERSION = "TETO V2.10.2"
 DEFAULT_STEPS = 5
 DEFAULT_SIMULATION_OBJECT_TYPE = "cube"
 DEFAULT_CUBE_PRIM_PATH = "/World/TETO_Cube"
@@ -138,6 +142,7 @@ def build_simulation_execution_result(
     perception_shadow_metadata: Dict[str, Any] | None = None,
     planner_gateway_shadow_metadata: Dict[str, Any] | None = None,
     ros2_interface_readiness_metadata: Dict[str, Any] | None = None,
+    ros2_message_export_metadata: Dict[str, Any] | None = None,
     started_at: str | None = None,
     finished_at: str | None = None,
 ) -> Dict[str, Any]:
@@ -186,6 +191,7 @@ def build_simulation_execution_result(
     result.update(perception_shadow_metadata or _perception_shadow_report_fields())
     result.update(planner_gateway_shadow_metadata or _planner_gateway_shadow_report_fields())
     result.update(ros2_interface_readiness_metadata or _ros2_interface_readiness_report_fields())
+    result.update(ros2_message_export_metadata or _ros2_message_export_report_fields())
     if (
         result.get("semantic_simulation_bridge_requested") is True
         and result.get("semantic_gate_passed") is not True
@@ -215,6 +221,8 @@ def build_simulation_execution_result(
     result.setdefault("after_joint_state_path", None)
     result.setdefault("ros2_interface_readiness_result_path", None)
     result.setdefault("ros2_interface_readiness_report_path", None)
+    result.setdefault("ros2_message_export_result_path", None)
+    result.setdefault("ros2_message_export_report_path", None)
     result.setdefault("motion_evidence_available", False)
     result.setdefault("motion_evidence_files", [])
     result.setdefault("motion_diff_summary", {})
@@ -302,6 +310,9 @@ def run_first_simulation_execution(
     check_ros2_interface_readiness: bool = False,
     ros2_interface_config: str | Path | None = None,
     ros2_interface_report: bool = False,
+    check_ros2_message_export: bool = False,
+    ros2_message_export_config: str | Path | None = None,
+    ros2_message_export_report: bool = False,
     output_dir: str | Path | None = None,
     write_report: bool = False,
     demo_command: str | None = None,
@@ -317,6 +328,7 @@ def run_first_simulation_execution(
     perception_shadow_requested = run_perception_shadow_pipeline or perception_shadow_report
     planner_gateway_shadow_requested = check_planner_gateway_shadow or planner_gateway_shadow_report
     ros2_interface_readiness_requested = check_ros2_interface_readiness or ros2_interface_report
+    ros2_message_export_requested = check_ros2_message_export or ros2_message_export_report
     lab_readiness_requested = (
         check_lab_readiness
         or check_camera_readiness
@@ -334,6 +346,7 @@ def run_first_simulation_execution(
         or perception_shadow_requested
         or planner_gateway_shadow_requested
         or ros2_interface_readiness_requested
+        or ros2_message_export_requested
     ) and not dry_run:
         no_isaac = True
     lab_readiness_request = build_lab_readiness_request(
@@ -438,6 +451,20 @@ def run_first_simulation_execution(
     ros2_interface_readiness_metadata = _ros2_interface_readiness_report_fields(
         requested=ros2_interface_readiness_requested,
         readiness=evaluate_ros2_interface_readiness(ros2_interface_readiness_request),
+    )
+    ros2_message_export_request = build_ros2_message_export_request(
+        requested=ros2_message_export_requested,
+        config_path=ros2_message_export_config,
+        planner_gateway_shadow_result=planner_gateway_shadow_metadata.get("planner_gateway_shadow")
+        if planner_gateway_shadow_requested
+        else None,
+        ros2_interface_readiness_result=ros2_interface_readiness_metadata.get("ros2_interface_readiness")
+        if ros2_interface_readiness_requested
+        else None,
+    )
+    ros2_message_export_metadata = _ros2_message_export_report_fields(
+        requested=ros2_message_export_requested,
+        message_export=evaluate_ros2_message_export(ros2_message_export_request),
     )
     effective_move_object = move_object or move_cube
     effective_spawn_cube = spawn_cube or effective_move_object
@@ -562,6 +589,7 @@ def run_first_simulation_execution(
                 perception_shadow_metadata=perception_shadow_metadata,
                 planner_gateway_shadow_metadata=planner_gateway_shadow_metadata,
                 ros2_interface_readiness_metadata=ros2_interface_readiness_metadata,
+                ros2_message_export_metadata=ros2_message_export_metadata,
                 error_code="E_INVALID_STEPS",
                 error_message="steps must be a positive integer",
                 started_at=started_at,
@@ -618,6 +646,7 @@ def run_first_simulation_execution(
                 perception_shadow_metadata=perception_shadow_metadata,
                 planner_gateway_shadow_metadata=planner_gateway_shadow_metadata,
                 ros2_interface_readiness_metadata=ros2_interface_readiness_metadata,
+                ros2_message_export_metadata=ros2_message_export_metadata,
                 error_code="E_INVALID_SIMULATION_TASK",
                 error_message=f"missing simulation task fields: {', '.join(missing_fields)}",
                 started_at=started_at,
@@ -713,6 +742,7 @@ def run_first_simulation_execution(
                     perception_shadow_metadata=perception_shadow_metadata,
                     planner_gateway_shadow_metadata=planner_gateway_shadow_metadata,
                     ros2_interface_readiness_metadata=ros2_interface_readiness_metadata,
+                    ros2_message_export_metadata=ros2_message_export_metadata,
                     error_code="E_ROBOT_ASSET_LOAD_FAILED",
                     error_message="robot asset path is unavailable",
                     started_at=started_at,
@@ -755,6 +785,7 @@ def run_first_simulation_execution(
                 perception_shadow_metadata=perception_shadow_metadata,
                 planner_gateway_shadow_metadata=planner_gateway_shadow_metadata,
                 ros2_interface_readiness_metadata=ros2_interface_readiness_metadata,
+                ros2_message_export_metadata=ros2_message_export_metadata,
                 started_at=started_at,
                 finished_at=_timestamp(),
             ),
@@ -824,6 +855,8 @@ def write_simulation_execution_result(
     planner_gateway_shadow_report_path = run_dir / "planner_gateway_shadow_report.md"
     ros2_interface_readiness_result_path = run_dir / "ros2_interface_readiness_result.json"
     ros2_interface_readiness_report_path = run_dir / "ros2_interface_readiness_report.md"
+    ros2_message_export_result_path = run_dir / "ros2_message_export_result.json"
+    ros2_message_export_report_path = run_dir / "ros2_message_export_report.md"
     result["report_path"] = str(report_path)
     structure_report_requested = bool(result.get("robot_prim_inspection_requested"))
     result["robot_structure_report_generated"] = structure_report_requested
@@ -930,6 +963,20 @@ def write_simulation_execution_result(
         ]
         result["ros2_interface_readiness"]["ros2_interface_readiness_report_path"] = result[
             "ros2_interface_readiness_report_path"
+        ]
+    ros2_message_export_requested = bool(result.get("ros2_message_export_requested"))
+    result["ros2_message_export_result_path"] = (
+        str(ros2_message_export_result_path) if ros2_message_export_requested else None
+    )
+    result["ros2_message_export_report_path"] = (
+        str(ros2_message_export_report_path) if ros2_message_export_requested else None
+    )
+    if isinstance(result.get("ros2_message_export"), dict):
+        result["ros2_message_export"]["ros2_message_export_result_path"] = result[
+            "ros2_message_export_result_path"
+        ]
+        result["ros2_message_export"]["ros2_message_export_report_path"] = result[
+            "ros2_message_export_report_path"
         ]
     result["semantic_bridge"] = _semantic_bridge_info(result)
     result["motion"] = _motion_info(result)
@@ -2093,6 +2140,46 @@ def _ros2_interface_readiness_report_fields(
         "ros2_interface_blocking_reasons": list(readiness.get("blocking_reasons") or []),
         "ros2_interface_warnings": list(readiness.get("warnings") or []),
         "ros2_interface_next_safe_action": readiness.get("next_safe_action"),
+    }
+
+
+def _ros2_message_export_report_fields(
+    *,
+    requested: bool = False,
+    message_export: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    message_export = message_export if isinstance(message_export, dict) else {}
+    return {
+        "ros2_message_export_requested": requested,
+        "ros2_message_export": message_export
+        or {
+            "requested": False,
+            "ros2_message_export_requested": False,
+            "ros2_message_export_status": "NOT_REQUESTED",
+            "message_export_status": "NOT_REQUESTED",
+            "message_id": None,
+            "message_schema": None,
+            "fake_publish_only": True,
+            "ros2_publish_enabled": False,
+            "ros2_publish_attempted": False,
+            "execution_allowed": False,
+            "moveit_called": False,
+            "trajectory_generated": False,
+            "tcp_pose_world_generated": False,
+            "joint_targets_generated": False,
+            "robot_command_generated": False,
+            "real_robot_motion_executed": False,
+            "blocking_reasons": [],
+            "warnings": [],
+        },
+        "ros2_message_export_status": message_export.get("ros2_message_export_status", "NOT_REQUESTED"),
+        "message_export_status": message_export.get("message_export_status", "NOT_REQUESTED"),
+        "ros2_message_id": message_export.get("message_id"),
+        "ros2_message_schema": message_export.get("message_schema"),
+        "fake_publish_only": message_export.get("fake_publish_only", True) is True,
+        "ros2_message_export_blocking_reasons": list(message_export.get("blocking_reasons") or []),
+        "ros2_message_export_warnings": list(message_export.get("warnings") or []),
+        "ros2_message_export_next_safe_action": message_export.get("next_safe_action"),
     }
 
 

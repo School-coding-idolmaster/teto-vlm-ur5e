@@ -19,7 +19,7 @@ from src.simulation_runtime import DEFAULT_SIMULATION_TASK, CURRENT_TETO_VERSION
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run TETO V2.10.1 ROS2 interface readiness, planner gateway shadow contract, full perception shadow pipeline, and no-motion simulation evidence smoke tests."
+        description="Run TETO V2.10.2 ROS2 message export, ROS2 interface readiness, planner gateway shadow contract, full perception shadow pipeline, and no-motion simulation evidence smoke tests."
     )
     parser.add_argument("--dry-run", action="store_true", help="Do not import Isaac; produce a test execution report.")
     parser.add_argument("--no-isaac", action="store_true", help="Pure Python test mode without Isaac imports.")
@@ -120,7 +120,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--execution-max-attempts",
         type=int,
         default=1,
-        help="Maximum attempts metadata. V2.10.1 supports 1 and does not auto-retry.",
+        help="Maximum attempts metadata. V2.10.2 supports 1 and does not auto-retry.",
     )
     parser.add_argument(
         "--execution-enable-retry-recommendation",
@@ -223,6 +223,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Generate ROS2 interface readiness evidence report.",
     )
     parser.add_argument(
+        "--check-ros2-message-export",
+        action="store_true",
+        help="Export a deterministic fake-publish ROS2 PlannerRequest JSON artifact without publishing.",
+    )
+    parser.add_argument(
+        "--ros2-message-export-config",
+        help="Path to ROS2 message export YAML/JSON config.",
+    )
+    parser.add_argument(
+        "--ros2-message-export-report",
+        action="store_true",
+        help="Generate ROS2 message export fake-publish evidence report.",
+    )
+    parser.add_argument(
         "--check-camera-source-adapter",
         action="store_true",
         help="Validate camera source adapter evidence and generate a no-motion snapshot contract.",
@@ -312,7 +326,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
     if args.execution_max_attempts != 1:
-        raise ValueError("--execution-max-attempts currently supports only 1 in TETO V2.10.1")
+        raise ValueError("--execution-max-attempts currently supports only 1 in TETO V2.10.2")
     simulation_task = _load_simulation_task(args.task_json)
     semantic_contract = None
     semantic_contract_path = None
@@ -400,6 +414,9 @@ def main() -> int:
         check_ros2_interface_readiness=args.check_ros2_interface_readiness,
         ros2_interface_config=args.ros2_interface_config,
         ros2_interface_report=args.ros2_interface_report,
+        check_ros2_message_export=args.check_ros2_message_export,
+        ros2_message_export_config=args.ros2_message_export_config,
+        ros2_message_export_report=args.ros2_message_export_report,
         output_dir=args.output_dir,
         write_report=True,
         demo_command=shlex.join([sys.executable, *sys.argv]),
@@ -656,6 +673,18 @@ def print_summary(result: dict, report_path: Path) -> None:
     print(f"ros2_interface_readiness_result_path: {result.get('ros2_interface_readiness_result_path')}")
     print(f"ros2_interface_readiness_report_path: {result.get('ros2_interface_readiness_report_path')}")
     print(f"ros2_interface_safety_boundary: {ros2_interface.get('safety_boundary')}")
+    message_export = result.get("ros2_message_export") or {}
+    print(f"ros2_message_export_requested: {result.get('ros2_message_export_requested')}")
+    print(f"ros2_message_export_status: {result.get('ros2_message_export_status')}")
+    print(f"message_export_status: {result.get('message_export_status')}")
+    print(f"ros2_message_id: {result.get('ros2_message_id')}")
+    print(f"ros2_message_schema: {result.get('ros2_message_schema')}")
+    print(f"fake_publish_only: {result.get('fake_publish_only')}")
+    print(f"ros2_message_export_blocking_reasons: {result.get('ros2_message_export_blocking_reasons')}")
+    print(f"ros2_message_export_warnings: {result.get('ros2_message_export_warnings')}")
+    print(f"ros2_message_export_result_path: {result.get('ros2_message_export_result_path')}")
+    print(f"ros2_message_export_report_path: {result.get('ros2_message_export_report_path')}")
+    print(f"ros2_message_export_safety_boundary: {message_export.get('safety_boundary')}")
     print(f"Report: {report_path}")
     if result.get("blocking_reasons"):
         print(f"Blocking reasons: {', '.join(result['blocking_reasons'])}")
