@@ -19,7 +19,7 @@ from src.simulation_runtime import DEFAULT_SIMULATION_TASK, CURRENT_TETO_VERSION
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run TETO V2.10.2 ROS2 message export, ROS2 interface readiness, planner gateway shadow contract, full perception shadow pipeline, and no-motion simulation evidence smoke tests."
+        description="Run TETO V2.11.0 full robot-system shadow bridge, ROS2 message export, and no-motion simulation evidence smoke tests."
     )
     parser.add_argument("--dry-run", action="store_true", help="Do not import Isaac; produce a test execution report.")
     parser.add_argument("--no-isaac", action="store_true", help="Pure Python test mode without Isaac imports.")
@@ -120,7 +120,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--execution-max-attempts",
         type=int,
         default=1,
-        help="Maximum attempts metadata. V2.10.2 supports 1 and does not auto-retry.",
+        help="Maximum attempts metadata. V2.11.0 supports 1 and does not auto-retry.",
     )
     parser.add_argument(
         "--execution-enable-retry-recommendation",
@@ -237,6 +237,42 @@ def build_parser() -> argparse.ArgumentParser:
         help="Generate ROS2 message export fake-publish evidence report.",
     )
     parser.add_argument(
+        "--check-moveit-plan-only",
+        action="store_true",
+        help="Validate MoveIt plan-only declarations without planning execution.",
+    )
+    parser.add_argument("--moveit-plan-only-config", help="Path to MoveIt plan-only YAML/JSON config.")
+    parser.add_argument(
+        "--moveit-plan-only-report",
+        action="store_true",
+        help="Generate MoveIt plan-only evidence report.",
+    )
+    parser.add_argument(
+        "--check-ur5-read-only-state",
+        action="store_true",
+        help="Validate UR5 read-only state monitor declarations without live sockets.",
+    )
+    parser.add_argument("--ur5-read-only-state-config", help="Path to UR5 read-only state YAML/JSON config.")
+    parser.add_argument(
+        "--ur5-read-only-state-report",
+        action="store_true",
+        help="Generate UR5 read-only state evidence report.",
+    )
+    parser.add_argument(
+        "--check-robot-system-shadow-bridge",
+        action="store_true",
+        help="Validate the full robot-system shadow bridge rehearsal boundary.",
+    )
+    parser.add_argument(
+        "--robot-system-shadow-bridge-config",
+        help="Path to robot-system shadow bridge YAML/JSON config.",
+    )
+    parser.add_argument(
+        "--robot-system-shadow-bridge-report",
+        action="store_true",
+        help="Generate full robot-system shadow bridge evidence report.",
+    )
+    parser.add_argument(
         "--check-camera-source-adapter",
         action="store_true",
         help="Validate camera source adapter evidence and generate a no-motion snapshot contract.",
@@ -326,7 +362,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
     if args.execution_max_attempts != 1:
-        raise ValueError("--execution-max-attempts currently supports only 1 in TETO V2.10.2")
+        raise ValueError("--execution-max-attempts currently supports only 1 in TETO V2.11.0")
     simulation_task = _load_simulation_task(args.task_json)
     semantic_contract = None
     semantic_contract_path = None
@@ -417,6 +453,15 @@ def main() -> int:
         check_ros2_message_export=args.check_ros2_message_export,
         ros2_message_export_config=args.ros2_message_export_config,
         ros2_message_export_report=args.ros2_message_export_report,
+        check_moveit_plan_only=args.check_moveit_plan_only,
+        moveit_plan_only_config=args.moveit_plan_only_config,
+        moveit_plan_only_report=args.moveit_plan_only_report,
+        check_ur5_read_only_state=args.check_ur5_read_only_state,
+        ur5_read_only_state_config=args.ur5_read_only_state_config,
+        ur5_read_only_state_report=args.ur5_read_only_state_report,
+        check_robot_system_shadow_bridge=args.check_robot_system_shadow_bridge,
+        robot_system_shadow_bridge_config=args.robot_system_shadow_bridge_config,
+        robot_system_shadow_bridge_report=args.robot_system_shadow_bridge_report,
         output_dir=args.output_dir,
         write_report=True,
         demo_command=shlex.join([sys.executable, *sys.argv]),
@@ -685,6 +730,36 @@ def print_summary(result: dict, report_path: Path) -> None:
     print(f"ros2_message_export_result_path: {result.get('ros2_message_export_result_path')}")
     print(f"ros2_message_export_report_path: {result.get('ros2_message_export_report_path')}")
     print(f"ros2_message_export_safety_boundary: {message_export.get('safety_boundary')}")
+    moveit_plan_only = result.get("moveit_plan_only") or {}
+    print(f"moveit_plan_only_requested: {result.get('moveit_plan_only_requested')}")
+    print(f"moveit_plan_only_status: {result.get('moveit_plan_only_status')}")
+    print(f"plan_only_status: {result.get('plan_only_status')}")
+    print(f"plan_only_ready: {result.get('plan_only_ready')}")
+    print(f"planning_group: {result.get('planning_group')}")
+    print(f"planning_frame: {result.get('planning_frame')}")
+    print(f"end_effector_frame: {result.get('end_effector_frame')}")
+    print(f"moveit_plan_only_blocking_reasons: {result.get('moveit_plan_only_blocking_reasons')}")
+    print(f"moveit_plan_only_result_path: {result.get('moveit_plan_only_result_path')}")
+    print(f"moveit_plan_only_report_path: {result.get('moveit_plan_only_report_path')}")
+    print(f"moveit_plan_only_safety_boundary: {moveit_plan_only.get('safety_boundary')}")
+    ur5_state = result.get("ur5_read_only_state") or {}
+    print(f"ur5_read_only_state_requested: {result.get('ur5_read_only_state_requested')}")
+    print(f"ur5_read_only_state_status: {result.get('ur5_read_only_state_status')}")
+    print(f"read_only_state_status: {result.get('read_only_state_status')}")
+    print(f"read_only_state_contract_ready: {result.get('read_only_state_contract_ready')}")
+    print(f"ur5_read_only_state_blocking_reasons: {result.get('ur5_read_only_state_blocking_reasons')}")
+    print(f"ur5_read_only_state_result_path: {result.get('ur5_read_only_state_result_path')}")
+    print(f"ur5_read_only_state_report_path: {result.get('ur5_read_only_state_report_path')}")
+    print(f"ur5_read_only_state_safety_boundary: {ur5_state.get('safety_boundary')}")
+    bridge = result.get("robot_system_shadow_bridge") or {}
+    print(f"robot_system_shadow_bridge_requested: {result.get('robot_system_shadow_bridge_requested')}")
+    print(f"robot_system_shadow_bridge_status: {result.get('robot_system_shadow_bridge_status')}")
+    print(f"robot_system_shadow_status: {result.get('robot_system_shadow_status')}")
+    print(f"robot_system_shadow_ready: {result.get('robot_system_shadow_ready')}")
+    print(f"robot_system_shadow_bridge_blocking_reasons: {result.get('robot_system_shadow_bridge_blocking_reasons')}")
+    print(f"robot_system_shadow_bridge_result_path: {result.get('robot_system_shadow_bridge_result_path')}")
+    print(f"robot_system_shadow_bridge_report_path: {result.get('robot_system_shadow_bridge_report_path')}")
+    print(f"robot_system_shadow_bridge_safety_boundary: {bridge.get('safety_boundary')}")
     print(f"Report: {report_path}")
     if result.get("blocking_reasons"):
         print(f"Blocking reasons: {', '.join(result['blocking_reasons'])}")

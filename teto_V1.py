@@ -75,7 +75,7 @@ def startup_animation():
    ██║   ███████╗   ██║   ╚██████╔╝
    ╚═╝   ╚══════╝   ╚═╝    ╚═════╝
 
-              TETO V2.10.2
+              TETO V2.11.0
            -- Test Launcher --
 """
     print(RED + title + RESET)
@@ -88,7 +88,7 @@ def _clean_path(value: str) -> str:
 
 def print_menu():
     print("=" * 40)
-    print("              TETO V2.10.2")
+    print("              TETO V2.11.0")
     print("             Test Launcher")
     print("=" * 40)
     print("1. Convert images")
@@ -501,7 +501,7 @@ def handle_check_environment():
 
 def handle_first_simulation_execution():
     script_path = PROJECT_ROOT / "scripts" / "run_first_simulation_execution.py"
-    print("Running TETO V2.10.2 ROS2 message export fake-publish / no-motion dry-run check.")
+    print("Running TETO V2.11.0 full robot-system shadow bridge / no-motion dry-run check.")
     print(
         f"For real Isaac runtime, run: {sys.executable} {script_path} "
         "--check-robot-asset --inspect-robot-prim --check-articulation-readiness "
@@ -512,8 +512,32 @@ def handle_first_simulation_execution():
         [
             sys.executable,
             str(script_path),
-            "--dry-run",
-            "--check-simulation-motion-precheck",
+            "--check-planner-gateway-shadow",
+            "--planner-gateway-shadow-config",
+            "configs/planner_gateway_shadow_positive.example.yaml",
+            "--planner-gateway-shadow-report",
+            "--perception-shadow-result",
+            "examples/planner_gateway_shadow/perception_positive_result.json",
+            "--check-ros2-interface-readiness",
+            "--ros2-interface-config",
+            "configs/ros2_interface.example.yaml",
+            "--ros2-interface-report",
+            "--check-ros2-message-export",
+            "--ros2-message-export-config",
+            "configs/ros2_message_export.example.yaml",
+            "--ros2-message-export-report",
+            "--check-moveit-plan-only",
+            "--moveit-plan-only-config",
+            "configs/moveit_plan_only.example.yaml",
+            "--moveit-plan-only-report",
+            "--check-ur5-read-only-state",
+            "--ur5-read-only-state-config",
+            "configs/ur5_read_only_state.example.yaml",
+            "--ur5-read-only-state-report",
+            "--check-robot-system-shadow-bridge",
+            "--robot-system-shadow-bridge-config",
+            "configs/robot_system_shadow_bridge.example.yaml",
+            "--robot-system-shadow-bridge-report",
         ],
         cwd=PROJECT_ROOT,
         check=False,

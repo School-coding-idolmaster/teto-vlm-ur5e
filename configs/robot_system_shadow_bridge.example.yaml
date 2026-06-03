@@ -1,0 +1,21 @@
+robot_system_shadow_bridge:
+  shadow_bridge_only: true
+  require_moveit_plan_only_ready: true
+  require_ur5_read_only_contract_ready: true
+  execution_allowed: false
+  ros2_publish_enabled: false
+  ros2_publish_attempted: false
+  moveit_execute_allowed: false
+  moveit_execute_called: false
+  trajectory_send_allowed: false
+  trajectory_sent: false
+  controller_command_sent: false
+  robot_command_generated: false
+  tcp_pose_world_generated: false
+  joint_targets_generated: false
+  real_robot_enabled: false
+  real_robot_motion_allowed: false
+  real_robot_motion_executed: false
+  rtde_write_attempted: false
+  dashboard_command_attempted: false
+  automatic_retry_motion: false

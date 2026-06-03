@@ -7,6 +7,7 @@ from typing import Any, Dict
 from src.camera_snapshot import format_camera_snapshot_report
 from src.camera_source_adapter import format_camera_source_report
 from src.geometry_validity import format_geometry_validity_report
+from src.moveit_plan_only_contract import format_moveit_plan_only_report
 from src.projector_shadow import format_projector_shadow_report
 from src.simulation_micro_motion import (
     normalize_motion_evidence_paths,
@@ -19,9 +20,11 @@ from src.planner_gateway_shadow import format_planner_gateway_shadow_report
 from src.real_scene_shadow_pipeline import format_real_scene_shadow_report
 from src.ros2_interface_readiness import format_ros2_interface_readiness_report
 from src.ros2_message_exporter import format_ros2_message_export_report
+from src.robot_system_shadow_bridge import format_robot_system_shadow_bridge_report
 from src.semantic_simulation_bridge import format_semantic_simulation_bridge_report
 from src.simulated_task_execution import format_simulated_task_execution_report
 from src.vlm_grounding_adapter import format_vlm_grounding_report
+from src.ur5_read_only_state_contract import format_ur5_read_only_state_report
 
 
 EVIDENCE_MANIFEST_SCHEMA_VERSION = "teto_evidence_manifest.v1"
@@ -85,6 +88,12 @@ def export_simulation_evidence(
     ros2_interface_readiness_report_path = output_dir / "ros2_interface_readiness_report.md"
     ros2_message_export_result_path = output_dir / "ros2_message_export_result.json"
     ros2_message_export_report_path = output_dir / "ros2_message_export_report.md"
+    moveit_plan_only_result_path = output_dir / "moveit_plan_only_result.json"
+    moveit_plan_only_report_path = output_dir / "moveit_plan_only_report.md"
+    ur5_read_only_state_result_path = output_dir / "ur5_read_only_state_result.json"
+    ur5_read_only_state_report_path = output_dir / "ur5_read_only_state_report.md"
+    robot_system_shadow_bridge_result_path = output_dir / "robot_system_shadow_bridge_result.json"
+    robot_system_shadow_bridge_report_path = output_dir / "robot_system_shadow_bridge_report.md"
 
     object_info = _simulation_object_info(result)
     robot_asset_info = _robot_asset_info(result)
@@ -106,6 +115,9 @@ def export_simulation_evidence(
     planner_gateway_shadow_info = _planner_gateway_shadow_info(result)
     ros2_interface_readiness_info = _ros2_interface_readiness_info(result)
     ros2_message_export_info = _ros2_message_export_info(result)
+    moveit_plan_only_info = _moveit_plan_only_info(result)
+    ur5_read_only_state_info = _ur5_read_only_state_info(result)
+    robot_system_shadow_bridge_info = _robot_system_shadow_bridge_info(result)
     structure_report_requested = bool(robot_prim_inspection_info.get("requested"))
     readiness_requested = bool(articulation_readiness_info.get("requested"))
     state_requested = bool(articulation_state_info.get("requested"))
@@ -126,6 +138,9 @@ def export_simulation_evidence(
     planner_gateway_shadow_requested = bool(planner_gateway_shadow_info.get("requested"))
     ros2_interface_readiness_requested = bool(ros2_interface_readiness_info.get("requested"))
     ros2_message_export_requested = bool(ros2_message_export_info.get("requested"))
+    moveit_plan_only_requested = bool(moveit_plan_only_info.get("requested"))
+    ur5_read_only_state_requested = bool(ur5_read_only_state_info.get("requested"))
+    robot_system_shadow_bridge_requested = bool(robot_system_shadow_bridge_info.get("requested"))
     run_id = output_dir.name
     created_at = result.get("finished_at") or result.get("started_at")
     report_path = result.get("report_path")
@@ -154,6 +169,9 @@ def export_simulation_evidence(
             planner_gateway_shadow_info=planner_gateway_shadow_info,
             ros2_interface_readiness_info=ros2_interface_readiness_info,
             ros2_message_export_info=ros2_message_export_info,
+            moveit_plan_only_info=moveit_plan_only_info,
+            ur5_read_only_state_info=ur5_read_only_state_info,
+            robot_system_shadow_bridge_info=robot_system_shadow_bridge_info,
             robot_structure_report_path=structure_report_ref,
             run_id=run_id,
             created_at=created_at,
@@ -404,6 +422,43 @@ def export_simulation_evidence(
         _write_json_artifact(ros2_message_export_result_path, ros2_message_export_info)
         ros2_message_export_report_path.write_text(
             format_ros2_message_export_report(ros2_message_export_info),
+            encoding="utf-8",
+        )
+    if moveit_plan_only_requested:
+        moveit_plan_only_info["moveit_plan_only_result_path"] = str(moveit_plan_only_result_path)
+        moveit_plan_only_info["moveit_plan_only_report_path"] = str(moveit_plan_only_report_path)
+        moveit_plan_only_info["moveit_plan_only_evidence_files"] = _moveit_plan_only_evidence_files(
+            moveit_plan_only_info
+        )
+        _write_json_artifact(moveit_plan_only_result_path, moveit_plan_only_info)
+        moveit_plan_only_report_path.write_text(
+            format_moveit_plan_only_report(moveit_plan_only_info),
+            encoding="utf-8",
+        )
+    if ur5_read_only_state_requested:
+        ur5_read_only_state_info["ur5_read_only_state_result_path"] = str(ur5_read_only_state_result_path)
+        ur5_read_only_state_info["ur5_read_only_state_report_path"] = str(ur5_read_only_state_report_path)
+        ur5_read_only_state_info["ur5_read_only_state_evidence_files"] = _ur5_read_only_state_evidence_files(
+            ur5_read_only_state_info
+        )
+        _write_json_artifact(ur5_read_only_state_result_path, ur5_read_only_state_info)
+        ur5_read_only_state_report_path.write_text(
+            format_ur5_read_only_state_report(ur5_read_only_state_info),
+            encoding="utf-8",
+        )
+    if robot_system_shadow_bridge_requested:
+        robot_system_shadow_bridge_info["robot_system_shadow_bridge_result_path"] = str(
+            robot_system_shadow_bridge_result_path
+        )
+        robot_system_shadow_bridge_info["robot_system_shadow_bridge_report_path"] = str(
+            robot_system_shadow_bridge_report_path
+        )
+        robot_system_shadow_bridge_info["robot_system_shadow_bridge_evidence_files"] = (
+            _robot_system_shadow_bridge_evidence_files(robot_system_shadow_bridge_info)
+        )
+        _write_json_artifact(robot_system_shadow_bridge_result_path, robot_system_shadow_bridge_info)
+        robot_system_shadow_bridge_report_path.write_text(
+            format_robot_system_shadow_bridge_report(robot_system_shadow_bridge_info),
             encoding="utf-8",
         )
     motion_evidence_summary = summarize_motion_evidence(simulation_micro_motion_info)
@@ -1129,22 +1184,46 @@ def export_simulation_evidence(
         "ros2_publish_enabled": False,
         "ros2_publish_attempted": False,
         "moveit_called": False,
-        "trajectory_generated": planner_gateway_shadow_info.get("trajectory_generated", False)
+        "trajectory_generated": robot_system_shadow_bridge_info.get("trajectory_generated", False)
+        if robot_system_shadow_bridge_requested
+        else moveit_plan_only_info.get("trajectory_generated", False)
+        if moveit_plan_only_requested
+        else planner_gateway_shadow_info.get("trajectory_generated", False)
         if planner_gateway_shadow_requested
         else False,
-        "tcp_pose_world_generated": planner_gateway_shadow_info.get("tcp_pose_world_generated", False)
+        "tcp_pose_world_generated": robot_system_shadow_bridge_info.get("tcp_pose_world_generated", False)
+        if robot_system_shadow_bridge_requested
+        else moveit_plan_only_info.get("tcp_pose_world_generated", False)
+        if moveit_plan_only_requested
+        else planner_gateway_shadow_info.get("tcp_pose_world_generated", False)
         if planner_gateway_shadow_requested
         else False,
-        "joint_targets_generated": planner_gateway_shadow_info.get("joint_targets_generated", False)
+        "joint_targets_generated": robot_system_shadow_bridge_info.get("joint_targets_generated", False)
+        if robot_system_shadow_bridge_requested
+        else moveit_plan_only_info.get("joint_targets_generated", False)
+        if moveit_plan_only_requested
+        else planner_gateway_shadow_info.get("joint_targets_generated", False)
         if planner_gateway_shadow_requested
         else False,
-        "robot_command_generated": planner_gateway_shadow_info.get("robot_command_generated", False)
+        "robot_command_generated": robot_system_shadow_bridge_info.get("robot_command_generated", False)
+        if robot_system_shadow_bridge_requested
+        else moveit_plan_only_info.get("robot_command_generated", False)
+        if moveit_plan_only_requested
+        else planner_gateway_shadow_info.get("robot_command_generated", False)
         if planner_gateway_shadow_requested
         else False,
-        "real_robot_motion_executed": planner_gateway_shadow_info.get("real_robot_motion_executed", False)
+        "real_robot_motion_executed": robot_system_shadow_bridge_info.get("real_robot_motion_executed", False)
+        if robot_system_shadow_bridge_requested
+        else planner_gateway_shadow_info.get("real_robot_motion_executed", False)
         if planner_gateway_shadow_requested
         else False,
-        "blocking_reasons": ros2_message_export_info.get("blocking_reasons", [])
+        "blocking_reasons": robot_system_shadow_bridge_info.get("blocking_reasons", [])
+        if robot_system_shadow_bridge_requested
+        else moveit_plan_only_info.get("blocking_reasons", [])
+        if moveit_plan_only_requested
+        else ur5_read_only_state_info.get("blocking_reasons", [])
+        if ur5_read_only_state_requested
+        else ros2_message_export_info.get("blocking_reasons", [])
         if ros2_message_export_requested
         else planner_gateway_shadow_info.get("blocking_reasons", [])
         if planner_gateway_shadow_requested
@@ -1163,7 +1242,13 @@ def export_simulation_evidence(
             if camera_source_requested
             else list(lab_readiness_info.get("blocking_reasons") or result.get("blocking_reasons") or [])
         ),
-        "warnings": ros2_message_export_info.get("warnings", [])
+        "warnings": robot_system_shadow_bridge_info.get("warnings", [])
+        if robot_system_shadow_bridge_requested
+        else moveit_plan_only_info.get("warnings", [])
+        if moveit_plan_only_requested
+        else ur5_read_only_state_info.get("warnings", [])
+        if ur5_read_only_state_requested
+        else ros2_message_export_info.get("warnings", [])
         if ros2_message_export_requested
         else planner_gateway_shadow_info.get("warnings", [])
         if planner_gateway_shadow_requested
@@ -1182,7 +1267,13 @@ def export_simulation_evidence(
             if camera_source_requested
             else []
         ),
-        "next_safe_action": ros2_message_export_info.get("next_safe_action")
+        "next_safe_action": robot_system_shadow_bridge_info.get("next_safe_action")
+        if robot_system_shadow_bridge_requested
+        else moveit_plan_only_info.get("next_safe_action")
+        if moveit_plan_only_requested
+        else ur5_read_only_state_info.get("next_safe_action")
+        if ur5_read_only_state_requested
+        else ros2_message_export_info.get("next_safe_action")
         if ros2_message_export_requested
         else planner_gateway_shadow_info.get("next_safe_action")
         if planner_gateway_shadow_requested
@@ -1281,10 +1372,159 @@ def export_simulation_evidence(
         "ros2_message_export_report_path": str(ros2_message_export_report_path)
         if ros2_message_export_requested
         else None,
+        "moveit_plan_only_evidence_available": moveit_plan_only_requested,
+        "moveit_plan_only_status": moveit_plan_only_info.get("moveit_plan_only_status"),
+        "plan_only_ready": moveit_plan_only_info.get("plan_only_ready", False),
+        "planning_group": moveit_plan_only_info.get("planning_group"),
+        "planning_frame": moveit_plan_only_info.get("planning_frame"),
+        "end_effector_frame": moveit_plan_only_info.get("end_effector_frame"),
+        "moveit_plan_requested": moveit_plan_only_info.get("moveit_plan_requested", False),
+        "moveit_plan_only": moveit_plan_only_info.get("moveit_plan_only", True),
+        "moveit_execute_allowed": robot_system_shadow_bridge_info.get("moveit_execute_allowed", False)
+        if robot_system_shadow_bridge_requested
+        else moveit_plan_only_info.get("moveit_execute_allowed", False),
+        "moveit_execute_called": robot_system_shadow_bridge_info.get("moveit_execute_called", False)
+        if robot_system_shadow_bridge_requested
+        else moveit_plan_only_info.get("moveit_execute_called", False),
+        "trajectory_send_allowed": robot_system_shadow_bridge_info.get("trajectory_send_allowed", False)
+        if robot_system_shadow_bridge_requested
+        else moveit_plan_only_info.get("trajectory_send_allowed", False),
+        "trajectory_sent": robot_system_shadow_bridge_info.get("trajectory_sent", False)
+        if robot_system_shadow_bridge_requested
+        else moveit_plan_only_info.get("trajectory_sent", False),
+        "moveit_plan_only_evidence_files": (
+            _moveit_plan_only_evidence_files(moveit_plan_only_info) if moveit_plan_only_requested else []
+        ),
+        "moveit_plan_only_result_path": str(moveit_plan_only_result_path) if moveit_plan_only_requested else None,
+        "moveit_plan_only_report_path": str(moveit_plan_only_report_path) if moveit_plan_only_requested else None,
+        "ur5_read_only_state_evidence_available": ur5_read_only_state_requested,
+        "ur5_read_only_state_status": ur5_read_only_state_info.get("ur5_read_only_state_status"),
+        "read_only_state_contract_ready": ur5_read_only_state_info.get("read_only_state_contract_ready", False),
+        "robot_model": ur5_read_only_state_info.get("robot_model"),
+        "robot_ip_declared": ur5_read_only_state_info.get("robot_ip_declared", False),
+        "read_only_mode": ur5_read_only_state_info.get("read_only_mode", True),
+        "rtde_read_enabled": ur5_read_only_state_info.get("rtde_read_enabled"),
+        "rtde_write_enabled": robot_system_shadow_bridge_info.get("rtde_write_enabled", False)
+        if robot_system_shadow_bridge_requested
+        else ur5_read_only_state_info.get("rtde_write_enabled", False),
+        "rtde_write_attempted": robot_system_shadow_bridge_info.get("rtde_write_attempted", False)
+        if robot_system_shadow_bridge_requested
+        else ur5_read_only_state_info.get("rtde_write_attempted", False),
+        "dashboard_read_enabled": ur5_read_only_state_info.get("dashboard_read_enabled"),
+        "dashboard_command_enabled": robot_system_shadow_bridge_info.get("dashboard_command_enabled", False)
+        if robot_system_shadow_bridge_requested
+        else ur5_read_only_state_info.get("dashboard_command_enabled", False),
+        "dashboard_command_attempted": robot_system_shadow_bridge_info.get("dashboard_command_attempted", False)
+        if robot_system_shadow_bridge_requested
+        else ur5_read_only_state_info.get("dashboard_command_attempted", False),
+        "required_state_fields_declared": ur5_read_only_state_info.get("required_state_fields_declared", []),
+        "state_ttl_ms": ur5_read_only_state_info.get("state_ttl_ms"),
+        "manual_confirmation_required": robot_system_shadow_bridge_info.get("manual_confirmation_required", True)
+        if robot_system_shadow_bridge_requested
+        else ur5_read_only_state_info.get("manual_confirmation_required", True)
+        if ur5_read_only_state_requested
+        else planner_gateway_shadow_info.get("manual_confirmation_required", True),
+        "ur5_read_only_state_evidence_files": (
+            _ur5_read_only_state_evidence_files(ur5_read_only_state_info) if ur5_read_only_state_requested else []
+        ),
+        "ur5_read_only_state_result_path": str(ur5_read_only_state_result_path)
+        if ur5_read_only_state_requested
+        else None,
+        "ur5_read_only_state_report_path": str(ur5_read_only_state_report_path)
+        if ur5_read_only_state_requested
+        else None,
+        "robot_system_shadow_bridge_evidence_available": robot_system_shadow_bridge_requested,
+        "robot_system_shadow_bridge_status": robot_system_shadow_bridge_info.get(
+            "robot_system_shadow_bridge_status"
+        ),
+        "robot_system_shadow_ready": robot_system_shadow_bridge_info.get("robot_system_shadow_ready", False),
+        "ros2_message_export_ready": robot_system_shadow_bridge_info.get("ros2_message_export_ready", False),
+        "moveit_plan_only_ready": robot_system_shadow_bridge_info.get("moveit_plan_only_ready", False),
+        "ur5_read_only_state_ready": robot_system_shadow_bridge_info.get("ur5_read_only_state_ready", False),
+        "controller_command_sent": robot_system_shadow_bridge_info.get("controller_command_sent", False),
+        "real_robot_enabled": robot_system_shadow_bridge_info.get("real_robot_enabled", False),
+        "automatic_retry_motion": robot_system_shadow_bridge_info.get("automatic_retry_motion", False),
+        "urscript_generated": robot_system_shadow_bridge_info.get("urscript_generated", False)
+        if robot_system_shadow_bridge_requested
+        else False,
+        "robot_system_shadow_bridge_evidence_files": (
+            _robot_system_shadow_bridge_evidence_files(robot_system_shadow_bridge_info)
+            if robot_system_shadow_bridge_requested
+            else []
+        ),
+        "robot_system_shadow_bridge_result_path": str(robot_system_shadow_bridge_result_path)
+        if robot_system_shadow_bridge_requested
+        else None,
+        "robot_system_shadow_bridge_report_path": str(robot_system_shadow_bridge_report_path)
+        if robot_system_shadow_bridge_requested
+        else None,
         "screenshot_before_path": None,
         "screenshot_after_path": None,
         "video_path": None,
     }
+    if not moveit_plan_only_requested:
+        _drop_keys(
+            manifest,
+            [
+                "moveit_plan_only_evidence_available",
+                "moveit_plan_only_status",
+                "plan_only_ready",
+                "planning_group",
+                "planning_frame",
+                "end_effector_frame",
+                "moveit_plan_requested",
+                "moveit_plan_only",
+                "moveit_execute_allowed",
+                "moveit_execute_called",
+                "trajectory_send_allowed",
+                "trajectory_sent",
+                "moveit_plan_only_evidence_files",
+                "moveit_plan_only_result_path",
+                "moveit_plan_only_report_path",
+            ],
+        )
+    if not ur5_read_only_state_requested:
+        _drop_keys(
+            manifest,
+            [
+                "ur5_read_only_state_evidence_available",
+                "ur5_read_only_state_status",
+                "read_only_state_contract_ready",
+                "robot_model",
+                "robot_ip_declared",
+                "read_only_mode",
+                "rtde_read_enabled",
+                "rtde_write_enabled",
+                "rtde_write_attempted",
+                "dashboard_read_enabled",
+                "dashboard_command_enabled",
+                "dashboard_command_attempted",
+                "required_state_fields_declared",
+                "state_ttl_ms",
+                "ur5_read_only_state_evidence_files",
+                "ur5_read_only_state_result_path",
+                "ur5_read_only_state_report_path",
+            ],
+        )
+    if not robot_system_shadow_bridge_requested:
+        _drop_keys(
+            manifest,
+            [
+                "robot_system_shadow_bridge_evidence_available",
+                "robot_system_shadow_bridge_status",
+                "robot_system_shadow_ready",
+                "ros2_message_export_ready",
+                "moveit_plan_only_ready",
+                "ur5_read_only_state_ready",
+                "controller_command_sent",
+                "real_robot_enabled",
+                "automatic_retry_motion",
+                "urscript_generated",
+                "robot_system_shadow_bridge_evidence_files",
+                "robot_system_shadow_bridge_result_path",
+                "robot_system_shadow_bridge_report_path",
+            ],
+        )
     with manifest_path.open("w", encoding="utf-8") as manifest_file:
         json.dump(manifest, manifest_file, ensure_ascii=False, indent=2)
         manifest_file.write("\n")
@@ -1339,6 +1579,12 @@ def export_simulation_evidence(
         "ros2_interface_readiness_report_path": ros2_interface_readiness_report_path,
         "ros2_message_export_result_path": ros2_message_export_result_path,
         "ros2_message_export_report_path": ros2_message_export_report_path,
+        "moveit_plan_only_result_path": moveit_plan_only_result_path,
+        "moveit_plan_only_report_path": moveit_plan_only_report_path,
+        "ur5_read_only_state_result_path": ur5_read_only_state_result_path,
+        "ur5_read_only_state_report_path": ur5_read_only_state_report_path,
+        "robot_system_shadow_bridge_result_path": robot_system_shadow_bridge_result_path,
+        "robot_system_shadow_bridge_report_path": robot_system_shadow_bridge_report_path,
     }
 
 
@@ -2443,6 +2689,137 @@ def _ros2_message_export_evidence_files(
     ]
 
 
+def _moveit_plan_only_info(result: Dict[str, Any]) -> Dict[str, Any]:
+    plan_only = result.get("moveit_plan_only") if isinstance(result.get("moveit_plan_only"), dict) else {}
+    return {
+        **plan_only,
+        "requested": result.get("moveit_plan_only_requested", plan_only.get("requested", False)) is True,
+        "moveit_plan_only_status": result.get(
+            "moveit_plan_only_status",
+            plan_only.get("moveit_plan_only_status", "NOT_REQUESTED"),
+        ),
+        "plan_only_status": result.get("plan_only_status", plan_only.get("plan_only_status", "NOT_REQUESTED")),
+        "plan_only_ready": result.get("plan_only_ready", plan_only.get("plan_only_ready", False)) is True,
+        "planning_group": result.get("planning_group", plan_only.get("planning_group")),
+        "planning_frame": result.get("planning_frame", plan_only.get("planning_frame")),
+        "end_effector_frame": result.get("end_effector_frame", plan_only.get("end_effector_frame")),
+        "blocking_reasons": result.get(
+            "moveit_plan_only_blocking_reasons",
+            plan_only.get("blocking_reasons", []),
+        ),
+        "warnings": result.get("moveit_plan_only_warnings", plan_only.get("warnings", [])),
+        "moveit_plan_only_result_path": result.get(
+            "moveit_plan_only_result_path",
+            plan_only.get("moveit_plan_only_result_path"),
+        ),
+        "moveit_plan_only_report_path": result.get(
+            "moveit_plan_only_report_path",
+            plan_only.get("moveit_plan_only_report_path"),
+        ),
+    }
+
+
+def _moveit_plan_only_evidence_files(moveit_plan_only_info: Dict[str, Any]) -> list[Dict[str, str | None]]:
+    return [
+        {"name": "moveit_plan_only_result.json", "path": moveit_plan_only_info.get("moveit_plan_only_result_path")},
+        {"name": "moveit_plan_only_report.md", "path": moveit_plan_only_info.get("moveit_plan_only_report_path")},
+    ]
+
+
+def _ur5_read_only_state_info(result: Dict[str, Any]) -> Dict[str, Any]:
+    state = result.get("ur5_read_only_state") if isinstance(result.get("ur5_read_only_state"), dict) else {}
+    return {
+        **state,
+        "requested": result.get("ur5_read_only_state_requested", state.get("requested", False)) is True,
+        "ur5_read_only_state_status": result.get(
+            "ur5_read_only_state_status",
+            state.get("ur5_read_only_state_status", "NOT_REQUESTED"),
+        ),
+        "read_only_state_status": result.get(
+            "read_only_state_status",
+            state.get("read_only_state_status", "NOT_REQUESTED"),
+        ),
+        "read_only_state_contract_ready": result.get(
+            "read_only_state_contract_ready",
+            state.get("read_only_state_contract_ready", False),
+        )
+        is True,
+        "blocking_reasons": result.get(
+            "ur5_read_only_state_blocking_reasons",
+            state.get("blocking_reasons", []),
+        ),
+        "warnings": result.get("ur5_read_only_state_warnings", state.get("warnings", [])),
+        "ur5_read_only_state_result_path": result.get(
+            "ur5_read_only_state_result_path",
+            state.get("ur5_read_only_state_result_path"),
+        ),
+        "ur5_read_only_state_report_path": result.get(
+            "ur5_read_only_state_report_path",
+            state.get("ur5_read_only_state_report_path"),
+        ),
+    }
+
+
+def _ur5_read_only_state_evidence_files(state_info: Dict[str, Any]) -> list[Dict[str, str | None]]:
+    return [
+        {"name": "ur5_read_only_state_result.json", "path": state_info.get("ur5_read_only_state_result_path")},
+        {"name": "ur5_read_only_state_report.md", "path": state_info.get("ur5_read_only_state_report_path")},
+    ]
+
+
+def _robot_system_shadow_bridge_info(result: Dict[str, Any]) -> Dict[str, Any]:
+    bridge = (
+        result.get("robot_system_shadow_bridge")
+        if isinstance(result.get("robot_system_shadow_bridge"), dict)
+        else {}
+    )
+    return {
+        **bridge,
+        "requested": result.get("robot_system_shadow_bridge_requested", bridge.get("requested", False)) is True,
+        "robot_system_shadow_bridge_status": result.get(
+            "robot_system_shadow_bridge_status",
+            bridge.get("robot_system_shadow_bridge_status", "NOT_REQUESTED"),
+        ),
+        "robot_system_shadow_status": result.get(
+            "robot_system_shadow_status",
+            bridge.get("robot_system_shadow_status", "NOT_REQUESTED"),
+        ),
+        "robot_system_shadow_ready": result.get(
+            "robot_system_shadow_ready",
+            bridge.get("robot_system_shadow_ready", False),
+        )
+        is True,
+        "blocking_reasons": result.get(
+            "robot_system_shadow_bridge_blocking_reasons",
+            bridge.get("blocking_reasons", []),
+        ),
+        "warnings": result.get("robot_system_shadow_bridge_warnings", bridge.get("warnings", [])),
+        "robot_system_shadow_bridge_result_path": result.get(
+            "robot_system_shadow_bridge_result_path",
+            bridge.get("robot_system_shadow_bridge_result_path"),
+        ),
+        "robot_system_shadow_bridge_report_path": result.get(
+            "robot_system_shadow_bridge_report_path",
+            bridge.get("robot_system_shadow_bridge_report_path"),
+        ),
+    }
+
+
+def _robot_system_shadow_bridge_evidence_files(
+    bridge_info: Dict[str, Any],
+) -> list[Dict[str, str | None]]:
+    return [
+        {
+            "name": "robot_system_shadow_bridge_result.json",
+            "path": bridge_info.get("robot_system_shadow_bridge_result_path"),
+        },
+        {
+            "name": "robot_system_shadow_bridge_report.md",
+            "path": bridge_info.get("robot_system_shadow_bridge_report_path"),
+        },
+    ]
+
+
 def _latest_execution_summary(
     execution_info: Dict[str, Any],
     precheck_info: Dict[str, Any],
@@ -2512,6 +2889,11 @@ def _write_json_artifact(path: Path, payload: Dict[str, Any]) -> None:
         output_file.write("\n")
 
 
+def _drop_keys(payload: Dict[str, Any], keys: list[str]) -> None:
+    for key in keys:
+        payload.pop(key, None)
+
+
 def _simulated_task_execution_report_context(
     result: Dict[str, Any],
     execution_info: Dict[str, Any],
@@ -2555,6 +2937,9 @@ def _build_summary_markdown(
     planner_gateway_shadow_info: Dict[str, Any],
     ros2_interface_readiness_info: Dict[str, Any],
     ros2_message_export_info: Dict[str, Any],
+    moveit_plan_only_info: Dict[str, Any],
+    ur5_read_only_state_info: Dict[str, Any],
+    robot_system_shadow_bridge_info: Dict[str, Any],
     robot_structure_report_path: str | None,
     run_id: str,
     created_at: str | None,
@@ -2990,6 +3375,9 @@ def _build_summary_markdown(
             f"- warnings: {_format_value(ros2_message_export_info.get('warnings'))}",
             "This V2.10.2 fake-publish export writes deterministic PlannerRequest JSON evidence only. It does not publish ROS2 messages, call MoveIt, generate trajectory, or control a real UR5.",
             "",
+            *_moveit_plan_only_summary_lines(moveit_plan_only_info),
+            *_ur5_read_only_state_summary_lines(ur5_read_only_state_info),
+            *_robot_system_shadow_bridge_summary_lines(robot_system_shadow_bridge_info),
             "## Readiness Evidence Summary",
             "",
             f"- readiness_evidence_available: {_format_value(lab_readiness_info.get('requested'))}",
@@ -3414,6 +3802,113 @@ def _build_simulation_motion_precheck_report_markdown(
             "",
         ]
     )
+
+
+def _moveit_plan_only_summary_lines(moveit_plan_only_info: Dict[str, Any]) -> list[str]:
+    if moveit_plan_only_info.get("requested") is not True:
+        return []
+    return [
+        "## MoveIt Plan-Only Contract Summary",
+        "",
+        f"- moveit_plan_only_evidence_available: {_format_value(moveit_plan_only_info.get('requested'))}",
+        f"- moveit_plan_only_status: {_format_value(moveit_plan_only_info.get('moveit_plan_only_status'))}",
+        f"- plan_only_status: {_format_value(moveit_plan_only_info.get('plan_only_status'))}",
+        f"- plan_only_ready: {_format_value(moveit_plan_only_info.get('plan_only_ready'))}",
+        f"- planning_group: {_format_value(moveit_plan_only_info.get('planning_group'))}",
+        f"- planning_frame: {_format_value(moveit_plan_only_info.get('planning_frame'))}",
+        f"- end_effector_frame: {_format_value(moveit_plan_only_info.get('end_effector_frame'))}",
+        f"- bounded_target_point_m: {_format_value(moveit_plan_only_info.get('bounded_target_point_m'))}",
+        f"- moveit_plan_requested: {_format_value(moveit_plan_only_info.get('moveit_plan_requested'))}",
+        f"- moveit_plan_only: {_format_value(moveit_plan_only_info.get('moveit_plan_only'))}",
+        f"- moveit_execute_allowed: {_format_value(moveit_plan_only_info.get('moveit_execute_allowed'))}",
+        f"- moveit_execute_called: {_format_value(moveit_plan_only_info.get('moveit_execute_called'))}",
+        f"- trajectory_generated: {_format_value(moveit_plan_only_info.get('trajectory_generated'))}",
+        f"- trajectory_send_allowed: {_format_value(moveit_plan_only_info.get('trajectory_send_allowed'))}",
+        f"- trajectory_sent: {_format_value(moveit_plan_only_info.get('trajectory_sent'))}",
+        f"- controller_command_sent: {_format_value(moveit_plan_only_info.get('controller_command_sent'))}",
+        f"- execution_allowed: {_format_value(moveit_plan_only_info.get('execution_allowed'))}",
+        f"- real_robot_enabled: {_format_value(moveit_plan_only_info.get('real_robot_enabled'))}",
+        f"- blocking_reasons: {_format_value(moveit_plan_only_info.get('blocking_reasons'))}",
+        f"- warnings: {_format_value(moveit_plan_only_info.get('warnings'))}",
+        f"- next_safe_action: {_format_value(moveit_plan_only_info.get('next_safe_action'))}",
+        "This V2.11.0 MoveIt plan-only contract creates non-executable planning evidence only. It does not execute a MoveIt plan, send a trajectory, produce executable joint targets, generate tcp_pose_world, or command a real UR5.",
+        "",
+    ]
+
+
+def _ur5_read_only_state_summary_lines(ur5_read_only_state_info: Dict[str, Any]) -> list[str]:
+    if ur5_read_only_state_info.get("requested") is not True:
+        return []
+    return [
+        "## UR5 Read-Only State Contract Summary",
+        "",
+        f"- ur5_read_only_state_evidence_available: {_format_value(ur5_read_only_state_info.get('requested'))}",
+        f"- ur5_read_only_state_status: {_format_value(ur5_read_only_state_info.get('ur5_read_only_state_status'))}",
+        f"- read_only_state_status: {_format_value(ur5_read_only_state_info.get('read_only_state_status'))}",
+        f"- read_only_state_contract_ready: {_format_value(ur5_read_only_state_info.get('read_only_state_contract_ready'))}",
+        f"- robot_model: {_format_value(ur5_read_only_state_info.get('robot_model'))}",
+        f"- robot_ip_declared: {_format_value(ur5_read_only_state_info.get('robot_ip_declared'))}",
+        f"- read_only_mode: {_format_value(ur5_read_only_state_info.get('read_only_mode'))}",
+        f"- rtde_read_enabled: {_format_value(ur5_read_only_state_info.get('rtde_read_enabled'))}",
+        f"- rtde_write_enabled: {_format_value(ur5_read_only_state_info.get('rtde_write_enabled'))}",
+        f"- rtde_write_attempted: {_format_value(ur5_read_only_state_info.get('rtde_write_attempted'))}",
+        f"- dashboard_read_enabled: {_format_value(ur5_read_only_state_info.get('dashboard_read_enabled'))}",
+        f"- dashboard_command_enabled: {_format_value(ur5_read_only_state_info.get('dashboard_command_enabled'))}",
+        f"- dashboard_command_attempted: {_format_value(ur5_read_only_state_info.get('dashboard_command_attempted'))}",
+        f"- required_state_fields_declared: {_format_value(ur5_read_only_state_info.get('required_state_fields_declared'))}",
+        f"- state_ttl_ms: {_format_value(ur5_read_only_state_info.get('state_ttl_ms'))}",
+        f"- manual_confirmation_required: {_format_value(ur5_read_only_state_info.get('manual_confirmation_required'))}",
+        f"- execution_allowed: {_format_value(ur5_read_only_state_info.get('execution_allowed'))}",
+        f"- real_robot_enabled: {_format_value(ur5_read_only_state_info.get('real_robot_enabled'))}",
+        f"- blocking_reasons: {_format_value(ur5_read_only_state_info.get('blocking_reasons'))}",
+        f"- warnings: {_format_value(ur5_read_only_state_info.get('warnings'))}",
+        f"- next_safe_action: {_format_value(ur5_read_only_state_info.get('next_safe_action'))}",
+        "This V2.11.0 UR5 read-only state contract validates declaration evidence only. It does not write RTDE values, send Dashboard commands, generate URScript, or command a real UR5.",
+        "",
+    ]
+
+
+def _robot_system_shadow_bridge_summary_lines(
+    robot_system_shadow_bridge_info: Dict[str, Any],
+) -> list[str]:
+    if robot_system_shadow_bridge_info.get("requested") is not True:
+        return []
+    return [
+        "## Full Robot-System Shadow Bridge Summary",
+        "",
+        f"- robot_system_shadow_bridge_evidence_available: {_format_value(robot_system_shadow_bridge_info.get('requested'))}",
+        f"- robot_system_shadow_bridge_status: {_format_value(robot_system_shadow_bridge_info.get('robot_system_shadow_bridge_status'))}",
+        f"- robot_system_shadow_status: {_format_value(robot_system_shadow_bridge_info.get('robot_system_shadow_status'))}",
+        f"- robot_system_shadow_ready: {_format_value(robot_system_shadow_bridge_info.get('robot_system_shadow_ready'))}",
+        f"- ros2_message_export_ready: {_format_value(robot_system_shadow_bridge_info.get('ros2_message_export_ready'))}",
+        f"- moveit_plan_only_ready: {_format_value(robot_system_shadow_bridge_info.get('moveit_plan_only_ready'))}",
+        f"- ur5_read_only_state_ready: {_format_value(robot_system_shadow_bridge_info.get('ur5_read_only_state_ready'))}",
+        f"- execution_allowed: {_format_value(robot_system_shadow_bridge_info.get('execution_allowed'))}",
+        f"- ros2_publish_enabled: {_format_value(robot_system_shadow_bridge_info.get('ros2_publish_enabled'))}",
+        f"- ros2_publish_attempted: {_format_value(robot_system_shadow_bridge_info.get('ros2_publish_attempted'))}",
+        f"- moveit_execute_allowed: {_format_value(robot_system_shadow_bridge_info.get('moveit_execute_allowed'))}",
+        f"- moveit_execute_called: {_format_value(robot_system_shadow_bridge_info.get('moveit_execute_called'))}",
+        f"- trajectory_generated: {_format_value(robot_system_shadow_bridge_info.get('trajectory_generated'))}",
+        f"- trajectory_send_allowed: {_format_value(robot_system_shadow_bridge_info.get('trajectory_send_allowed'))}",
+        f"- trajectory_sent: {_format_value(robot_system_shadow_bridge_info.get('trajectory_sent'))}",
+        f"- controller_command_sent: {_format_value(robot_system_shadow_bridge_info.get('controller_command_sent'))}",
+        f"- tcp_pose_world_generated: {_format_value(robot_system_shadow_bridge_info.get('tcp_pose_world_generated'))}",
+        f"- joint_targets_generated: {_format_value(robot_system_shadow_bridge_info.get('joint_targets_generated'))}",
+        f"- robot_command_generated: {_format_value(robot_system_shadow_bridge_info.get('robot_command_generated'))}",
+        f"- real_robot_enabled: {_format_value(robot_system_shadow_bridge_info.get('real_robot_enabled'))}",
+        f"- real_robot_motion_executed: {_format_value(robot_system_shadow_bridge_info.get('real_robot_motion_executed'))}",
+        f"- rtde_write_enabled: {_format_value(robot_system_shadow_bridge_info.get('rtde_write_enabled'))}",
+        f"- rtde_write_attempted: {_format_value(robot_system_shadow_bridge_info.get('rtde_write_attempted'))}",
+        f"- dashboard_command_enabled: {_format_value(robot_system_shadow_bridge_info.get('dashboard_command_enabled'))}",
+        f"- dashboard_command_attempted: {_format_value(robot_system_shadow_bridge_info.get('dashboard_command_attempted'))}",
+        f"- urscript_generated: {_format_value(robot_system_shadow_bridge_info.get('urscript_generated'))}",
+        f"- automatic_retry_motion: {_format_value(robot_system_shadow_bridge_info.get('automatic_retry_motion'))}",
+        f"- blocking_reasons: {_format_value(robot_system_shadow_bridge_info.get('blocking_reasons'))}",
+        f"- warnings: {_format_value(robot_system_shadow_bridge_info.get('warnings'))}",
+        f"- next_safe_action: {_format_value(robot_system_shadow_bridge_info.get('next_safe_action'))}",
+        "This V2.11.0 full robot-system shadow bridge merges fake ROS2 message export, MoveIt plan-only evidence, and UR5 read-only state declarations into one no-motion rehearsal boundary. It does not publish ROS2 commands, execute MoveIt, send controller trajectories, use UR driver/RTDE writes/Dashboard/URScript commands, or move a real UR5.",
+        "",
+    ]
 
 
 def _build_pose_delta_markdown(result: Dict[str, Any], *, object_info: Dict[str, Any]) -> str:

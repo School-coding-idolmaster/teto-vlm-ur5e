@@ -22,11 +22,14 @@ This project currently focuses on:
 - Simulation object execution reports and evidence exports through Isaac Runtime
 - Read-only UR5e articulation readiness, articulation state observation, and
   simulation-only motion precheck contracts
+- Full robot-system shadow bridge evidence that merges ROS2 fake-publish,
+  MoveIt plan-only, and UR5 read-only state declarations without motion
 - Placeholder dataset and annotation utilities
 - Placeholder robot interface
 
-Future work can connect Qwen2.5-VL, LLaVA, InternVL, Isaac Sim, ROS2, MoveIt2,
-UR5 controllers, or other local robotics and VLM components.
+Future work can connect Qwen2.5-VL, LLaVA, InternVL, Isaac Sim execution,
+live ROS2 publish, MoveIt2 execution, UR5 controllers, or other local robotics
+and VLM components.
 
 ## Project Structure
 
@@ -1925,6 +1928,61 @@ reasons, warnings, and safety flags proving no ROS2 publish, MoveIt call,
 trajectory, `tcp_pose_world`, joint target, robot command, or real robot motion
 occurred.
 
+## TETO V2.11.0 Full Robot-System Shadow Bridge Dry-Run
+
+TETO V2.11.0 adds a full robot-system shadow bridge. It merges the validated
+Planner Gateway shadow input, ROS2 fake-publish `PlannerRequest`, MoveIt
+plan-only declaration, and UR5 read-only state monitor declaration into one
+deterministic no-motion rehearsal boundary.
+
+The generated artifacts are shadow evidence only. V2.11.0 does not publish
+ROS2 messages, does not call `rclpy` publish, does not execute MoveIt plans,
+does not send controller trajectories, does not use UR driver writes, RTDE
+writes, Dashboard commands, or URScript, does not generate executable
+`tcp_pose_world` or joint targets, does not generate robot commands, and does
+not move a real UR5.
+
+Full robot-system shadow bridge positive smoke:
+
+```bash
+python3 scripts/run_first_simulation_execution.py \
+  --check-planner-gateway-shadow \
+  --planner-gateway-shadow-config configs/planner_gateway_shadow_positive.example.yaml \
+  --planner-gateway-shadow-report \
+  --perception-shadow-result examples/planner_gateway_shadow/perception_positive_result.json \
+  --check-ros2-interface-readiness \
+  --ros2-interface-config configs/ros2_interface.example.yaml \
+  --ros2-interface-report \
+  --check-ros2-message-export \
+  --ros2-message-export-config configs/ros2_message_export.example.yaml \
+  --ros2-message-export-report \
+  --check-moveit-plan-only \
+  --moveit-plan-only-config configs/moveit_plan_only.example.yaml \
+  --moveit-plan-only-report \
+  --check-ur5-read-only-state \
+  --ur5-read-only-state-config configs/ur5_read_only_state.example.yaml \
+  --ur5-read-only-state-report \
+  --check-robot-system-shadow-bridge \
+  --robot-system-shadow-bridge-config configs/robot_system_shadow_bridge.example.yaml \
+  --robot-system-shadow-bridge-report \
+  --output-dir /tmp/teto_v2110_full_robot_system_shadow_bridge
+```
+
+The evidence bundle includes `moveit_plan_only_result.json`,
+`moveit_plan_only_report.md`, `ur5_read_only_state_result.json`,
+`ur5_read_only_state_report.md`, `robot_system_shadow_bridge_result.json`,
+`robot_system_shadow_bridge_report.md`, `summary.md`, and
+`evidence_manifest.json`. `summary.md` includes `MoveIt Plan-Only Contract
+Summary`, `UR5 Read-Only State Contract Summary`, and `Full Robot-System Shadow
+Bridge Summary`. The manifest records the bridge readiness flags and safety
+flags proving `execution_allowed=false`, `moveit_execute_called=false`,
+`trajectory_sent=false`, `controller_command_sent=false`,
+`ros2_publish_attempted=false`, `rtde_write_attempted=false`,
+`dashboard_command_attempted=false`, `urscript_generated=false`,
+`robot_command_generated=false`, `tcp_pose_world_generated=false`,
+`joint_targets_generated=false`, `real_robot_motion_executed=false`, and
+`automatic_retry_motion=false`.
+
 Demo commands accept common image formats directly. TETO automatically
 creates a cached RGB JPEG under `data/processed/auto/`, with EXIF orientation
 applied, long edge resized, animated images reduced to the first frame, and
@@ -2148,4 +2206,5 @@ python3 -m src.cli prepare-images --input-dir data/raw --output-dir data/process
 - V2.10.0 = planner gateway shadow contract
 - V2.10.1 = ROS2 environment / interface readiness check
 - V2.10.2 = ROS2 message export / fake publish dry-run
-- Future ROS2 / MoveIt2 / RTDE / URScript / real UR5 controller integration remains outside the current implemented safety boundary
+- V2.11.0 = full robot-system shadow bridge with MoveIt plan-only and UR5 read-only state declarations
+- Live ROS2 publish / MoveIt2 execution / RTDE write / Dashboard command / URScript / real UR5 controller integration remains outside the current implemented safety boundary

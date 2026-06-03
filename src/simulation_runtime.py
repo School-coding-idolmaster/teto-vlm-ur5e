@@ -14,6 +14,10 @@ from src.camera_source_adapter import build_camera_source_adapter_request, evalu
 from src.evidence_exporter import export_simulation_evidence
 from src.geometry_validity import build_geometry_validity_request, evaluate_geometry_validity
 from src.lab_readiness import build_lab_readiness_request, evaluate_lab_readiness
+from src.moveit_plan_only_contract import (
+    build_moveit_plan_only_request,
+    evaluate_moveit_plan_only,
+)
 from src.perception_shadow_pipeline import (
     build_perception_shadow_request,
     evaluate_perception_shadow_pipeline,
@@ -34,6 +38,10 @@ from src.ros2_interface_readiness import (
 from src.ros2_message_exporter import (
     build_ros2_message_export_request,
     evaluate_ros2_message_export,
+)
+from src.robot_system_shadow_bridge import (
+    build_robot_system_shadow_bridge_request,
+    evaluate_robot_system_shadow_bridge,
 )
 from src.robot_prim_inspector import (
     UR5E_ARM_JOINT_NAMES,
@@ -67,11 +75,15 @@ from src.simulated_task_execution import (
     SimulatedTaskExecutionRequest,
     execute_safe_simulated_task,
 )
+from src.ur5_read_only_state_contract import (
+    build_ur5_read_only_state_request,
+    evaluate_ur5_read_only_state,
+)
 from src.vlm_grounding_adapter import build_vlm_grounding_adapter_request, evaluate_vlm_grounding_adapter
 
 
 REPORT_VERSION = "teto_simulation_execution.v1"
-CURRENT_TETO_VERSION = "TETO V2.10.2"
+CURRENT_TETO_VERSION = "TETO V2.11.0"
 DEFAULT_STEPS = 5
 DEFAULT_SIMULATION_OBJECT_TYPE = "cube"
 DEFAULT_CUBE_PRIM_PATH = "/World/TETO_Cube"
@@ -143,6 +155,9 @@ def build_simulation_execution_result(
     planner_gateway_shadow_metadata: Dict[str, Any] | None = None,
     ros2_interface_readiness_metadata: Dict[str, Any] | None = None,
     ros2_message_export_metadata: Dict[str, Any] | None = None,
+    moveit_plan_only_metadata: Dict[str, Any] | None = None,
+    ur5_read_only_state_metadata: Dict[str, Any] | None = None,
+    robot_system_shadow_bridge_metadata: Dict[str, Any] | None = None,
     started_at: str | None = None,
     finished_at: str | None = None,
 ) -> Dict[str, Any]:
@@ -192,6 +207,9 @@ def build_simulation_execution_result(
     result.update(planner_gateway_shadow_metadata or _planner_gateway_shadow_report_fields())
     result.update(ros2_interface_readiness_metadata or _ros2_interface_readiness_report_fields())
     result.update(ros2_message_export_metadata or _ros2_message_export_report_fields())
+    result.update(moveit_plan_only_metadata or _moveit_plan_only_report_fields())
+    result.update(ur5_read_only_state_metadata or _ur5_read_only_state_report_fields())
+    result.update(robot_system_shadow_bridge_metadata or _robot_system_shadow_bridge_report_fields())
     if (
         result.get("semantic_simulation_bridge_requested") is True
         and result.get("semantic_gate_passed") is not True
@@ -223,6 +241,12 @@ def build_simulation_execution_result(
     result.setdefault("ros2_interface_readiness_report_path", None)
     result.setdefault("ros2_message_export_result_path", None)
     result.setdefault("ros2_message_export_report_path", None)
+    result.setdefault("moveit_plan_only_result_path", None)
+    result.setdefault("moveit_plan_only_report_path", None)
+    result.setdefault("ur5_read_only_state_result_path", None)
+    result.setdefault("ur5_read_only_state_report_path", None)
+    result.setdefault("robot_system_shadow_bridge_result_path", None)
+    result.setdefault("robot_system_shadow_bridge_report_path", None)
     result.setdefault("motion_evidence_available", False)
     result.setdefault("motion_evidence_files", [])
     result.setdefault("motion_diff_summary", {})
@@ -313,6 +337,15 @@ def run_first_simulation_execution(
     check_ros2_message_export: bool = False,
     ros2_message_export_config: str | Path | None = None,
     ros2_message_export_report: bool = False,
+    check_moveit_plan_only: bool = False,
+    moveit_plan_only_config: str | Path | None = None,
+    moveit_plan_only_report: bool = False,
+    check_ur5_read_only_state: bool = False,
+    ur5_read_only_state_config: str | Path | None = None,
+    ur5_read_only_state_report: bool = False,
+    check_robot_system_shadow_bridge: bool = False,
+    robot_system_shadow_bridge_config: str | Path | None = None,
+    robot_system_shadow_bridge_report: bool = False,
     output_dir: str | Path | None = None,
     write_report: bool = False,
     demo_command: str | None = None,
@@ -329,6 +362,9 @@ def run_first_simulation_execution(
     planner_gateway_shadow_requested = check_planner_gateway_shadow or planner_gateway_shadow_report
     ros2_interface_readiness_requested = check_ros2_interface_readiness or ros2_interface_report
     ros2_message_export_requested = check_ros2_message_export or ros2_message_export_report
+    moveit_plan_only_requested = check_moveit_plan_only or moveit_plan_only_report
+    ur5_read_only_state_requested = check_ur5_read_only_state or ur5_read_only_state_report
+    robot_system_shadow_bridge_requested = check_robot_system_shadow_bridge or robot_system_shadow_bridge_report
     lab_readiness_requested = (
         check_lab_readiness
         or check_camera_readiness
@@ -347,6 +383,9 @@ def run_first_simulation_execution(
         or planner_gateway_shadow_requested
         or ros2_interface_readiness_requested
         or ros2_message_export_requested
+        or moveit_plan_only_requested
+        or ur5_read_only_state_requested
+        or robot_system_shadow_bridge_requested
     ) and not dry_run:
         no_isaac = True
     lab_readiness_request = build_lab_readiness_request(
@@ -465,6 +504,42 @@ def run_first_simulation_execution(
     ros2_message_export_metadata = _ros2_message_export_report_fields(
         requested=ros2_message_export_requested,
         message_export=evaluate_ros2_message_export(ros2_message_export_request),
+    )
+    moveit_plan_only_request = build_moveit_plan_only_request(
+        requested=moveit_plan_only_requested,
+        config_path=moveit_plan_only_config,
+        ros2_message_export_result=ros2_message_export_metadata.get("ros2_message_export")
+        if ros2_message_export_requested
+        else None,
+    )
+    moveit_plan_only_metadata = _moveit_plan_only_report_fields(
+        requested=moveit_plan_only_requested,
+        plan_only=evaluate_moveit_plan_only(moveit_plan_only_request),
+    )
+    ur5_read_only_state_request = build_ur5_read_only_state_request(
+        requested=ur5_read_only_state_requested,
+        config_path=ur5_read_only_state_config,
+    )
+    ur5_read_only_state_metadata = _ur5_read_only_state_report_fields(
+        requested=ur5_read_only_state_requested,
+        state=evaluate_ur5_read_only_state(ur5_read_only_state_request),
+    )
+    robot_system_shadow_bridge_request = build_robot_system_shadow_bridge_request(
+        requested=robot_system_shadow_bridge_requested,
+        config_path=robot_system_shadow_bridge_config,
+        ros2_message_export_result=ros2_message_export_metadata.get("ros2_message_export")
+        if ros2_message_export_requested
+        else None,
+        moveit_plan_only_result=moveit_plan_only_metadata.get("moveit_plan_only")
+        if moveit_plan_only_requested
+        else None,
+        ur5_read_only_state_result=ur5_read_only_state_metadata.get("ur5_read_only_state")
+        if ur5_read_only_state_requested
+        else None,
+    )
+    robot_system_shadow_bridge_metadata = _robot_system_shadow_bridge_report_fields(
+        requested=robot_system_shadow_bridge_requested,
+        bridge=evaluate_robot_system_shadow_bridge(robot_system_shadow_bridge_request),
     )
     effective_move_object = move_object or move_cube
     effective_spawn_cube = spawn_cube or effective_move_object
@@ -590,6 +665,9 @@ def run_first_simulation_execution(
                 planner_gateway_shadow_metadata=planner_gateway_shadow_metadata,
                 ros2_interface_readiness_metadata=ros2_interface_readiness_metadata,
                 ros2_message_export_metadata=ros2_message_export_metadata,
+                moveit_plan_only_metadata=moveit_plan_only_metadata,
+                ur5_read_only_state_metadata=ur5_read_only_state_metadata,
+                robot_system_shadow_bridge_metadata=robot_system_shadow_bridge_metadata,
                 error_code="E_INVALID_STEPS",
                 error_message="steps must be a positive integer",
                 started_at=started_at,
@@ -647,6 +725,9 @@ def run_first_simulation_execution(
                 planner_gateway_shadow_metadata=planner_gateway_shadow_metadata,
                 ros2_interface_readiness_metadata=ros2_interface_readiness_metadata,
                 ros2_message_export_metadata=ros2_message_export_metadata,
+                moveit_plan_only_metadata=moveit_plan_only_metadata,
+                ur5_read_only_state_metadata=ur5_read_only_state_metadata,
+                robot_system_shadow_bridge_metadata=robot_system_shadow_bridge_metadata,
                 error_code="E_INVALID_SIMULATION_TASK",
                 error_message=f"missing simulation task fields: {', '.join(missing_fields)}",
                 started_at=started_at,
@@ -743,6 +824,9 @@ def run_first_simulation_execution(
                     planner_gateway_shadow_metadata=planner_gateway_shadow_metadata,
                     ros2_interface_readiness_metadata=ros2_interface_readiness_metadata,
                     ros2_message_export_metadata=ros2_message_export_metadata,
+                    moveit_plan_only_metadata=moveit_plan_only_metadata,
+                    ur5_read_only_state_metadata=ur5_read_only_state_metadata,
+                    robot_system_shadow_bridge_metadata=robot_system_shadow_bridge_metadata,
                     error_code="E_ROBOT_ASSET_LOAD_FAILED",
                     error_message="robot asset path is unavailable",
                     started_at=started_at,
@@ -786,6 +870,9 @@ def run_first_simulation_execution(
                 planner_gateway_shadow_metadata=planner_gateway_shadow_metadata,
                 ros2_interface_readiness_metadata=ros2_interface_readiness_metadata,
                 ros2_message_export_metadata=ros2_message_export_metadata,
+                moveit_plan_only_metadata=moveit_plan_only_metadata,
+                ur5_read_only_state_metadata=ur5_read_only_state_metadata,
+                robot_system_shadow_bridge_metadata=robot_system_shadow_bridge_metadata,
                 started_at=started_at,
                 finished_at=_timestamp(),
             ),
@@ -857,6 +944,12 @@ def write_simulation_execution_result(
     ros2_interface_readiness_report_path = run_dir / "ros2_interface_readiness_report.md"
     ros2_message_export_result_path = run_dir / "ros2_message_export_result.json"
     ros2_message_export_report_path = run_dir / "ros2_message_export_report.md"
+    moveit_plan_only_result_path = run_dir / "moveit_plan_only_result.json"
+    moveit_plan_only_report_path = run_dir / "moveit_plan_only_report.md"
+    ur5_read_only_state_result_path = run_dir / "ur5_read_only_state_result.json"
+    ur5_read_only_state_report_path = run_dir / "ur5_read_only_state_report.md"
+    robot_system_shadow_bridge_result_path = run_dir / "robot_system_shadow_bridge_result.json"
+    robot_system_shadow_bridge_report_path = run_dir / "robot_system_shadow_bridge_report.md"
     result["report_path"] = str(report_path)
     structure_report_requested = bool(result.get("robot_prim_inspection_requested"))
     result["robot_structure_report_generated"] = structure_report_requested
@@ -977,6 +1070,44 @@ def write_simulation_execution_result(
         ]
         result["ros2_message_export"]["ros2_message_export_report_path"] = result[
             "ros2_message_export_report_path"
+        ]
+    moveit_plan_only_requested = bool(result.get("moveit_plan_only_requested"))
+    result["moveit_plan_only_result_path"] = (
+        str(moveit_plan_only_result_path) if moveit_plan_only_requested else None
+    )
+    result["moveit_plan_only_report_path"] = (
+        str(moveit_plan_only_report_path) if moveit_plan_only_requested else None
+    )
+    if isinstance(result.get("moveit_plan_only"), dict):
+        result["moveit_plan_only"]["moveit_plan_only_result_path"] = result["moveit_plan_only_result_path"]
+        result["moveit_plan_only"]["moveit_plan_only_report_path"] = result["moveit_plan_only_report_path"]
+    ur5_read_only_state_requested = bool(result.get("ur5_read_only_state_requested"))
+    result["ur5_read_only_state_result_path"] = (
+        str(ur5_read_only_state_result_path) if ur5_read_only_state_requested else None
+    )
+    result["ur5_read_only_state_report_path"] = (
+        str(ur5_read_only_state_report_path) if ur5_read_only_state_requested else None
+    )
+    if isinstance(result.get("ur5_read_only_state"), dict):
+        result["ur5_read_only_state"]["ur5_read_only_state_result_path"] = result[
+            "ur5_read_only_state_result_path"
+        ]
+        result["ur5_read_only_state"]["ur5_read_only_state_report_path"] = result[
+            "ur5_read_only_state_report_path"
+        ]
+    robot_system_shadow_bridge_requested = bool(result.get("robot_system_shadow_bridge_requested"))
+    result["robot_system_shadow_bridge_result_path"] = (
+        str(robot_system_shadow_bridge_result_path) if robot_system_shadow_bridge_requested else None
+    )
+    result["robot_system_shadow_bridge_report_path"] = (
+        str(robot_system_shadow_bridge_report_path) if robot_system_shadow_bridge_requested else None
+    )
+    if isinstance(result.get("robot_system_shadow_bridge"), dict):
+        result["robot_system_shadow_bridge"]["robot_system_shadow_bridge_result_path"] = result[
+            "robot_system_shadow_bridge_result_path"
+        ]
+        result["robot_system_shadow_bridge"]["robot_system_shadow_bridge_report_path"] = result[
+            "robot_system_shadow_bridge_report_path"
         ]
     result["semantic_bridge"] = _semantic_bridge_info(result)
     result["motion"] = _motion_info(result)
@@ -2180,6 +2311,119 @@ def _ros2_message_export_report_fields(
         "ros2_message_export_blocking_reasons": list(message_export.get("blocking_reasons") or []),
         "ros2_message_export_warnings": list(message_export.get("warnings") or []),
         "ros2_message_export_next_safe_action": message_export.get("next_safe_action"),
+    }
+
+
+def _moveit_plan_only_report_fields(
+    *,
+    requested: bool = False,
+    plan_only: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    plan_only = plan_only if isinstance(plan_only, dict) else {}
+    return {
+        "moveit_plan_only_requested": requested,
+        "moveit_plan_only": plan_only
+        or {
+            "requested": False,
+            "moveit_plan_only_status": "NOT_REQUESTED",
+            "plan_only_status": "NOT_REQUESTED",
+            "plan_only_ready": False,
+            "moveit_plan_requested": False,
+            "moveit_plan_only": True,
+            "moveit_execute_allowed": False,
+            "moveit_execute_called": False,
+            "trajectory_generated": False,
+            "trajectory_send_allowed": False,
+            "trajectory_sent": False,
+            "blocking_reasons": [],
+            "warnings": [],
+        },
+        "moveit_plan_only_status": plan_only.get("moveit_plan_only_status", "NOT_REQUESTED"),
+        "plan_only_status": plan_only.get("plan_only_status", "NOT_REQUESTED"),
+        "plan_only_ready": plan_only.get("plan_only_ready", False) is True,
+        "planning_group": plan_only.get("planning_group"),
+        "planning_frame": plan_only.get("planning_frame"),
+        "end_effector_frame": plan_only.get("end_effector_frame"),
+        "moveit_plan_only_blocking_reasons": list(plan_only.get("blocking_reasons") or []),
+        "moveit_plan_only_warnings": list(plan_only.get("warnings") or []),
+    }
+
+
+def _ur5_read_only_state_report_fields(
+    *,
+    requested: bool = False,
+    state: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    state = state if isinstance(state, dict) else {}
+    return {
+        "ur5_read_only_state_requested": requested,
+        "ur5_read_only_state": state
+        or {
+            "requested": False,
+            "ur5_read_only_state_status": "NOT_REQUESTED",
+            "read_only_state_status": "NOT_REQUESTED",
+            "read_only_state_contract_ready": False,
+            "robot_ip_declared": False,
+            "read_only_mode": True,
+            "rtde_write_enabled": False,
+            "rtde_write_attempted": False,
+            "dashboard_command_enabled": False,
+            "dashboard_command_attempted": False,
+            "required_state_fields_declared": [],
+            "manual_confirmation_required": True,
+            "execution_allowed": False,
+            "real_robot_enabled": False,
+            "blocking_reasons": [],
+            "warnings": [],
+        },
+        "ur5_read_only_state_status": state.get("ur5_read_only_state_status", "NOT_REQUESTED"),
+        "read_only_state_status": state.get("read_only_state_status", "NOT_REQUESTED"),
+        "read_only_state_contract_ready": state.get("read_only_state_contract_ready", False) is True,
+        "ur5_read_only_state_blocking_reasons": list(state.get("blocking_reasons") or []),
+        "ur5_read_only_state_warnings": list(state.get("warnings") or []),
+    }
+
+
+def _robot_system_shadow_bridge_report_fields(
+    *,
+    requested: bool = False,
+    bridge: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    bridge = bridge if isinstance(bridge, dict) else {}
+    return {
+        "robot_system_shadow_bridge_requested": requested,
+        "robot_system_shadow_bridge": bridge
+        or {
+            "requested": False,
+            "robot_system_shadow_bridge_status": "NOT_REQUESTED",
+            "robot_system_shadow_status": "NOT_REQUESTED",
+            "robot_system_shadow_ready": False,
+            "ros2_message_export_ready": False,
+            "moveit_plan_only_ready": False,
+            "ur5_read_only_state_ready": False,
+            "execution_allowed": False,
+            "ros2_publish_enabled": False,
+            "ros2_publish_attempted": False,
+            "moveit_execute_allowed": False,
+            "moveit_execute_called": False,
+            "trajectory_generated": False,
+            "trajectory_send_allowed": False,
+            "trajectory_sent": False,
+            "controller_command_sent": False,
+            "tcp_pose_world_generated": False,
+            "joint_targets_generated": False,
+            "robot_command_generated": False,
+            "real_robot_enabled": False,
+            "real_robot_motion_executed": False,
+            "automatic_retry_motion": False,
+            "blocking_reasons": [],
+            "warnings": [],
+        },
+        "robot_system_shadow_bridge_status": bridge.get("robot_system_shadow_bridge_status", "NOT_REQUESTED"),
+        "robot_system_shadow_status": bridge.get("robot_system_shadow_status", "NOT_REQUESTED"),
+        "robot_system_shadow_ready": bridge.get("robot_system_shadow_ready", False) is True,
+        "robot_system_shadow_bridge_blocking_reasons": list(bridge.get("blocking_reasons") or []),
+        "robot_system_shadow_bridge_warnings": list(bridge.get("warnings") or []),
     }
 
 

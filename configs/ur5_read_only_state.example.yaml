@@ -1,0 +1,24 @@
+ur5_read_only_state:
+  read_only_mode: true
+  robot_model: UR5e
+  robot_ip: unavailable_for_shadow
+  rtde_read_enabled: declared_future_only
+  rtde_write_enabled: false
+  rtde_write_attempted: false
+  dashboard_read_enabled: declared_future_only
+  dashboard_command_enabled: false
+  dashboard_command_attempted: false
+  state_ttl_ms: 500
+  manual_confirmation_required: true
+  execution_allowed: false
+  real_robot_enabled: false
+  required_state_fields:
+    - robot_mode
+    - safety_status
+    - program_state
+    - speed_scaling
+    - protective_stop
+    - emergency_stop
+    - teach_mode
+    - remote_control_mode
+    - calibration_status
