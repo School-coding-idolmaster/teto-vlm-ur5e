@@ -83,7 +83,7 @@ from src.vlm_grounding_adapter import build_vlm_grounding_adapter_request, evalu
 
 
 REPORT_VERSION = "teto_simulation_execution.v1"
-CURRENT_TETO_VERSION = "TETO V2.11.0"
+CURRENT_TETO_VERSION = "TETO V3.0.0"
 DEFAULT_STEPS = 5
 DEFAULT_SIMULATION_OBJECT_TYPE = "cube"
 DEFAULT_CUBE_PRIM_PATH = "/World/TETO_Cube"

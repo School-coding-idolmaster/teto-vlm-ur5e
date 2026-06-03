@@ -23,3 +23,6 @@ configs/local.camera.yaml
 configs/local.live_vlm.yaml
 configs/local.camera_snapshot.yaml
 configs/local.camera_snapshot.json
+configs/*local*.yaml
+configs/*real*.yaml
+configs/*lab.local*.yaml

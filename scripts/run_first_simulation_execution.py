@@ -15,11 +15,12 @@ from src.semantic_simulation_bridge import (
     load_semantic_task_contract,
 )
 from src.simulation_runtime import DEFAULT_SIMULATION_TASK, CURRENT_TETO_VERSION, run_first_simulation_execution
+from src.v3_hover_demo_orchestrator import V3HoverDemoRequest, evaluate_v3_hover_demo
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run TETO V2.11.0 full robot-system shadow bridge, ROS2 message export, and no-motion simulation evidence smoke tests."
+        description="Run TETO V3.0.0 hover-demo evidence or legacy no-motion simulation evidence smoke tests."
     )
     parser.add_argument("--dry-run", action="store_true", help="Do not import Isaac; produce a test execution report.")
     parser.add_argument("--no-isaac", action="store_true", help="Pure Python test mode without Isaac imports.")
@@ -120,7 +121,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--execution-max-attempts",
         type=int,
         default=1,
-        help="Maximum attempts metadata. V2.11.0 supports 1 and does not auto-retry.",
+        help="Maximum attempts metadata. The legacy simulated execution path supports 1 and does not auto-retry.",
     )
     parser.add_argument(
         "--execution-enable-retry-recommendation",
@@ -356,13 +357,55 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Generate full perception shadow pipeline evidence report.",
     )
+    parser.add_argument(
+        "--run-v3-hover-demo",
+        action="store_true",
+        help="Run the TETO V3.0.0 first real UR5 hover demo pipeline. Real motion remains disabled by default.",
+    )
+    parser.add_argument("--v3-user-command", help="Limited natural-language V3 command, e.g. 'hover over the red mug'.")
+    parser.add_argument("--v3-hover-config", help="Path to a V3 hover demo YAML/JSON config.")
+    parser.add_argument(
+        "--v3-hover-report",
+        action="store_true",
+        help="Write V3 hover demo JSON, Markdown report, summary, and evidence manifest.",
+    )
+    parser.add_argument("--enable-live-camera", action="store_true", help="Allow the V3 live camera stage when config also permits it.")
+    parser.add_argument("--enable-live-vlm", action="store_true", help="Allow the V3 live VLM stage when config also permits it.")
+    parser.add_argument("--enable-ros2-runtime", action="store_true", help="Require/enable ROS2 runtime checks for V3.")
+    parser.add_argument("--enable-moveit-plan", action="store_true", help="Enable V3 MoveIt planning checks.")
+    parser.add_argument("--enable-moveit-execute", action="store_true", help="Enable V3 MoveIt execution gate.")
+    parser.add_argument(
+        "--enable-real-robot-motion",
+        action="store_true",
+        help="Request the final V3 real UR5 motion gate; still blocked unless every safety gate passes.",
+    )
+    parser.add_argument("--manual-confirmation-token", help="Manual confirmation token for V3 real-motion gate.")
     return parser
 
 
 def main() -> int:
     args = build_parser().parse_args()
+    if args.run_v3_hover_demo:
+        result = evaluate_v3_hover_demo(
+            V3HoverDemoRequest(
+                requested=True,
+                user_command=args.v3_user_command or args.user_command,
+                config_path=args.v3_hover_config or "configs/v3_hover_demo.example.yaml",
+                output_dir=args.output_dir,
+                write_evidence=args.v3_hover_report,
+                manual_confirmation_token=args.manual_confirmation_token,
+                enable_live_camera=args.enable_live_camera,
+                enable_live_vlm=args.enable_live_vlm,
+                enable_ros2_runtime=args.enable_ros2_runtime,
+                enable_moveit_plan=args.enable_moveit_plan,
+                enable_moveit_execute=args.enable_moveit_execute,
+                enable_real_robot_motion=args.enable_real_robot_motion,
+            )
+        )
+        print_v3_hover_summary(result)
+        return 0 if result.get("ok") else 1
     if args.execution_max_attempts != 1:
-        raise ValueError("--execution-max-attempts currently supports only 1 in TETO V2.11.0")
+        raise ValueError("--execution-max-attempts currently supports only 1 in the legacy simulated execution path")
     simulation_task = _load_simulation_task(args.task_json)
     semantic_contract = None
     semantic_contract_path = None
@@ -469,6 +512,30 @@ def main() -> int:
     report_path = Path(str(result["report_path"]))
     print_summary(result, report_path)
     return 0 if result.get("ok") else 1
+
+
+def print_v3_hover_summary(result: dict) -> None:
+    print("=" * 50)
+    print("TETO V3.0.0 FIRST REAL UR5 HOVER DEMO")
+    print("=" * 50)
+    print(f"Status: {result.get('v3_hover_demo_status')}")
+    print(f"Mode: {result.get('v3_demo_mode')}")
+    print(f"user_command: {result.get('user_command')}")
+    print(f"normalized_intent: {result.get('normalized_intent')}")
+    print(f"target_label: {result.get('target_label')}")
+    print(f"planner_request_ready: {result.get('planner_request_ready')}")
+    print(f"ros2_interface_ready: {result.get('ros2_interface_ready')}")
+    print(f"moveit_plan_ready: {result.get('moveit_plan_ready')}")
+    print(f"ur5_state_ok: {result.get('ur5_state_ok')}")
+    print(f"manual_confirmation_required: {result.get('manual_confirmation_required')}")
+    print(f"manual_confirmation_accepted: {result.get('manual_confirmation_accepted')}")
+    print(f"enable_real_robot_motion: {result.get('enable_real_robot_motion')}")
+    print(f"trajectory_send_allowed: {result.get('trajectory_send_allowed')}")
+    print(f"controller_command_sent: {result.get('controller_command_sent')}")
+    print(f"real_robot_motion_executed: {result.get('real_robot_motion_executed')}")
+    print(f"blocking_reasons: {result.get('blocking_reasons')}")
+    print(f"v3_hover_demo_result_path: {result.get('v3_hover_demo_result_path')}")
+    print(f"v3_hover_demo_report_path: {result.get('v3_hover_demo_report_path')}")
 
 
 def print_summary(result: dict, report_path: Path) -> None:

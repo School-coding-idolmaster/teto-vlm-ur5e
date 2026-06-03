@@ -1,0 +1,163 @@
+v3_hover_demo:
+  version: TETO V3.0.0
+  demo_name: first_real_ur5_hover_demo
+  supported_intents:
+    - hover_to_object
+    - return_home
+    - stop
+  target_examples:
+    - red_mug
+    - red cup
+    - red object
+
+  user_command: hover over the red mug
+  hover_offset_m: 0.08
+  max_speed_scale: 0.10
+  max_acc_scale: 0.10
+  scene_ttl_ms: 1500
+  confidence_threshold: 0.70
+  manual_confirmation_required: true
+  manual_confirmation_token: CONFIRM_REAL_UR5_HOVER
+  manual_confirmation_timeout_s: 30
+  require_reobserve_before_execute: true
+  single_target_only: true
+  workspace_bounds:
+    x_min: -1.0
+    x_max: 1.0
+    y_min: -1.0
+    y_max: 1.0
+    z_min: 0.0
+    z_max: 2.0
+
+  enable_live_camera: false
+  enable_live_vlm: false
+  enable_ros2_runtime: false
+  enable_moveit_plan: false
+  enable_moveit_execute: false
+  enable_real_robot_motion: false
+  execution_allowed: false
+  allow_return_home: true
+  return_home_named_target: home
+  forbid_urscript: true
+  forbid_rtde_write: true
+  forbid_dashboard_command: true
+  forbid_raw_joint_targets: true
+  forbid_tcp_pose_world_from_llm: true
+
+  perception_shadow_pipeline:
+    user_command: hover over the red mug
+    camera_source_adapter:
+      source_mode: offline_file
+      snapshot_id: v3_hover_fixture_snapshot_001
+      scene_version: v3_hover_fixture_scene_v1
+      capture_timestamp: "2099-01-01T00:00:00Z"
+      frame_id: v3_hover_fixture_frame_001
+      camera_frame: camera_color_optical_frame
+      image_ref: examples/camera_source/sample_image_ref.json
+      depth_ref: examples/camera_source/sample_depth_ref.json
+      camera_info_ref: examples/camera_source/sample_camera_info.json
+      width: 640
+      height: 480
+      color_encoding: rgb8
+      depth_encoding: uint16_mm
+      depth_available: true
+      camera_info_available: true
+      depth_required: true
+      capture_backend: offline_file
+      capture_method: declared_snapshot_manifest
+      allow_live_camera_capture: false
+      continuous_capture_enabled: false
+      live_vlm_called: false
+    vlm_grounding_adapter:
+      adapter_mode: mock_vlm
+      snapshot_id: v3_hover_fixture_snapshot_001
+      scene_version: v3_hover_fixture_scene_v1
+      user_command: hover over the red mug
+      expected_snapshot_id: v3_hover_fixture_snapshot_001
+      expected_scene_version: v3_hover_fixture_scene_v1
+      overall_confidence_threshold: 0.70
+      allow_live_vlm: false
+      live_vlm_called: false
+    geometry_validity:
+      depth_required: true
+      thresholds:
+        confidence_threshold: 0.70
+        min_bbox_area_px: 1.0
+    projector_shadow:
+      camera_info_ref: examples/projector_camera_info_example.json
+      depth_sample:
+        depth_value_m: 0.8
+      mock_tf_ref: examples/projector_mock_tf_example.json
+      camera_frame: camera_color_optical_frame
+      world_frame: mock_world
+      projection_method: pinhole_mock_tf
+      projection_confidence: 0.86
+      require_world_projection: true
+      depth_range_m:
+        min: 0.05
+        max: 2.0
+      workspace_m:
+        x: [-1.0, 1.0]
+        y: [-1.0, 1.0]
+        z: [0.0, 2.0]
+
+  ros2_interface_readiness:
+    ros2_environment_declared: true
+    ros_distro: humble
+    ros_domain_id: unavailable
+    allow_missing_ros2_runtime: true
+    require_ros2_runtime: false
+    planner_gateway_interface:
+      mode: topic
+      topic_name: /teto/planner_gateway/shadow_request
+      message_schema: teto_planner_gateway_shadow.v1
+    frames:
+      world_frame: mock_world
+      robot_base_frame: base_link
+      camera_frame: camera_color_optical_frame
+      target_frame: target_object
+    shadow_only: true
+    ros2_publish_enabled: false
+    ros2_publish_attempted: false
+    moveit_enabled: false
+    moveit_called: false
+    real_robot_enabled: false
+    execution_allowed: false
+
+  moveit_plan_only:
+    plan_only: true
+    planning_group: ur_manipulator
+    planning_frame: base_link
+    end_effector_frame: tool0
+    moveit_execute_allowed: false
+    moveit_execute_called: false
+    trajectory_send_allowed: false
+    trajectory_sent: false
+    controller_command_sent: false
+    execution_allowed: false
+    real_robot_enabled: false
+
+  ur5_read_only_state:
+    read_only_mode: true
+    robot_model: UR5e
+    robot_ip: unavailable_for_shadow
+    rtde_read_enabled: declared_future_only
+    rtde_write_enabled: false
+    rtde_write_attempted: false
+    dashboard_read_enabled: declared_future_only
+    dashboard_command_enabled: false
+    dashboard_command_attempted: false
+    state_ttl_ms: 500
+    manual_confirmation_required: true
+    execution_allowed: false
+    real_robot_enabled: false
+    required_state_fields:
+      - robot_mode
+      - safety_status
+      - program_state
+      - speed_scaling
+      - protective_stop
+      - emergency_stop
+      - teach_mode
+      - remote_control_mode
+      - calibration_status

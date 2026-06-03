@@ -2160,6 +2160,51 @@ for one recognition run. To inspect an older experiment, find its line in
 Older workspaces may still contain `outputs/recognition_runs/`. New batch
 recognition runs no longer write there.
 
+## TETO V3.0.0: First Real UR5 Hover Demo
+
+TETO V3.0.0 is the first real text-to-camera-to-VLM-to-TETO-to-UR5 execution
+milestone. The initial task is intentionally narrow: identify one object from a
+limited command such as:
+
+```text
+hover over the red mug
+```
+
+The V3 path normalizes the command, takes a one-shot camera snapshot, grounds
+the target with a VLM adapter, runs TETO semantic and geometry gates, projects
+2D evidence to a bounded 3D target, prepares a planner request, checks ROS2 /
+MoveIt / UR5 state evidence, requires manual confirmation, and only then allows
+a low-speed hover above the object.
+
+Run the CI-safe software/no-robot smoke path with:
+
+```bash
+python3 scripts/run_first_simulation_execution.py \
+  --run-v3-hover-demo \
+  --v3-user-command "hover over the red mug" \
+  --v3-hover-config configs/v3_hover_demo.example.yaml \
+  --v3-hover-report
+```
+
+Safety boundaries:
+
+- no arbitrary natural-language execution
+- no grasping, pushing, pressing, or other contact tasks
+- no raw URScript
+- no RTDE write control
+- no Dashboard motion command
+- no raw joint target generation
+- no LLM-generated `tcp_pose_world` execution
+- manual confirmation required for real motion
+- low-speed MoveIt execution only
+- bounded workspace checks
+- evidence export required
+
+Without the lab robot, V3.0.0 software mode validates the pipeline but cannot
+claim physical demo success. The project may claim “TETO V3.0.0 First Real UR5
+Hover Demo accepted” only after the lab real-hover mode exports evidence with
+`real_robot_motion_executed=true`.
+
 Use the unified CLI:
 
 ```bash
@@ -2207,4 +2252,5 @@ python3 -m src.cli prepare-images --input-dir data/raw --output-dir data/process
 - V2.10.1 = ROS2 environment / interface readiness check
 - V2.10.2 = ROS2 message export / fake publish dry-run
 - V2.11.0 = full robot-system shadow bridge with MoveIt plan-only and UR5 read-only state declarations
-- Live ROS2 publish / MoveIt2 execution / RTDE write / Dashboard command / URScript / real UR5 controller integration remains outside the current implemented safety boundary
+- V3.0.0 = first real UR5 hover demo architecture with real motion disabled by default and manual confirmation required
+- RTDE write / Dashboard command / URScript / raw joint target execution remains outside the implemented safety boundary

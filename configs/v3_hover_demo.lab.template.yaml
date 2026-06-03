@@ -1,0 +1,45 @@
+v3_hover_demo:
+  version: TETO V3.0.0
+  demo_name: first_real_ur5_hover_demo
+  user_command: hover over the red mug
+
+  hover_offset_m: 0.08
+  max_speed_scale: 0.10
+  max_acc_scale: 0.10
+  scene_ttl_ms: 1500
+  confidence_threshold: 0.70
+  manual_confirmation_required: true
+  manual_confirmation_token: CONFIRM_REAL_UR5_HOVER
+  manual_confirmation_timeout_s: 30
+  require_reobserve_before_execute: true
+  single_target_only: true
+
+  workspace_bounds:
+    x_min: -0.50
+    x_max: 0.50
+    y_min: -0.60
+    y_max: 0.60
+    z_min: 0.05
+    z_max: 0.80
+
+  enable_live_camera: false
+  enable_live_vlm: false
+  enable_ros2_runtime: false
+  enable_moveit_plan: false
+  enable_moveit_execute: false
+  enable_real_robot_motion: false
+  execution_allowed: false
+
+  allow_return_home: true
+  return_home_named_target: home
+  forbid_urscript: true
+  forbid_rtde_write: true
+  forbid_dashboard_command: true
+  forbid_raw_joint_targets: true
+  forbid_tcp_pose_world_from_llm: true
+
+  lab_placeholders:
+    robot_ip: REPLACE_WITH_LAB_UR5_IP_IN_LOCAL_FILE_ONLY
+    camera_source: REPLACE_WITH_LAB_CAMERA_SOURCE_IN_LOCAL_FILE_ONLY
+    local_vlm_endpoint: REPLACE_WITH_APPROVED_LOCAL_VLM_ENDPOINT_IN_LOCAL_FILE_ONLY
+    ros_domain_id: REPLACE_WITH_LAB_ROS_DOMAIN_ID_IN_LOCAL_FILE_ONLY
