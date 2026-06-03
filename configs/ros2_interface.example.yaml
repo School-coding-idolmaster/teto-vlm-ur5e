@@ -1,0 +1,25 @@
+ros2_interface_readiness:
+  ros2_environment_declared: true
+  ros_distro: humble
+  ros_domain_id: unavailable
+  allow_missing_ros2_runtime: true
+  require_ros2_runtime: false
+
+  planner_gateway_interface:
+    mode: topic
+    topic_name: /teto/planner_gateway/shadow_request
+    message_schema: teto_planner_gateway_shadow.v1
+
+  frames:
+    world_frame: world
+    robot_base_frame: base_link
+    camera_frame: camera_color_optical_frame
+    target_frame: target_object
+
+  shadow_only: true
+  ros2_publish_enabled: false
+  ros2_publish_attempted: false
+  moveit_enabled: false
+  moveit_called: false
+  real_robot_enabled: false
+  execution_allowed: false

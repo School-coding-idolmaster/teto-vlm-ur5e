@@ -27,6 +27,10 @@ from src.real_scene_shadow_pipeline import (
     build_real_scene_shadow_request,
     evaluate_real_scene_shadow_pipeline,
 )
+from src.ros2_interface_readiness import (
+    build_ros2_interface_readiness_request,
+    evaluate_ros2_interface_readiness,
+)
 from src.robot_prim_inspector import (
     UR5E_ARM_JOINT_NAMES,
     build_robot_prim_inspection_report,
@@ -63,7 +67,7 @@ from src.vlm_grounding_adapter import build_vlm_grounding_adapter_request, evalu
 
 
 REPORT_VERSION = "teto_simulation_execution.v1"
-CURRENT_TETO_VERSION = "TETO V2.10.0"
+CURRENT_TETO_VERSION = "TETO V2.10.1"
 DEFAULT_STEPS = 5
 DEFAULT_SIMULATION_OBJECT_TYPE = "cube"
 DEFAULT_CUBE_PRIM_PATH = "/World/TETO_Cube"
@@ -133,6 +137,7 @@ def build_simulation_execution_result(
     real_scene_shadow_metadata: Dict[str, Any] | None = None,
     perception_shadow_metadata: Dict[str, Any] | None = None,
     planner_gateway_shadow_metadata: Dict[str, Any] | None = None,
+    ros2_interface_readiness_metadata: Dict[str, Any] | None = None,
     started_at: str | None = None,
     finished_at: str | None = None,
 ) -> Dict[str, Any]:
@@ -180,6 +185,7 @@ def build_simulation_execution_result(
     result.update(real_scene_shadow_metadata or _real_scene_shadow_report_fields())
     result.update(perception_shadow_metadata or _perception_shadow_report_fields())
     result.update(planner_gateway_shadow_metadata or _planner_gateway_shadow_report_fields())
+    result.update(ros2_interface_readiness_metadata or _ros2_interface_readiness_report_fields())
     if (
         result.get("semantic_simulation_bridge_requested") is True
         and result.get("semantic_gate_passed") is not True
@@ -207,6 +213,8 @@ def build_simulation_execution_result(
     result.setdefault("simulation_motion_report_path", None)
     result.setdefault("before_joint_state_path", None)
     result.setdefault("after_joint_state_path", None)
+    result.setdefault("ros2_interface_readiness_result_path", None)
+    result.setdefault("ros2_interface_readiness_report_path", None)
     result.setdefault("motion_evidence_available", False)
     result.setdefault("motion_evidence_files", [])
     result.setdefault("motion_diff_summary", {})
@@ -291,6 +299,9 @@ def run_first_simulation_execution(
     planner_gateway_shadow_config: str | Path | None = None,
     planner_gateway_shadow_report: bool = False,
     perception_shadow_result: str | Path | None = None,
+    check_ros2_interface_readiness: bool = False,
+    ros2_interface_config: str | Path | None = None,
+    ros2_interface_report: bool = False,
     output_dir: str | Path | None = None,
     write_report: bool = False,
     demo_command: str | None = None,
@@ -305,6 +316,7 @@ def run_first_simulation_execution(
     real_scene_shadow_requested = run_real_scene_shadow or real_scene_shadow_report
     perception_shadow_requested = run_perception_shadow_pipeline or perception_shadow_report
     planner_gateway_shadow_requested = check_planner_gateway_shadow or planner_gateway_shadow_report
+    ros2_interface_readiness_requested = check_ros2_interface_readiness or ros2_interface_report
     lab_readiness_requested = (
         check_lab_readiness
         or check_camera_readiness
@@ -321,6 +333,7 @@ def run_first_simulation_execution(
         or real_scene_shadow_requested
         or perception_shadow_requested
         or planner_gateway_shadow_requested
+        or ros2_interface_readiness_requested
     ) and not dry_run:
         no_isaac = True
     lab_readiness_request = build_lab_readiness_request(
@@ -417,6 +430,14 @@ def run_first_simulation_execution(
     planner_gateway_shadow_metadata = _planner_gateway_shadow_report_fields(
         requested=planner_gateway_shadow_requested,
         gateway=evaluate_planner_gateway_shadow(planner_gateway_shadow_request),
+    )
+    ros2_interface_readiness_request = build_ros2_interface_readiness_request(
+        requested=ros2_interface_readiness_requested,
+        config_path=ros2_interface_config,
+    )
+    ros2_interface_readiness_metadata = _ros2_interface_readiness_report_fields(
+        requested=ros2_interface_readiness_requested,
+        readiness=evaluate_ros2_interface_readiness(ros2_interface_readiness_request),
     )
     effective_move_object = move_object or move_cube
     effective_spawn_cube = spawn_cube or effective_move_object
@@ -540,6 +561,7 @@ def run_first_simulation_execution(
                 real_scene_shadow_metadata=real_scene_shadow_metadata,
                 perception_shadow_metadata=perception_shadow_metadata,
                 planner_gateway_shadow_metadata=planner_gateway_shadow_metadata,
+                ros2_interface_readiness_metadata=ros2_interface_readiness_metadata,
                 error_code="E_INVALID_STEPS",
                 error_message="steps must be a positive integer",
                 started_at=started_at,
@@ -595,6 +617,7 @@ def run_first_simulation_execution(
                 real_scene_shadow_metadata=real_scene_shadow_metadata,
                 perception_shadow_metadata=perception_shadow_metadata,
                 planner_gateway_shadow_metadata=planner_gateway_shadow_metadata,
+                ros2_interface_readiness_metadata=ros2_interface_readiness_metadata,
                 error_code="E_INVALID_SIMULATION_TASK",
                 error_message=f"missing simulation task fields: {', '.join(missing_fields)}",
                 started_at=started_at,
@@ -689,6 +712,7 @@ def run_first_simulation_execution(
                     real_scene_shadow_metadata=real_scene_shadow_metadata,
                     perception_shadow_metadata=perception_shadow_metadata,
                     planner_gateway_shadow_metadata=planner_gateway_shadow_metadata,
+                    ros2_interface_readiness_metadata=ros2_interface_readiness_metadata,
                     error_code="E_ROBOT_ASSET_LOAD_FAILED",
                     error_message="robot asset path is unavailable",
                     started_at=started_at,
@@ -730,6 +754,7 @@ def run_first_simulation_execution(
                 real_scene_shadow_metadata=real_scene_shadow_metadata,
                 perception_shadow_metadata=perception_shadow_metadata,
                 planner_gateway_shadow_metadata=planner_gateway_shadow_metadata,
+                ros2_interface_readiness_metadata=ros2_interface_readiness_metadata,
                 started_at=started_at,
                 finished_at=_timestamp(),
             ),
@@ -797,6 +822,8 @@ def write_simulation_execution_result(
     perception_shadow_report_path = run_dir / "perception_shadow_report.md"
     planner_gateway_shadow_result_path = run_dir / "planner_gateway_shadow_result.json"
     planner_gateway_shadow_report_path = run_dir / "planner_gateway_shadow_report.md"
+    ros2_interface_readiness_result_path = run_dir / "ros2_interface_readiness_result.json"
+    ros2_interface_readiness_report_path = run_dir / "ros2_interface_readiness_report.md"
     result["report_path"] = str(report_path)
     structure_report_requested = bool(result.get("robot_prim_inspection_requested"))
     result["robot_structure_report_generated"] = structure_report_requested
@@ -889,6 +916,20 @@ def write_simulation_execution_result(
         ]
         result["planner_gateway_shadow"]["planner_gateway_shadow_report_path"] = result[
             "planner_gateway_shadow_report_path"
+        ]
+    ros2_interface_readiness_requested = bool(result.get("ros2_interface_readiness_requested"))
+    result["ros2_interface_readiness_result_path"] = (
+        str(ros2_interface_readiness_result_path) if ros2_interface_readiness_requested else None
+    )
+    result["ros2_interface_readiness_report_path"] = (
+        str(ros2_interface_readiness_report_path) if ros2_interface_readiness_requested else None
+    )
+    if isinstance(result.get("ros2_interface_readiness"), dict):
+        result["ros2_interface_readiness"]["ros2_interface_readiness_result_path"] = result[
+            "ros2_interface_readiness_result_path"
+        ]
+        result["ros2_interface_readiness"]["ros2_interface_readiness_report_path"] = result[
+            "ros2_interface_readiness_report_path"
         ]
     result["semantic_bridge"] = _semantic_bridge_info(result)
     result["motion"] = _motion_info(result)
@@ -1997,6 +2038,61 @@ def _planner_gateway_shadow_report_fields(
         "planner_gateway_shadow_warnings": list(gateway.get("warnings") or []),
         "planner_gateway_shadow_next_safe_action": gateway.get("next_safe_action"),
         "planner_gateway_shadow_replay_ready": gateway.get("replay_ready", False) is True,
+    }
+
+
+def _ros2_interface_readiness_report_fields(
+    *,
+    requested: bool = False,
+    readiness: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    readiness = readiness if isinstance(readiness, dict) else {}
+    return {
+        "ros2_interface_readiness_requested": requested,
+        "ros2_interface_readiness": readiness
+        or {
+            "requested": False,
+            "ros2_interface_readiness_requested": False,
+            "ros2_interface_readiness_status": "NOT_REQUESTED",
+            "ros2_environment_declared": False,
+            "ros_distro": None,
+            "ros_domain_id": None,
+            "planner_gateway_interface_mode": None,
+            "planner_gateway_endpoint": None,
+            "message_schema": None,
+            "world_frame": None,
+            "robot_base_frame": None,
+            "camera_frame": None,
+            "target_frame": None,
+            "shadow_only": True,
+            "ros2_publish_enabled": False,
+            "ros2_publish_attempted": False,
+            "moveit_enabled": False,
+            "moveit_called": False,
+            "execution_allowed": False,
+            "trajectory_generated": False,
+            "tcp_pose_world_generated": False,
+            "joint_targets_generated": False,
+            "robot_command_generated": False,
+            "real_robot_motion_executed": False,
+            "blocking_reasons": [],
+            "warnings": [],
+        },
+        "ros2_interface_readiness_status": readiness.get("ros2_interface_readiness_status", "NOT_REQUESTED"),
+        "ros2_environment_declared": readiness.get("ros2_environment_declared", False) is True,
+        "ros_distro": readiness.get("ros_distro"),
+        "ros_domain_id": readiness.get("ros_domain_id"),
+        "planner_gateway_interface_mode": readiness.get("planner_gateway_interface_mode"),
+        "planner_gateway_endpoint": readiness.get("planner_gateway_endpoint"),
+        "message_schema": readiness.get("message_schema"),
+        "ros2_interface_world_frame": readiness.get("world_frame"),
+        "robot_base_frame": readiness.get("robot_base_frame"),
+        "ros2_interface_camera_frame": readiness.get("camera_frame"),
+        "target_frame": readiness.get("target_frame"),
+        "shadow_only": readiness.get("shadow_only", True) is True,
+        "ros2_interface_blocking_reasons": list(readiness.get("blocking_reasons") or []),
+        "ros2_interface_warnings": list(readiness.get("warnings") or []),
+        "ros2_interface_next_safe_action": readiness.get("next_safe_action"),
     }
 
 

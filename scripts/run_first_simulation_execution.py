@@ -19,7 +19,7 @@ from src.simulation_runtime import DEFAULT_SIMULATION_TASK, CURRENT_TETO_VERSION
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run TETO V2.10.0 planner gateway shadow contract, full perception shadow pipeline, and no-motion simulation evidence smoke tests."
+        description="Run TETO V2.10.1 ROS2 interface readiness, planner gateway shadow contract, full perception shadow pipeline, and no-motion simulation evidence smoke tests."
     )
     parser.add_argument("--dry-run", action="store_true", help="Do not import Isaac; produce a test execution report.")
     parser.add_argument("--no-isaac", action="store_true", help="Pure Python test mode without Isaac imports.")
@@ -120,7 +120,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--execution-max-attempts",
         type=int,
         default=1,
-        help="Maximum attempts metadata. V2.10.0 supports 1 and does not auto-retry.",
+        help="Maximum attempts metadata. V2.10.1 supports 1 and does not auto-retry.",
     )
     parser.add_argument(
         "--execution-enable-retry-recommendation",
@@ -207,6 +207,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--perception-shadow-result",
         help="Path to an offline perception_shadow_result JSON/YAML file.",
+    )
+    parser.add_argument(
+        "--check-ros2-interface-readiness",
+        action="store_true",
+        help="Validate ROS2 Planner Gateway interface declarations without publishing or moving.",
+    )
+    parser.add_argument(
+        "--ros2-interface-config",
+        help="Path to ROS2 interface readiness YAML/JSON config.",
+    )
+    parser.add_argument(
+        "--ros2-interface-report",
+        action="store_true",
+        help="Generate ROS2 interface readiness evidence report.",
     )
     parser.add_argument(
         "--check-camera-source-adapter",
@@ -298,7 +312,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
     if args.execution_max_attempts != 1:
-        raise ValueError("--execution-max-attempts currently supports only 1 in TETO V2.10.0")
+        raise ValueError("--execution-max-attempts currently supports only 1 in TETO V2.10.1")
     simulation_task = _load_simulation_task(args.task_json)
     semantic_contract = None
     semantic_contract_path = None
@@ -383,6 +397,9 @@ def main() -> int:
         planner_gateway_shadow_config=args.planner_gateway_shadow_config,
         planner_gateway_shadow_report=args.planner_gateway_shadow_report,
         perception_shadow_result=args.perception_shadow_result,
+        check_ros2_interface_readiness=args.check_ros2_interface_readiness,
+        ros2_interface_config=args.ros2_interface_config,
+        ros2_interface_report=args.ros2_interface_report,
         output_dir=args.output_dir,
         write_report=True,
         demo_command=shlex.join([sys.executable, *sys.argv]),
@@ -621,6 +638,24 @@ def print_summary(result: dict, report_path: Path) -> None:
     print(f"planner_gateway_shadow_blocking_reasons: {result.get('planner_gateway_shadow_blocking_reasons')}")
     print(f"planner_gateway_shadow_result_path: {result.get('planner_gateway_shadow_result_path')}")
     print(f"planner_gateway_shadow_report_path: {result.get('planner_gateway_shadow_report_path')}")
+    ros2_interface = result.get("ros2_interface_readiness") or {}
+    print(f"ros2_interface_readiness_requested: {result.get('ros2_interface_readiness_requested')}")
+    print(f"ros2_interface_readiness_status: {result.get('ros2_interface_readiness_status')}")
+    print(f"ros2_environment_declared: {result.get('ros2_environment_declared')}")
+    print(f"ros_distro: {result.get('ros_distro')}")
+    print(f"ros_domain_id: {result.get('ros_domain_id')}")
+    print(f"planner_gateway_interface_mode: {result.get('planner_gateway_interface_mode')}")
+    print(f"planner_gateway_endpoint: {result.get('planner_gateway_endpoint')}")
+    print(f"message_schema: {result.get('message_schema')}")
+    print(f"ros2_interface_world_frame: {result.get('ros2_interface_world_frame')}")
+    print(f"robot_base_frame: {result.get('robot_base_frame')}")
+    print(f"ros2_interface_camera_frame: {result.get('ros2_interface_camera_frame')}")
+    print(f"shadow_only: {result.get('shadow_only')}")
+    print(f"ros2_interface_blocking_reasons: {result.get('ros2_interface_blocking_reasons')}")
+    print(f"ros2_interface_warnings: {result.get('ros2_interface_warnings')}")
+    print(f"ros2_interface_readiness_result_path: {result.get('ros2_interface_readiness_result_path')}")
+    print(f"ros2_interface_readiness_report_path: {result.get('ros2_interface_readiness_report_path')}")
+    print(f"ros2_interface_safety_boundary: {ros2_interface.get('safety_boundary')}")
     print(f"Report: {report_path}")
     if result.get("blocking_reasons"):
         print(f"Blocking reasons: {', '.join(result['blocking_reasons'])}")

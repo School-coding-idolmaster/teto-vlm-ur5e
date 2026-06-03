@@ -17,6 +17,7 @@ from src.lab_readiness import format_lab_readiness_report
 from src.perception_shadow_pipeline import format_perception_shadow_report
 from src.planner_gateway_shadow import format_planner_gateway_shadow_report
 from src.real_scene_shadow_pipeline import format_real_scene_shadow_report
+from src.ros2_interface_readiness import format_ros2_interface_readiness_report
 from src.semantic_simulation_bridge import format_semantic_simulation_bridge_report
 from src.simulated_task_execution import format_simulated_task_execution_report
 from src.vlm_grounding_adapter import format_vlm_grounding_report
@@ -79,6 +80,8 @@ def export_simulation_evidence(
     perception_shadow_report_path = output_dir / "perception_shadow_report.md"
     planner_gateway_shadow_result_path = output_dir / "planner_gateway_shadow_result.json"
     planner_gateway_shadow_report_path = output_dir / "planner_gateway_shadow_report.md"
+    ros2_interface_readiness_result_path = output_dir / "ros2_interface_readiness_result.json"
+    ros2_interface_readiness_report_path = output_dir / "ros2_interface_readiness_report.md"
 
     object_info = _simulation_object_info(result)
     robot_asset_info = _robot_asset_info(result)
@@ -98,6 +101,7 @@ def export_simulation_evidence(
     real_scene_shadow_info = _real_scene_shadow_info(result)
     perception_shadow_info = _perception_shadow_info(result)
     planner_gateway_shadow_info = _planner_gateway_shadow_info(result)
+    ros2_interface_readiness_info = _ros2_interface_readiness_info(result)
     structure_report_requested = bool(robot_prim_inspection_info.get("requested"))
     readiness_requested = bool(articulation_readiness_info.get("requested"))
     state_requested = bool(articulation_state_info.get("requested"))
@@ -116,6 +120,7 @@ def export_simulation_evidence(
     real_scene_shadow_requested = bool(real_scene_shadow_info.get("requested"))
     perception_shadow_requested = bool(perception_shadow_info.get("requested"))
     planner_gateway_shadow_requested = bool(planner_gateway_shadow_info.get("requested"))
+    ros2_interface_readiness_requested = bool(ros2_interface_readiness_info.get("requested"))
     run_id = output_dir.name
     created_at = result.get("finished_at") or result.get("started_at")
     report_path = result.get("report_path")
@@ -142,6 +147,7 @@ def export_simulation_evidence(
             real_scene_shadow_info=real_scene_shadow_info,
             perception_shadow_info=perception_shadow_info,
             planner_gateway_shadow_info=planner_gateway_shadow_info,
+            ros2_interface_readiness_info=ros2_interface_readiness_info,
             robot_structure_report_path=structure_report_ref,
             run_id=run_id,
             created_at=created_at,
@@ -366,6 +372,21 @@ def export_simulation_evidence(
         _write_json_artifact(planner_gateway_shadow_result_path, planner_gateway_shadow_info)
         planner_gateway_shadow_report_path.write_text(
             format_planner_gateway_shadow_report(planner_gateway_shadow_info),
+            encoding="utf-8",
+        )
+    if ros2_interface_readiness_requested:
+        ros2_interface_readiness_info["ros2_interface_readiness_result_path"] = str(
+            ros2_interface_readiness_result_path
+        )
+        ros2_interface_readiness_info["ros2_interface_readiness_report_path"] = str(
+            ros2_interface_readiness_report_path
+        )
+        ros2_interface_readiness_info["ros2_interface_readiness_evidence_files"] = (
+            _ros2_interface_readiness_evidence_files(ros2_interface_readiness_info)
+        )
+        _write_json_artifact(ros2_interface_readiness_result_path, ros2_interface_readiness_info)
+        ros2_interface_readiness_report_path.write_text(
+            format_ros2_interface_readiness_report(ros2_interface_readiness_info),
             encoding="utf-8",
         )
     motion_evidence_summary = summarize_motion_evidence(simulation_micro_motion_info)
@@ -728,6 +749,8 @@ def export_simulation_evidence(
             if real_scene_shadow_requested
             else camera_source_info.get("blocking_reasons")
             if camera_source_requested
+            else ros2_interface_readiness_info.get("blocking_reasons")
+            if ros2_interface_readiness_requested
             else list(lab_readiness_info.get("blocking_reasons") or result.get("blocking_reasons") or [])
         ),
         "warnings": (
@@ -741,6 +764,8 @@ def export_simulation_evidence(
             if real_scene_shadow_requested
             else camera_source_info.get("warnings", [])
             if camera_source_requested
+            else ros2_interface_readiness_info.get("warnings", [])
+            if ros2_interface_readiness_requested
             else []
         ),
         "next_safe_action": (
@@ -754,6 +779,8 @@ def export_simulation_evidence(
             if real_scene_shadow_requested
             else camera_source_info.get("next_safe_action")
             if camera_source_requested
+            else ros2_interface_readiness_info.get("next_safe_action")
+            if ros2_interface_readiness_requested
             else lab_readiness_info.get("next_safe_action")
         ),
         "replay_ready": real_scene_shadow_info.get(
@@ -1046,7 +1073,11 @@ def export_simulation_evidence(
         or result.get("scene_version"),
         "world_frame": planner_gateway_shadow_info.get("world_frame")
         if planner_gateway_shadow_requested
-        else projector_shadow_info.get("world_frame"),
+        else (
+            ros2_interface_readiness_info.get("world_frame")
+            if ros2_interface_readiness_requested
+            else projector_shadow_info.get("world_frame")
+        ),
         "world_point_m": planner_gateway_shadow_info.get("world_point_m")
         if planner_gateway_shadow_requested
         else (
@@ -1163,6 +1194,38 @@ def export_simulation_evidence(
         "planner_gateway_shadow_report_path": str(planner_gateway_shadow_report_path)
         if planner_gateway_shadow_requested
         else None,
+        "ros2_interface_readiness_evidence_available": ros2_interface_readiness_requested,
+        "ros2_interface_readiness_status": ros2_interface_readiness_info.get(
+            "ros2_interface_readiness_status"
+        ),
+        "ros2_environment_declared": ros2_interface_readiness_info.get("ros2_environment_declared"),
+        "ros_distro": ros2_interface_readiness_info.get("ros_distro"),
+        "ros_domain_id": ros2_interface_readiness_info.get("ros_domain_id"),
+        "planner_gateway_interface_mode": ros2_interface_readiness_info.get("planner_gateway_interface_mode"),
+        "planner_gateway_endpoint": ros2_interface_readiness_info.get("planner_gateway_endpoint"),
+        "message_schema": ros2_interface_readiness_info.get("message_schema"),
+        "robot_base_frame": ros2_interface_readiness_info.get("robot_base_frame"),
+        "camera_frame": ros2_interface_readiness_info.get("camera_frame")
+        if ros2_interface_readiness_requested
+        else projector_shadow_info.get("camera_frame") or camera_source_info.get("camera_frame"),
+        "shadow_only": ros2_interface_readiness_info.get("shadow_only"),
+        "moveit_enabled": ros2_interface_readiness_info.get("moveit_enabled", False),
+        "ros2_interface_readiness_blocking_reasons": ros2_interface_readiness_info.get(
+            "blocking_reasons",
+            [],
+        ),
+        "ros2_interface_readiness_warnings": ros2_interface_readiness_info.get("warnings", []),
+        "ros2_interface_readiness_evidence_files": (
+            _ros2_interface_readiness_evidence_files(ros2_interface_readiness_info)
+            if ros2_interface_readiness_requested
+            else []
+        ),
+        "ros2_interface_readiness_result_path": str(ros2_interface_readiness_result_path)
+        if ros2_interface_readiness_requested
+        else None,
+        "ros2_interface_readiness_report_path": str(ros2_interface_readiness_report_path)
+        if ros2_interface_readiness_requested
+        else None,
         "screenshot_before_path": None,
         "screenshot_after_path": None,
         "video_path": None,
@@ -1217,6 +1280,8 @@ def export_simulation_evidence(
         "perception_shadow_report_path": perception_shadow_report_path,
         "planner_gateway_shadow_result_path": planner_gateway_shadow_result_path,
         "planner_gateway_shadow_report_path": planner_gateway_shadow_report_path,
+        "ros2_interface_readiness_result_path": ros2_interface_readiness_result_path,
+        "ros2_interface_readiness_report_path": ros2_interface_readiness_report_path,
     }
 
 
@@ -2162,6 +2227,90 @@ def _planner_gateway_shadow_evidence_files(
     ]
 
 
+def _ros2_interface_readiness_info(result: Dict[str, Any]) -> Dict[str, Any]:
+    readiness = (
+        result.get("ros2_interface_readiness")
+        if isinstance(result.get("ros2_interface_readiness"), dict)
+        else {}
+    )
+    return {
+        **readiness,
+        "requested": result.get("ros2_interface_readiness_requested", readiness.get("requested", False)) is True,
+        "ros2_interface_readiness_requested": result.get(
+            "ros2_interface_readiness_requested",
+            readiness.get("ros2_interface_readiness_requested", False),
+        )
+        is True,
+        "ros2_interface_readiness_status": result.get(
+            "ros2_interface_readiness_status",
+            readiness.get("ros2_interface_readiness_status", "NOT_REQUESTED"),
+        ),
+        "ros2_environment_declared": result.get(
+            "ros2_environment_declared",
+            readiness.get("ros2_environment_declared", False),
+        )
+        is True,
+        "ros_distro": result.get("ros_distro", readiness.get("ros_distro")),
+        "ros_domain_id": result.get("ros_domain_id", readiness.get("ros_domain_id")),
+        "planner_gateway_interface_mode": result.get(
+            "planner_gateway_interface_mode",
+            readiness.get("planner_gateway_interface_mode"),
+        ),
+        "planner_gateway_endpoint": result.get(
+            "planner_gateway_endpoint",
+            readiness.get("planner_gateway_endpoint"),
+        ),
+        "message_schema": result.get("message_schema", readiness.get("message_schema")),
+        "world_frame": result.get("ros2_interface_world_frame", readiness.get("world_frame")),
+        "robot_base_frame": result.get("robot_base_frame", readiness.get("robot_base_frame")),
+        "camera_frame": result.get("ros2_interface_camera_frame", readiness.get("camera_frame")),
+        "target_frame": result.get("target_frame", readiness.get("target_frame")),
+        "shadow_only": result.get("shadow_only", readiness.get("shadow_only", True)) is True,
+        "ros2_publish_enabled": readiness.get("ros2_publish_enabled", False) is True,
+        "ros2_publish_attempted": readiness.get("ros2_publish_attempted", False) is True,
+        "moveit_enabled": readiness.get("moveit_enabled", False) is True,
+        "moveit_called": readiness.get("moveit_called", False) is True,
+        "execution_allowed": readiness.get("execution_allowed", False) is True,
+        "trajectory_generated": readiness.get("trajectory_generated", False) is True,
+        "tcp_pose_world_generated": readiness.get("tcp_pose_world_generated", False) is True,
+        "joint_targets_generated": readiness.get("joint_targets_generated", False) is True,
+        "robot_command_generated": readiness.get("robot_command_generated", False) is True,
+        "real_robot_motion_executed": readiness.get("real_robot_motion_executed", False) is True,
+        "blocking_reasons": result.get(
+            "ros2_interface_blocking_reasons",
+            readiness.get("blocking_reasons", []),
+        ),
+        "warnings": result.get("ros2_interface_warnings", readiness.get("warnings", [])),
+        "next_safe_action": result.get(
+            "ros2_interface_next_safe_action",
+            readiness.get("next_safe_action"),
+        ),
+        "ros2_interface_readiness_result_path": result.get(
+            "ros2_interface_readiness_result_path",
+            readiness.get("ros2_interface_readiness_result_path"),
+        ),
+        "ros2_interface_readiness_report_path": result.get(
+            "ros2_interface_readiness_report_path",
+            readiness.get("ros2_interface_readiness_report_path"),
+        ),
+    }
+
+
+def _ros2_interface_readiness_evidence_files(
+    ros2_interface_readiness_info: Dict[str, Any],
+) -> list[Dict[str, str | None]]:
+    return [
+        {
+            "name": "ros2_interface_readiness_result.json",
+            "path": ros2_interface_readiness_info.get("ros2_interface_readiness_result_path"),
+        },
+        {
+            "name": "ros2_interface_readiness_report.md",
+            "path": ros2_interface_readiness_info.get("ros2_interface_readiness_report_path"),
+        },
+    ]
+
+
 def _latest_execution_summary(
     execution_info: Dict[str, Any],
     precheck_info: Dict[str, Any],
@@ -2272,6 +2421,7 @@ def _build_summary_markdown(
     real_scene_shadow_info: Dict[str, Any],
     perception_shadow_info: Dict[str, Any],
     planner_gateway_shadow_info: Dict[str, Any],
+    ros2_interface_readiness_info: Dict[str, Any],
     robot_structure_report_path: str | None,
     run_id: str,
     created_at: str | None,
@@ -2651,6 +2801,34 @@ def _build_summary_markdown(
             f"- next_safe_action: {_format_value(planner_gateway_shadow_info.get('next_safe_action'))}",
             f"- replay_ready: {_format_value(planner_gateway_shadow_info.get('replay_ready'))}",
             "This V2.10.0 Planner Gateway Shadow Contract converts perception shadow world_point_m into bounded planner input evidence only. It is no-ROS2-publish, no-MoveIt, no-real-robot, and no-trajectory evidence; it does not generate tcp_pose_world, URScript, joint targets, or robot commands.",
+            "",
+            "## ROS2 Interface Readiness Summary",
+            "",
+            f"- ros2_interface_readiness_evidence_available: {_format_value(ros2_interface_readiness_info.get('requested'))}",
+            f"- ros2_interface_readiness_status: {_format_value(ros2_interface_readiness_info.get('ros2_interface_readiness_status'))}",
+            f"- ros2_environment_declared: {_format_value(ros2_interface_readiness_info.get('ros2_environment_declared'))}",
+            f"- ros_distro: {_format_value(ros2_interface_readiness_info.get('ros_distro'))}",
+            f"- ros_domain_id: {_format_value(ros2_interface_readiness_info.get('ros_domain_id'))}",
+            f"- planner_gateway_interface_mode: {_format_value(ros2_interface_readiness_info.get('planner_gateway_interface_mode'))}",
+            f"- planner_gateway_endpoint: {_format_value(ros2_interface_readiness_info.get('planner_gateway_endpoint'))}",
+            f"- message_schema: {_format_value(ros2_interface_readiness_info.get('message_schema'))}",
+            f"- world_frame: {_format_value(ros2_interface_readiness_info.get('world_frame'))}",
+            f"- robot_base_frame: {_format_value(ros2_interface_readiness_info.get('robot_base_frame'))}",
+            f"- camera_frame: {_format_value(ros2_interface_readiness_info.get('camera_frame'))}",
+            f"- shadow_only: {_format_value(ros2_interface_readiness_info.get('shadow_only'))}",
+            f"- ros2_publish_enabled: {_format_value(ros2_interface_readiness_info.get('ros2_publish_enabled'))}",
+            f"- ros2_publish_attempted: {_format_value(ros2_interface_readiness_info.get('ros2_publish_attempted'))}",
+            f"- moveit_enabled: {_format_value(ros2_interface_readiness_info.get('moveit_enabled'))}",
+            f"- moveit_called: {_format_value(ros2_interface_readiness_info.get('moveit_called'))}",
+            f"- execution_allowed: {_format_value(ros2_interface_readiness_info.get('execution_allowed'))}",
+            f"- trajectory_generated: {_format_value(ros2_interface_readiness_info.get('trajectory_generated'))}",
+            f"- tcp_pose_world_generated: {_format_value(ros2_interface_readiness_info.get('tcp_pose_world_generated'))}",
+            f"- joint_targets_generated: {_format_value(ros2_interface_readiness_info.get('joint_targets_generated'))}",
+            f"- robot_command_generated: {_format_value(ros2_interface_readiness_info.get('robot_command_generated'))}",
+            f"- real_robot_motion_executed: {_format_value(ros2_interface_readiness_info.get('real_robot_motion_executed'))}",
+            f"- blocking_reasons: {_format_value(ros2_interface_readiness_info.get('blocking_reasons'))}",
+            f"- warnings: {_format_value(ros2_interface_readiness_info.get('warnings'))}",
+            "This V2.10.1 ROS2 Environment / Interface Readiness Check prepares a future shadow bridge declaration only. It does not publish ROS2 messages, call MoveIt, connect to a real UR5, or generate robot motion commands.",
             "",
             "## Readiness Evidence Summary",
             "",
