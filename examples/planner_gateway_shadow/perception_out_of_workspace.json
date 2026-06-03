@@ -1,0 +1,28 @@
+{
+  "contract_version": "teto_perception_shadow_pipeline.v1",
+  "perception_shadow_requested": true,
+  "requested": true,
+  "perception_shadow_status": "PASS",
+  "user_command": "hover over the red mug",
+  "normalized_command": "hover over the red mug",
+  "snapshot_id": "perception_fixture_snapshot_001",
+  "grounding_id": "mock_grounding_red_mug_001",
+  "scene_version": "perception_fixture_scene_v1",
+  "target_label": "red_mug",
+  "target_object_id": "mock_red_mug_001",
+  "overall_confidence": 0.89,
+  "semantic_gate_passed": true,
+  "geometry_validity_status": "PASS",
+  "projector_status": "PASS",
+  "world_frame": "base_link",
+  "camera_frame": "camera_color_optical_frame",
+  "world_point_m": [2.0, 0.0, 1.0],
+  "workspace_check_passed": false,
+  "replay_ready": true,
+  "live_camera_used": false,
+  "live_vlm_called": false,
+  "real_robot_motion_executed": false,
+  "blocking_reasons": [],
+  "warnings": []
+}
+

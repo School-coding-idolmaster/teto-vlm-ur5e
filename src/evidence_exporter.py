@@ -15,6 +15,7 @@ from src.simulation_micro_motion import (
 )
 from src.lab_readiness import format_lab_readiness_report
 from src.perception_shadow_pipeline import format_perception_shadow_report
+from src.planner_gateway_shadow import format_planner_gateway_shadow_report
 from src.real_scene_shadow_pipeline import format_real_scene_shadow_report
 from src.semantic_simulation_bridge import format_semantic_simulation_bridge_report
 from src.simulated_task_execution import format_simulated_task_execution_report
@@ -76,6 +77,8 @@ def export_simulation_evidence(
     real_scene_shadow_report_path = output_dir / "real_scene_shadow_report.md"
     perception_shadow_result_path = output_dir / "perception_shadow_result.json"
     perception_shadow_report_path = output_dir / "perception_shadow_report.md"
+    planner_gateway_shadow_result_path = output_dir / "planner_gateway_shadow_result.json"
+    planner_gateway_shadow_report_path = output_dir / "planner_gateway_shadow_report.md"
 
     object_info = _simulation_object_info(result)
     robot_asset_info = _robot_asset_info(result)
@@ -94,6 +97,7 @@ def export_simulation_evidence(
     projector_shadow_info = _projector_shadow_info(result)
     real_scene_shadow_info = _real_scene_shadow_info(result)
     perception_shadow_info = _perception_shadow_info(result)
+    planner_gateway_shadow_info = _planner_gateway_shadow_info(result)
     structure_report_requested = bool(robot_prim_inspection_info.get("requested"))
     readiness_requested = bool(articulation_readiness_info.get("requested"))
     state_requested = bool(articulation_state_info.get("requested"))
@@ -111,6 +115,7 @@ def export_simulation_evidence(
     projector_shadow_requested = bool(projector_shadow_info.get("requested"))
     real_scene_shadow_requested = bool(real_scene_shadow_info.get("requested"))
     perception_shadow_requested = bool(perception_shadow_info.get("requested"))
+    planner_gateway_shadow_requested = bool(planner_gateway_shadow_info.get("requested"))
     run_id = output_dir.name
     created_at = result.get("finished_at") or result.get("started_at")
     report_path = result.get("report_path")
@@ -136,6 +141,7 @@ def export_simulation_evidence(
             projector_shadow_info=projector_shadow_info,
             real_scene_shadow_info=real_scene_shadow_info,
             perception_shadow_info=perception_shadow_info,
+            planner_gateway_shadow_info=planner_gateway_shadow_info,
             robot_structure_report_path=structure_report_ref,
             run_id=run_id,
             created_at=created_at,
@@ -345,6 +351,21 @@ def export_simulation_evidence(
         _write_json_artifact(perception_shadow_result_path, perception_shadow_info)
         perception_shadow_report_path.write_text(
             format_perception_shadow_report(perception_shadow_info),
+            encoding="utf-8",
+        )
+    if planner_gateway_shadow_requested:
+        planner_gateway_shadow_info["planner_gateway_shadow_result_path"] = str(
+            planner_gateway_shadow_result_path
+        )
+        planner_gateway_shadow_info["planner_gateway_shadow_report_path"] = str(
+            planner_gateway_shadow_report_path
+        )
+        planner_gateway_shadow_info["planner_gateway_shadow_evidence_files"] = (
+            _planner_gateway_shadow_evidence_files(planner_gateway_shadow_info)
+        )
+        _write_json_artifact(planner_gateway_shadow_result_path, planner_gateway_shadow_info)
+        planner_gateway_shadow_report_path.write_text(
+            format_planner_gateway_shadow_report(planner_gateway_shadow_info),
             encoding="utf-8",
         )
     motion_evidence_summary = summarize_motion_evidence(simulation_micro_motion_info)
@@ -968,6 +989,180 @@ def export_simulation_evidence(
         "perception_shadow_report_path": str(perception_shadow_report_path)
         if perception_shadow_requested
         else None,
+        "planner_gateway_shadow_evidence_available": planner_gateway_shadow_requested,
+        "planner_gateway_shadow_requested": planner_gateway_shadow_requested,
+        "planner_gateway_shadow_status": planner_gateway_shadow_info.get("planner_gateway_shadow_status"),
+        "gateway_request_id": planner_gateway_shadow_info.get("gateway_request_id")
+        if planner_gateway_shadow_requested
+        else None,
+        "task_id": planner_gateway_shadow_info.get("task_id") if planner_gateway_shadow_requested else None,
+        "user_command": planner_gateway_shadow_info.get("user_command")
+        if planner_gateway_shadow_requested
+        else (
+            perception_shadow_info.get("user_command")
+            if perception_shadow_requested
+            else vlm_grounding_info.get("user_command")
+        ),
+        "normalized_command": planner_gateway_shadow_info.get("normalized_command")
+        if planner_gateway_shadow_requested
+        else (
+            perception_shadow_info.get("normalized_command")
+            if perception_shadow_requested
+            else vlm_grounding_info.get("normalized_command")
+        ),
+        "intent_name": planner_gateway_shadow_info.get("intent_name") if planner_gateway_shadow_requested else None,
+        "target_label": planner_gateway_shadow_info.get("target_label")
+        if planner_gateway_shadow_requested
+        else perception_shadow_info.get("target_label")
+        or vlm_grounding_info.get("target_label"),
+        "target_object_id": planner_gateway_shadow_info.get("target_object_id")
+        if planner_gateway_shadow_requested
+        else perception_shadow_info.get("target_object_id")
+        or vlm_grounding_info.get("target_object_id"),
+        "snapshot_id": planner_gateway_shadow_info.get("snapshot_id")
+        if planner_gateway_shadow_requested
+        else perception_shadow_info.get("snapshot_id")
+        or projector_shadow_info.get("snapshot_id")
+        or geometry_validity_info.get("snapshot_id")
+        or vlm_grounding_info.get("snapshot_id")
+        or real_scene_shadow_info.get("snapshot_id")
+        or camera_source_info.get("snapshot_id"),
+        "grounding_id": planner_gateway_shadow_info.get("grounding_id")
+        if planner_gateway_shadow_requested
+        else perception_shadow_info.get("grounding_id")
+        or projector_shadow_info.get("grounding_id")
+        or geometry_validity_info.get("grounding_id")
+        or vlm_grounding_info.get("grounding_id")
+        or real_scene_shadow_info.get("grounding_id"),
+        "scene_version": planner_gateway_shadow_info.get("scene_version")
+        if planner_gateway_shadow_requested
+        else perception_shadow_info.get("scene_version")
+        or projector_shadow_info.get("scene_version")
+        or geometry_validity_info.get("scene_version")
+        or vlm_grounding_info.get("scene_version")
+        or real_scene_shadow_info.get("scene_version")
+        or camera_snapshot_info.get("scene_version")
+        or camera_source_info.get("scene_version")
+        or result.get("scene_version"),
+        "world_frame": planner_gateway_shadow_info.get("world_frame")
+        if planner_gateway_shadow_requested
+        else projector_shadow_info.get("world_frame"),
+        "world_point_m": planner_gateway_shadow_info.get("world_point_m")
+        if planner_gateway_shadow_requested
+        else (
+            perception_shadow_info.get("world_point_m")
+            if perception_shadow_requested
+            else projector_shadow_info.get("world_point_m")
+        ),
+        "bounded_target_point_m": planner_gateway_shadow_info.get("bounded_target_point_m")
+        if planner_gateway_shadow_requested
+        else None,
+        "hover_offset_m": planner_gateway_shadow_info.get("hover_offset_m") if planner_gateway_shadow_requested else None,
+        "workspace_check_passed": planner_gateway_shadow_info.get("workspace_check_passed")
+        if planner_gateway_shadow_requested
+        else (
+            perception_shadow_info.get("workspace_check_passed")
+            if perception_shadow_requested
+            else projector_shadow_info.get("workspace_check_passed")
+        ),
+        "confidence_check_passed": planner_gateway_shadow_info.get("confidence_check_passed")
+        if planner_gateway_shadow_requested
+        else geometry_validity_info.get("confidence_check_passed"),
+        "planner_input_ready": planner_gateway_shadow_info.get("planner_input_ready", False),
+        "manual_confirmation_required": planner_gateway_shadow_info.get(
+            "manual_confirmation_required",
+            True,
+        ),
+        "execution_allowed": False,
+        "ros2_publish_enabled": False,
+        "ros2_publish_attempted": False,
+        "moveit_called": False,
+        "trajectory_generated": planner_gateway_shadow_info.get("trajectory_generated", False)
+        if planner_gateway_shadow_requested
+        else False,
+        "tcp_pose_world_generated": planner_gateway_shadow_info.get("tcp_pose_world_generated", False)
+        if planner_gateway_shadow_requested
+        else False,
+        "joint_targets_generated": planner_gateway_shadow_info.get("joint_targets_generated", False)
+        if planner_gateway_shadow_requested
+        else False,
+        "robot_command_generated": planner_gateway_shadow_info.get("robot_command_generated", False)
+        if planner_gateway_shadow_requested
+        else False,
+        "real_robot_motion_executed": planner_gateway_shadow_info.get("real_robot_motion_executed", False)
+        if planner_gateway_shadow_requested
+        else False,
+        "blocking_reasons": planner_gateway_shadow_info.get("blocking_reasons", [])
+        if planner_gateway_shadow_requested
+        else (
+            perception_shadow_info.get("blocking_reasons", [])
+            if perception_shadow_requested
+            else projector_shadow_info.get("blocking_reasons")
+            if projector_shadow_requested
+            else geometry_validity_info.get("blocking_reasons")
+            if geometry_validity_requested
+            else vlm_grounding_info.get("blocking_reasons")
+            if vlm_grounding_requested
+            else real_scene_shadow_info.get("blocking_reasons")
+            if real_scene_shadow_requested
+            else camera_source_info.get("blocking_reasons")
+            if camera_source_requested
+            else list(lab_readiness_info.get("blocking_reasons") or result.get("blocking_reasons") or [])
+        ),
+        "warnings": planner_gateway_shadow_info.get("warnings", [])
+        if planner_gateway_shadow_requested
+        else (
+            perception_shadow_info.get("warnings", [])
+            if perception_shadow_requested
+            else projector_shadow_info.get("warnings", [])
+            if projector_shadow_requested
+            else geometry_validity_info.get("warnings", [])
+            if geometry_validity_requested
+            else vlm_grounding_info.get("warnings", [])
+            if vlm_grounding_requested
+            else real_scene_shadow_info.get("warnings", [])
+            if real_scene_shadow_requested
+            else camera_source_info.get("warnings", [])
+            if camera_source_requested
+            else []
+        ),
+        "next_safe_action": planner_gateway_shadow_info.get("next_safe_action")
+        if planner_gateway_shadow_requested
+        else (
+            perception_shadow_info.get("next_safe_action")
+            if perception_shadow_requested
+            else projector_shadow_info.get("next_safe_action")
+            if projector_shadow_requested
+            else geometry_validity_info.get("next_safe_action")
+            if geometry_validity_requested
+            else vlm_grounding_info.get("next_safe_action")
+            if vlm_grounding_requested
+            else real_scene_shadow_info.get("next_safe_action")
+            if real_scene_shadow_requested
+            else camera_source_info.get("next_safe_action")
+            if camera_source_requested
+            else lab_readiness_info.get("next_safe_action")
+        ),
+        "replay_ready": planner_gateway_shadow_info.get("replay_ready", False)
+        if planner_gateway_shadow_requested
+        else (
+            perception_shadow_info.get("replay_ready", False)
+            if perception_shadow_requested
+            else real_scene_shadow_info.get("replay_ready", False)
+            if real_scene_shadow_requested
+            else simulated_task_execution_info.get("replay_ready", False)
+        ),
+        "planner_gateway_shadow_evidence_files": (
+            _planner_gateway_shadow_evidence_files(planner_gateway_shadow_info)
+            if planner_gateway_shadow_requested
+            else []
+        ),
+        "planner_gateway_shadow_result_path": str(planner_gateway_shadow_result_path)
+        if planner_gateway_shadow_requested
+        else None,
+        "planner_gateway_shadow_report_path": str(planner_gateway_shadow_report_path)
+        if planner_gateway_shadow_requested
+        else None,
         "screenshot_before_path": None,
         "screenshot_after_path": None,
         "video_path": None,
@@ -1020,6 +1215,8 @@ def export_simulation_evidence(
         "real_scene_shadow_report_path": real_scene_shadow_report_path,
         "perception_shadow_result_path": perception_shadow_result_path,
         "perception_shadow_report_path": perception_shadow_report_path,
+        "planner_gateway_shadow_result_path": planner_gateway_shadow_result_path,
+        "planner_gateway_shadow_report_path": planner_gateway_shadow_report_path,
     }
 
 
@@ -1875,6 +2072,96 @@ def _perception_shadow_evidence_files(perception_shadow_info: Dict[str, Any]) ->
     ]
 
 
+def _planner_gateway_shadow_info(result: Dict[str, Any]) -> Dict[str, Any]:
+    gateway = result.get("planner_gateway_shadow") if isinstance(result.get("planner_gateway_shadow"), dict) else {}
+    return {
+        **gateway,
+        "requested": result.get("planner_gateway_shadow_requested", gateway.get("requested", False)) is True,
+        "planner_gateway_shadow_requested": result.get(
+            "planner_gateway_shadow_requested",
+            gateway.get("planner_gateway_shadow_requested", False),
+        )
+        is True,
+        "planner_gateway_shadow_status": result.get(
+            "planner_gateway_shadow_status",
+            gateway.get("planner_gateway_shadow_status", "NOT_REQUESTED"),
+        ),
+        "gateway_request_id": result.get(
+            "planner_gateway_shadow_gateway_request_id",
+            gateway.get("gateway_request_id"),
+        ),
+        "task_id": result.get("planner_gateway_shadow_task_id", gateway.get("task_id")),
+        "user_command": gateway.get("user_command"),
+        "normalized_command": gateway.get("normalized_command"),
+        "intent_name": result.get("planner_gateway_shadow_intent_name", gateway.get("intent_name")),
+        "target_label": result.get("planner_gateway_shadow_target_label", gateway.get("target_label")),
+        "target_object_id": gateway.get("target_object_id"),
+        "snapshot_id": result.get("planner_gateway_shadow_snapshot_id", gateway.get("snapshot_id")),
+        "grounding_id": result.get("planner_gateway_shadow_grounding_id", gateway.get("grounding_id")),
+        "scene_version": result.get("planner_gateway_shadow_scene_version", gateway.get("scene_version")),
+        "world_frame": result.get("planner_gateway_shadow_world_frame", gateway.get("world_frame")),
+        "camera_frame": gateway.get("camera_frame"),
+        "world_point_m": result.get("planner_gateway_shadow_world_point_m", gateway.get("world_point_m")),
+        "bounded_target_point_m": result.get(
+            "planner_gateway_shadow_bounded_target_point_m",
+            gateway.get("bounded_target_point_m"),
+        ),
+        "hover_offset_m": gateway.get("hover_offset_m"),
+        "workspace_check_passed": result.get(
+            "planner_gateway_shadow_workspace_check_passed",
+            gateway.get("workspace_check_passed"),
+        ),
+        "confidence_check_passed": result.get(
+            "planner_gateway_shadow_confidence_check_passed",
+            gateway.get("confidence_check_passed"),
+        ),
+        "ttl_check_passed": gateway.get("ttl_check_passed"),
+        "semantic_gate_passed": gateway.get("semantic_gate_passed", False) is True,
+        "geometry_validity_status": gateway.get("geometry_validity_status"),
+        "projector_status": gateway.get("projector_status"),
+        "planner_input_ready": result.get("planner_input_ready", gateway.get("planner_input_ready", False)) is True,
+        "manual_confirmation_required": result.get(
+            "planner_gateway_shadow_manual_confirmation_required",
+            gateway.get("manual_confirmation_required", True),
+        )
+        is True,
+        "execution_allowed": gateway.get("execution_allowed", False) is True,
+        "ros2_publish_enabled": gateway.get("ros2_publish_enabled", False) is True,
+        "ros2_publish_attempted": gateway.get("ros2_publish_attempted", False) is True,
+        "moveit_called": gateway.get("moveit_called", False) is True,
+        "trajectory_generated": gateway.get("trajectory_generated", False) is True,
+        "tcp_pose_world_generated": gateway.get("tcp_pose_world_generated", False) is True,
+        "joint_targets_generated": gateway.get("joint_targets_generated", False) is True,
+        "robot_command_generated": gateway.get("robot_command_generated", False) is True,
+        "real_robot_motion_executed": gateway.get("real_robot_motion_executed", False) is True,
+        "blocking_reasons": result.get(
+            "planner_gateway_shadow_blocking_reasons",
+            gateway.get("blocking_reasons", []),
+        ),
+        "warnings": result.get("planner_gateway_shadow_warnings", gateway.get("warnings", [])),
+        "next_safe_action": result.get(
+            "planner_gateway_shadow_next_safe_action",
+            gateway.get("next_safe_action"),
+        ),
+        "replay_ready": result.get("planner_gateway_shadow_replay_ready", gateway.get("replay_ready", False)) is True,
+    }
+
+
+def _planner_gateway_shadow_evidence_files(
+    planner_gateway_shadow_info: Dict[str, Any],
+) -> list[Dict[str, str | None]]:
+    return [
+        {
+            "name": "planner_gateway_shadow_result.json",
+            "path": planner_gateway_shadow_info.get("planner_gateway_shadow_result_path"),
+        },
+        {
+            "name": "planner_gateway_shadow_report.md",
+            "path": planner_gateway_shadow_info.get("planner_gateway_shadow_report_path"),
+        },
+    ]
+
+
 def _latest_execution_summary(
     execution_info: Dict[str, Any],
     precheck_info: Dict[str, Any],
@@ -1984,6 +2271,7 @@ def _build_summary_markdown(
     projector_shadow_info: Dict[str, Any],
     real_scene_shadow_info: Dict[str, Any],
     perception_shadow_info: Dict[str, Any],
+    planner_gateway_shadow_info: Dict[str, Any],
     robot_structure_report_path: str | None,
     run_id: str,
     created_at: str | None,
@@ -2328,6 +2616,41 @@ def _build_summary_markdown(
             f"- joint_targets_generated: {_format_value(perception_shadow_info.get('joint_targets_generated'))}",
             f"- tcp_pose_world_generated: {_format_value(perception_shadow_info.get('tcp_pose_world_generated'))}",
             "This V2.9.5 full perception shadow pipeline composes text command, camera source, camera snapshot, VLM grounding, semantic gate, geometry validity, and 2D-to-3D projector evidence into world_point_m evidence. It is no-motion, no-live-camera, no-live-VLM, no-real-robot, no-ROS2, and no-MoveIt evidence only; it does not generate trajectory, tcp_pose_world, URScript, joint targets, or robot commands.",
+            "",
+            "## Planner Gateway Shadow Summary",
+            "",
+            f"- planner_gateway_shadow_evidence_available: {_format_value(planner_gateway_shadow_info.get('requested'))}",
+            f"- planner_gateway_shadow_status: {_format_value(planner_gateway_shadow_info.get('planner_gateway_shadow_status'))}",
+            f"- gateway_request_id: {_format_value(planner_gateway_shadow_info.get('gateway_request_id'))}",
+            f"- task_id: {_format_value(planner_gateway_shadow_info.get('task_id'))}",
+            f"- user_command: {_format_value(planner_gateway_shadow_info.get('user_command'))}",
+            f"- intent_name: {_format_value(planner_gateway_shadow_info.get('intent_name'))}",
+            f"- target_label: {_format_value(planner_gateway_shadow_info.get('target_label'))}",
+            f"- snapshot_id: {_format_value(planner_gateway_shadow_info.get('snapshot_id'))}",
+            f"- grounding_id: {_format_value(planner_gateway_shadow_info.get('grounding_id'))}",
+            f"- scene_version: {_format_value(planner_gateway_shadow_info.get('scene_version'))}",
+            f"- world_frame: {_format_value(planner_gateway_shadow_info.get('world_frame'))}",
+            f"- world_point_m: {_format_value(planner_gateway_shadow_info.get('world_point_m'))}",
+            f"- bounded_target_point_m: {_format_value(planner_gateway_shadow_info.get('bounded_target_point_m'))}",
+            f"- hover_offset_m: {_format_value(planner_gateway_shadow_info.get('hover_offset_m'))}",
+            f"- workspace_check_passed: {_format_value(planner_gateway_shadow_info.get('workspace_check_passed'))}",
+            f"- confidence_check_passed: {_format_value(planner_gateway_shadow_info.get('confidence_check_passed'))}",
+            f"- planner_input_ready: {_format_value(planner_gateway_shadow_info.get('planner_input_ready'))}",
+            f"- manual_confirmation_required: {_format_value(planner_gateway_shadow_info.get('manual_confirmation_required'))}",
+            f"- execution_allowed: {_format_value(planner_gateway_shadow_info.get('execution_allowed'))}",
+            f"- ros2_publish_enabled: {_format_value(planner_gateway_shadow_info.get('ros2_publish_enabled'))}",
+            f"- ros2_publish_attempted: {_format_value(planner_gateway_shadow_info.get('ros2_publish_attempted'))}",
+            f"- moveit_called: {_format_value(planner_gateway_shadow_info.get('moveit_called'))}",
+            f"- trajectory_generated: {_format_value(planner_gateway_shadow_info.get('trajectory_generated'))}",
+            f"- tcp_pose_world_generated: {_format_value(planner_gateway_shadow_info.get('tcp_pose_world_generated'))}",
+            f"- joint_targets_generated: {_format_value(planner_gateway_shadow_info.get('joint_targets_generated'))}",
+            f"- robot_command_generated: {_format_value(planner_gateway_shadow_info.get('robot_command_generated'))}",
+            f"- real_robot_motion_executed: {_format_value(planner_gateway_shadow_info.get('real_robot_motion_executed'))}",
+            f"- blocking_reasons: {_format_value(planner_gateway_shadow_info.get('blocking_reasons'))}",
+            f"- warnings: {_format_value(planner_gateway_shadow_info.get('warnings'))}",
+            f"- next_safe_action: {_format_value(planner_gateway_shadow_info.get('next_safe_action'))}",
+            f"- replay_ready: {_format_value(planner_gateway_shadow_info.get('replay_ready'))}",
+            "This V2.10.0 Planner Gateway Shadow Contract converts perception shadow world_point_m into bounded planner input evidence only. It is no-ROS2-publish, no-MoveIt, no-real-robot, and no-trajectory evidence; it does not generate tcp_pose_world, URScript, joint targets, or robot commands.",
             "",
             "## Readiness Evidence Summary",
             "",

@@ -1808,6 +1808,48 @@ safety flags proving no robot command, trajectory, joint targets, or
 V2.9.5 is the final perception-side integration stage before the planned
 V2.10.x ROS2 Planner Gateway shadow bridge.
 
+## TETO V2.10.0 Planner Gateway Shadow Contract
+
+TETO V2.10.0 adds the Planner Gateway Shadow Contract. It converts the V2.9.5
+full perception shadow pipeline output, especially validated `world_point_m`,
+into bounded Planner Gateway input evidence that a future gateway can consume.
+
+The generated shadow request is planner input metadata, not an execution
+command. It records fields such as `intent_name: hover_to_object`,
+`target_world_point_m`, `hover_offset_m`, `bounded_target_point_m`,
+`world_frame`, conservative speed and acceleration scales, `must_reconfirm:
+true`, `execution_allowed: false`, and `mode: shadow_only`.
+
+V2.10.0 is not ROS2 bridge live publish, not MoveIt planning, and not real UR5
+execution. It does not publish ROS2 topics, services, or actions; does not call
+MoveIt; does not connect to RTDE, URScript, Dashboard, or a real robot backend;
+and does not generate trajectory, `tcp_pose_world`, URScript, joint targets, or
+robot commands.
+
+Planner Gateway shadow positive smoke:
+
+```bash
+python3 scripts/run_first_simulation_execution.py \
+  --check-planner-gateway-shadow \
+  --planner-gateway-shadow-config configs/planner_gateway_shadow_positive.example.yaml \
+  --planner-gateway-shadow-report \
+  --perception-shadow-result examples/planner_gateway_shadow/perception_positive_result.json \
+  --output-dir /tmp/teto_v2100_planner_gateway_shadow_positive
+```
+
+The evidence bundle includes `planner_gateway_shadow_result.json`,
+`planner_gateway_shadow_report.md`, `summary.md`, and
+`evidence_manifest.json`. The report states the no-ROS2-publish / no-MoveIt /
+no-real-robot / no-trajectory safety boundary, and the manifest records the
+gateway request id, task id, intent, perception identifiers, `world_point_m`,
+`bounded_target_point_m`, workspace and confidence checks, manual confirmation
+requirement, blocking reasons, warnings, replay readiness, and safety flags
+proving no trajectory, `tcp_pose_world`, joint targets, robot commands, ROS2
+publish, MoveIt call, or real robot motion occurred.
+
+V2.10.0 is the first step of the V2.10.x ROS2/Planner Gateway shadow bridge
+line. It remains shadow-only and evidence-only.
+
 Demo commands accept common image formats directly. TETO automatically
 creates a cached RGB JPEG under `data/processed/auto/`, with EXIF orientation
 applied, long edge resized, animated images reduced to the first frame, and
@@ -2028,4 +2070,5 @@ python3 -m src.cli prepare-images --input-dir data/raw --output-dir data/process
 - V2.9.3 = camera source adapter / manual snapshot no-motion
 - V2.9.4 = local/mock VLM grounding adapter no-motion
 - V2.9.5 = full perception shadow pipeline
+- V2.10.0 = planner gateway shadow contract
 - Future ROS2 / MoveIt2 / RTDE / URScript / real UR5 controller integration remains outside the current implemented safety boundary

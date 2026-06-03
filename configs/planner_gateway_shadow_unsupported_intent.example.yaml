@@ -1,0 +1,14 @@
+planner_gateway_shadow:
+  gateway_request_id: planner_shadow_unsupported_intent_001
+  task_id: planner_shadow_task_unsupported_intent_001
+  intent_name: grasp_object
+  allowed_intents:
+    - hover_to_object
+  world_frame: base_link
+  hover_offset_m: 0.08
+  confidence_threshold: 0.5
+  manual_confirmation_required: true
+  execution_allowed: false
+  ros2_publish_enabled: false
+  moveit_called: false
+

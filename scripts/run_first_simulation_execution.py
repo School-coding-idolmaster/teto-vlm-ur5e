@@ -19,7 +19,7 @@ from src.simulation_runtime import DEFAULT_SIMULATION_TASK, CURRENT_TETO_VERSION
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run TETO V2.9.5 full perception shadow pipeline, VLM grounding adapter, camera source adapter, projector shadow, geometry validity, real-scene no-motion shadow, and safe simulation evidence smoke test."
+        description="Run TETO V2.10.0 planner gateway shadow contract, full perception shadow pipeline, and no-motion simulation evidence smoke tests."
     )
     parser.add_argument("--dry-run", action="store_true", help="Do not import Isaac; produce a test execution report.")
     parser.add_argument("--no-isaac", action="store_true", help="Pure Python test mode without Isaac imports.")
@@ -120,7 +120,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--execution-max-attempts",
         type=int,
         default=1,
-        help="Maximum attempts metadata. V2.9.5 supports 1 and does not auto-retry.",
+        help="Maximum attempts metadata. V2.10.0 supports 1 and does not auto-retry.",
     )
     parser.add_argument(
         "--execution-enable-retry-recommendation",
@@ -189,6 +189,24 @@ def build_parser() -> argparse.ArgumentParser:
         "--allow-live-vlm",
         action="store_true",
         help="Declare live VLM allowance metadata only; V2.9.5 still never calls a live model.",
+    )
+    parser.add_argument(
+        "--check-planner-gateway-shadow",
+        action="store_true",
+        help="Generate bounded Planner Gateway shadow input evidence from perception shadow result JSON.",
+    )
+    parser.add_argument(
+        "--planner-gateway-shadow-config",
+        help="Path to Planner Gateway shadow YAML/JSON config.",
+    )
+    parser.add_argument(
+        "--planner-gateway-shadow-report",
+        action="store_true",
+        help="Generate Planner Gateway shadow contract evidence report.",
+    )
+    parser.add_argument(
+        "--perception-shadow-result",
+        help="Path to an offline perception_shadow_result JSON/YAML file.",
     )
     parser.add_argument(
         "--check-camera-source-adapter",
@@ -280,7 +298,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
     if args.execution_max_attempts != 1:
-        raise ValueError("--execution-max-attempts currently supports only 1 in TETO V2.9.5")
+        raise ValueError("--execution-max-attempts currently supports only 1 in TETO V2.10.0")
     simulation_task = _load_simulation_task(args.task_json)
     semantic_contract = None
     semantic_contract_path = None
@@ -361,6 +379,10 @@ def main() -> int:
         run_perception_shadow_pipeline=args.run_perception_shadow_pipeline,
         perception_shadow_config=args.perception_shadow_config,
         perception_shadow_report=args.perception_shadow_report,
+        check_planner_gateway_shadow=args.check_planner_gateway_shadow,
+        planner_gateway_shadow_config=args.planner_gateway_shadow_config,
+        planner_gateway_shadow_report=args.planner_gateway_shadow_report,
+        perception_shadow_result=args.perception_shadow_result,
         output_dir=args.output_dir,
         write_report=True,
         demo_command=shlex.join([sys.executable, *sys.argv]),
@@ -582,6 +604,23 @@ def print_summary(result: dict, report_path: Path) -> None:
     print(f"perception_shadow_blocking_reasons: {result.get('perception_shadow_blocking_reasons')}")
     print(f"perception_shadow_result_path: {result.get('perception_shadow_result_path')}")
     print(f"perception_shadow_report_path: {result.get('perception_shadow_report_path')}")
+    gateway = result.get("planner_gateway_shadow") or {}
+    print(f"planner_gateway_shadow_requested: {result.get('planner_gateway_shadow_requested')}")
+    print(f"planner_gateway_shadow_status: {result.get('planner_gateway_shadow_status')}")
+    print(f"planner_gateway_shadow_gateway_request_id: {result.get('planner_gateway_shadow_gateway_request_id')}")
+    print(f"planner_gateway_shadow_task_id: {result.get('planner_gateway_shadow_task_id')}")
+    print(f"planner_gateway_shadow_intent_name: {result.get('planner_gateway_shadow_intent_name')}")
+    print(f"planner_gateway_shadow_target_label: {result.get('planner_gateway_shadow_target_label')}")
+    print(f"planner_gateway_shadow_snapshot_id: {result.get('planner_gateway_shadow_snapshot_id')}")
+    print(f"planner_gateway_shadow_grounding_id: {result.get('planner_gateway_shadow_grounding_id')}")
+    print(f"planner_gateway_shadow_scene_version: {result.get('planner_gateway_shadow_scene_version')}")
+    print(f"planner_gateway_shadow_world_frame: {result.get('planner_gateway_shadow_world_frame')}")
+    print(f"planner_gateway_shadow_world_point_m: {gateway.get('world_point_m')}")
+    print(f"planner_gateway_shadow_bounded_target_point_m: {gateway.get('bounded_target_point_m')}")
+    print(f"planner_input_ready: {result.get('planner_input_ready')}")
+    print(f"planner_gateway_shadow_blocking_reasons: {result.get('planner_gateway_shadow_blocking_reasons')}")
+    print(f"planner_gateway_shadow_result_path: {result.get('planner_gateway_shadow_result_path')}")
+    print(f"planner_gateway_shadow_report_path: {result.get('planner_gateway_shadow_report_path')}")
     print(f"Report: {report_path}")
     if result.get("blocking_reasons"):
         print(f"Blocking reasons: {', '.join(result['blocking_reasons'])}")

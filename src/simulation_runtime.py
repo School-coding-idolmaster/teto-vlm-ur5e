@@ -18,6 +18,10 @@ from src.perception_shadow_pipeline import (
     build_perception_shadow_request,
     evaluate_perception_shadow_pipeline,
 )
+from src.planner_gateway_shadow import (
+    build_planner_gateway_shadow_request,
+    evaluate_planner_gateway_shadow,
+)
 from src.projector_shadow import build_projector_shadow_request, evaluate_projector_shadow
 from src.real_scene_shadow_pipeline import (
     build_real_scene_shadow_request,
@@ -59,7 +63,7 @@ from src.vlm_grounding_adapter import build_vlm_grounding_adapter_request, evalu
 
 
 REPORT_VERSION = "teto_simulation_execution.v1"
-CURRENT_TETO_VERSION = "TETO V2.9.5"
+CURRENT_TETO_VERSION = "TETO V2.10.0"
 DEFAULT_STEPS = 5
 DEFAULT_SIMULATION_OBJECT_TYPE = "cube"
 DEFAULT_CUBE_PRIM_PATH = "/World/TETO_Cube"
@@ -128,6 +132,7 @@ def build_simulation_execution_result(
     projector_shadow_metadata: Dict[str, Any] | None = None,
     real_scene_shadow_metadata: Dict[str, Any] | None = None,
     perception_shadow_metadata: Dict[str, Any] | None = None,
+    planner_gateway_shadow_metadata: Dict[str, Any] | None = None,
     started_at: str | None = None,
     finished_at: str | None = None,
 ) -> Dict[str, Any]:
@@ -174,6 +179,7 @@ def build_simulation_execution_result(
     result.update(projector_shadow_metadata or _projector_shadow_report_fields())
     result.update(real_scene_shadow_metadata or _real_scene_shadow_report_fields())
     result.update(perception_shadow_metadata or _perception_shadow_report_fields())
+    result.update(planner_gateway_shadow_metadata or _planner_gateway_shadow_report_fields())
     if (
         result.get("semantic_simulation_bridge_requested") is True
         and result.get("semantic_gate_passed") is not True
@@ -281,6 +287,10 @@ def run_first_simulation_execution(
     run_perception_shadow_pipeline: bool = False,
     perception_shadow_config: str | Path | None = None,
     perception_shadow_report: bool = False,
+    check_planner_gateway_shadow: bool = False,
+    planner_gateway_shadow_config: str | Path | None = None,
+    planner_gateway_shadow_report: bool = False,
+    perception_shadow_result: str | Path | None = None,
     output_dir: str | Path | None = None,
     write_report: bool = False,
     demo_command: str | None = None,
@@ -294,6 +304,7 @@ def run_first_simulation_execution(
     geometry_validity_requested = check_geometry_validity or geometry_validity_report
     real_scene_shadow_requested = run_real_scene_shadow or real_scene_shadow_report
     perception_shadow_requested = run_perception_shadow_pipeline or perception_shadow_report
+    planner_gateway_shadow_requested = check_planner_gateway_shadow or planner_gateway_shadow_report
     lab_readiness_requested = (
         check_lab_readiness
         or check_camera_readiness
@@ -309,6 +320,7 @@ def run_first_simulation_execution(
         or projector_shadow_requested
         or real_scene_shadow_requested
         or perception_shadow_requested
+        or planner_gateway_shadow_requested
     ) and not dry_run:
         no_isaac = True
     lab_readiness_request = build_lab_readiness_request(
@@ -393,6 +405,18 @@ def run_first_simulation_execution(
     perception_shadow_metadata = _perception_shadow_report_fields(
         requested=perception_shadow_requested,
         perception=evaluate_perception_shadow_pipeline(perception_shadow_request),
+    )
+    planner_gateway_shadow_request = build_planner_gateway_shadow_request(
+        requested=planner_gateway_shadow_requested,
+        config_path=planner_gateway_shadow_config,
+        perception_shadow_result_path=perception_shadow_result,
+        perception_shadow_result=perception_shadow_metadata.get("perception_shadow")
+        if perception_shadow_requested and not perception_shadow_result
+        else None,
+    )
+    planner_gateway_shadow_metadata = _planner_gateway_shadow_report_fields(
+        requested=planner_gateway_shadow_requested,
+        gateway=evaluate_planner_gateway_shadow(planner_gateway_shadow_request),
     )
     effective_move_object = move_object or move_cube
     effective_spawn_cube = spawn_cube or effective_move_object
@@ -515,6 +539,7 @@ def run_first_simulation_execution(
                 projector_shadow_metadata=projector_shadow_metadata,
                 real_scene_shadow_metadata=real_scene_shadow_metadata,
                 perception_shadow_metadata=perception_shadow_metadata,
+                planner_gateway_shadow_metadata=planner_gateway_shadow_metadata,
                 error_code="E_INVALID_STEPS",
                 error_message="steps must be a positive integer",
                 started_at=started_at,
@@ -569,6 +594,7 @@ def run_first_simulation_execution(
                 projector_shadow_metadata=projector_shadow_metadata,
                 real_scene_shadow_metadata=real_scene_shadow_metadata,
                 perception_shadow_metadata=perception_shadow_metadata,
+                planner_gateway_shadow_metadata=planner_gateway_shadow_metadata,
                 error_code="E_INVALID_SIMULATION_TASK",
                 error_message=f"missing simulation task fields: {', '.join(missing_fields)}",
                 started_at=started_at,
@@ -662,6 +688,7 @@ def run_first_simulation_execution(
                     projector_shadow_metadata=projector_shadow_metadata,
                     real_scene_shadow_metadata=real_scene_shadow_metadata,
                     perception_shadow_metadata=perception_shadow_metadata,
+                    planner_gateway_shadow_metadata=planner_gateway_shadow_metadata,
                     error_code="E_ROBOT_ASSET_LOAD_FAILED",
                     error_message="robot asset path is unavailable",
                     started_at=started_at,
@@ -702,6 +729,7 @@ def run_first_simulation_execution(
                 projector_shadow_metadata=projector_shadow_metadata,
                 real_scene_shadow_metadata=real_scene_shadow_metadata,
                 perception_shadow_metadata=perception_shadow_metadata,
+                planner_gateway_shadow_metadata=planner_gateway_shadow_metadata,
                 started_at=started_at,
                 finished_at=_timestamp(),
             ),
@@ -767,6 +795,8 @@ def write_simulation_execution_result(
     vlm_grounding_report_path = run_dir / "vlm_grounding_report.md"
     perception_shadow_result_path = run_dir / "perception_shadow_result.json"
     perception_shadow_report_path = run_dir / "perception_shadow_report.md"
+    planner_gateway_shadow_result_path = run_dir / "planner_gateway_shadow_result.json"
+    planner_gateway_shadow_report_path = run_dir / "planner_gateway_shadow_report.md"
     result["report_path"] = str(report_path)
     structure_report_requested = bool(result.get("robot_prim_inspection_requested"))
     result["robot_structure_report_generated"] = structure_report_requested
@@ -846,6 +876,20 @@ def write_simulation_execution_result(
     if isinstance(result.get("perception_shadow"), dict):
         result["perception_shadow"]["perception_shadow_result_path"] = result["perception_shadow_result_path"]
         result["perception_shadow"]["perception_shadow_report_path"] = result["perception_shadow_report_path"]
+    planner_gateway_shadow_requested = bool(result.get("planner_gateway_shadow_requested"))
+    result["planner_gateway_shadow_result_path"] = (
+        str(planner_gateway_shadow_result_path) if planner_gateway_shadow_requested else None
+    )
+    result["planner_gateway_shadow_report_path"] = (
+        str(planner_gateway_shadow_report_path) if planner_gateway_shadow_requested else None
+    )
+    if isinstance(result.get("planner_gateway_shadow"), dict):
+        result["planner_gateway_shadow"]["planner_gateway_shadow_result_path"] = result[
+            "planner_gateway_shadow_result_path"
+        ]
+        result["planner_gateway_shadow"]["planner_gateway_shadow_report_path"] = result[
+            "planner_gateway_shadow_report_path"
+        ]
     result["semantic_bridge"] = _semantic_bridge_info(result)
     result["motion"] = _motion_info(result)
     result["precheck"] = _precheck_info(result)
@@ -1899,6 +1943,60 @@ def _perception_shadow_report_fields(
         "perception_shadow_next_safe_action": perception.get("next_safe_action"),
         "no_motion_perception_passed": perception.get("no_motion_perception_passed", False) is True,
         "perception_shadow_replay_ready": perception.get("replay_ready", False) is True,
+    }
+
+
+def _planner_gateway_shadow_report_fields(
+    *,
+    requested: bool = False,
+    gateway: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    gateway = gateway if isinstance(gateway, dict) else {}
+    return {
+        "planner_gateway_shadow_requested": requested,
+        "planner_gateway_shadow": gateway
+        or {
+            "requested": False,
+            "planner_gateway_shadow_requested": False,
+            "planner_gateway_shadow_status": "NOT_REQUESTED",
+            "planner_input_ready": False,
+            "manual_confirmation_required": True,
+            "execution_allowed": False,
+            "ros2_publish_enabled": False,
+            "ros2_publish_attempted": False,
+            "moveit_called": False,
+            "trajectory_generated": False,
+            "tcp_pose_world_generated": False,
+            "joint_targets_generated": False,
+            "robot_command_generated": False,
+            "real_robot_motion_executed": False,
+            "blocking_reasons": [],
+            "warnings": [],
+            "replay_ready": False,
+        },
+        "planner_gateway_shadow_status": gateway.get("planner_gateway_shadow_status", "NOT_REQUESTED"),
+        "planner_gateway_shadow_gateway_request_id": gateway.get("gateway_request_id"),
+        "planner_gateway_shadow_task_id": gateway.get("task_id"),
+        "planner_gateway_shadow_intent_name": gateway.get("intent_name"),
+        "planner_gateway_shadow_target_label": gateway.get("target_label"),
+        "planner_gateway_shadow_snapshot_id": gateway.get("snapshot_id"),
+        "planner_gateway_shadow_grounding_id": gateway.get("grounding_id"),
+        "planner_gateway_shadow_scene_version": gateway.get("scene_version"),
+        "planner_gateway_shadow_world_frame": gateway.get("world_frame"),
+        "planner_gateway_shadow_world_point_m": gateway.get("world_point_m"),
+        "planner_gateway_shadow_bounded_target_point_m": gateway.get("bounded_target_point_m"),
+        "planner_gateway_shadow_workspace_check_passed": gateway.get("workspace_check_passed"),
+        "planner_gateway_shadow_confidence_check_passed": gateway.get("confidence_check_passed"),
+        "planner_input_ready": gateway.get("planner_input_ready", False) is True,
+        "planner_gateway_shadow_manual_confirmation_required": gateway.get(
+            "manual_confirmation_required",
+            True,
+        )
+        is True,
+        "planner_gateway_shadow_blocking_reasons": list(gateway.get("blocking_reasons") or []),
+        "planner_gateway_shadow_warnings": list(gateway.get("warnings") or []),
+        "planner_gateway_shadow_next_safe_action": gateway.get("next_safe_action"),
+        "planner_gateway_shadow_replay_ready": gateway.get("replay_ready", False) is True,
     }
 
 
