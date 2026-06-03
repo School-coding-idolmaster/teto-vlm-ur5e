@@ -1,0 +1,18 @@
+perception_shadow_pipeline:
+  user_command: hover over the red mug
+  camera_source_config: configs/perception_shadow_camera_source_fixture.yaml
+  vlm_grounding_config: configs/perception_shadow_vlm_grounding_fixture.yaml
+  geometry_validity:
+    depth_required: true
+  projector_shadow:
+    camera_info_ref: examples/projector_camera_info_example.json
+    depth_sample:
+      depth_value_m: 0.8
+    mock_tf_ref: examples/projector_mock_tf_example.json
+    camera_frame: camera_color_optical_frame
+    world_frame: mock_world
+    workspace_m:
+      x: [0.5, 1.0]
+      y: [0.5, 1.0]
+      z: [0.0, 2.5]
+

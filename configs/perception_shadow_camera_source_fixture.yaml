@@ -1,0 +1,21 @@
+camera_source_adapter:
+  source_mode: offline_file
+  snapshot_id: perception_fixture_snapshot_001
+  scene_version: perception_fixture_scene_v1
+  capture_timestamp: "2099-01-01T00:00:00Z"
+  frame_id: perception_fixture_frame_001
+  camera_frame: camera_color_optical_frame
+  image_ref: examples/camera_source/sample_image_ref.json
+  depth_ref: examples/camera_source/sample_depth_ref.json
+  camera_info_ref: examples/camera_source/sample_camera_info.json
+  width: 640
+  height: 480
+  depth_available: true
+  camera_info_available: true
+  depth_required: true
+  capture_backend: offline_file
+  capture_method: declared_snapshot_manifest
+  allow_live_camera_capture: false
+  continuous_capture_enabled: false
+  live_vlm_called: false
+

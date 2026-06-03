@@ -1,0 +1,11 @@
+{
+  "bundle_id": "perception_low_confidence_bundle_001",
+  "config_ref": "configs/perception_shadow_low_confidence.example.yaml",
+  "expected_status": "BLOCKED",
+  "expected_error_code": "E_LOW_CONFIDENCE",
+  "offline_only": true,
+  "live_camera_used": false,
+  "live_vlm_called": false,
+  "robot_command_generated": false
+}
+

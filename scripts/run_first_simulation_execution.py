@@ -19,7 +19,7 @@ from src.simulation_runtime import DEFAULT_SIMULATION_TASK, CURRENT_TETO_VERSION
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run TETO V2.9.4 VLM grounding adapter, camera source adapter, projector shadow, geometry validity, real-scene no-motion shadow, and safe simulation evidence smoke test."
+        description="Run TETO V2.9.5 full perception shadow pipeline, VLM grounding adapter, camera source adapter, projector shadow, geometry validity, real-scene no-motion shadow, and safe simulation evidence smoke test."
     )
     parser.add_argument("--dry-run", action="store_true", help="Do not import Isaac; produce a test execution report.")
     parser.add_argument("--no-isaac", action="store_true", help="Pure Python test mode without Isaac imports.")
@@ -120,7 +120,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--execution-max-attempts",
         type=int,
         default=1,
-        help="Maximum attempts metadata. V2.9.4 supports 1 and does not auto-retry.",
+        help="Maximum attempts metadata. V2.9.5 supports 1 and does not auto-retry.",
     )
     parser.add_argument(
         "--execution-enable-retry-recommendation",
@@ -188,7 +188,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--allow-live-vlm",
         action="store_true",
-        help="Declare live VLM allowance metadata only; V2.9.4 still never calls a live model.",
+        help="Declare live VLM allowance metadata only; V2.9.5 still never calls a live model.",
     )
     parser.add_argument(
         "--check-camera-source-adapter",
@@ -260,13 +260,27 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Generate real-scene no-motion shadow evidence report.",
     )
+    parser.add_argument(
+        "--run-perception-shadow-pipeline",
+        action="store_true",
+        help="Run the full text + camera + grounding + geometry + projector no-motion shadow pipeline.",
+    )
+    parser.add_argument(
+        "--perception-shadow-config",
+        help="Path to full perception shadow pipeline YAML/JSON config.",
+    )
+    parser.add_argument(
+        "--perception-shadow-report",
+        action="store_true",
+        help="Generate full perception shadow pipeline evidence report.",
+    )
     return parser
 
 
 def main() -> int:
     args = build_parser().parse_args()
     if args.execution_max_attempts != 1:
-        raise ValueError("--execution-max-attempts currently supports only 1 in TETO V2.9.4")
+        raise ValueError("--execution-max-attempts currently supports only 1 in TETO V2.9.5")
     simulation_task = _load_simulation_task(args.task_json)
     semantic_contract = None
     semantic_contract_path = None
@@ -344,6 +358,9 @@ def main() -> int:
         real_scene_shadow_config=args.real_scene_shadow_config,
         grounding_result=args.grounding_result,
         real_scene_shadow_report=args.real_scene_shadow_report,
+        run_perception_shadow_pipeline=args.run_perception_shadow_pipeline,
+        perception_shadow_config=args.perception_shadow_config,
+        perception_shadow_report=args.perception_shadow_report,
         output_dir=args.output_dir,
         write_report=True,
         demo_command=shlex.join([sys.executable, *sys.argv]),
@@ -545,6 +562,26 @@ def print_summary(result: dict, report_path: Path) -> None:
     print(f"no_motion_shadow_passed: {result.get('no_motion_shadow_passed')}")
     print(f"real_scene_shadow_replay_ready: {result.get('real_scene_shadow_replay_ready')}")
     print(f"real_scene_shadow_blocking_reasons: {result.get('real_scene_shadow_blocking_reasons')}")
+    perception = result.get("perception_shadow") or {}
+    print(f"perception_shadow_requested: {result.get('perception_shadow_requested')}")
+    print(f"perception_shadow_status: {result.get('perception_shadow_status')}")
+    print(f"perception_shadow_snapshot_id: {result.get('perception_shadow_snapshot_id')}")
+    print(f"perception_shadow_grounding_id: {result.get('perception_shadow_grounding_id')}")
+    print(f"perception_shadow_scene_version: {result.get('perception_shadow_scene_version')}")
+    print(f"perception_shadow_user_command: {result.get('perception_shadow_user_command')}")
+    print(f"perception_shadow_normalized_command: {result.get('perception_shadow_normalized_command')}")
+    print(f"perception_shadow_camera_source_status: {result.get('perception_shadow_camera_source_status')}")
+    print(f"perception_shadow_vlm_grounding_status: {result.get('perception_shadow_vlm_grounding_status')}")
+    print(f"perception_shadow_real_scene_shadow_status: {result.get('perception_shadow_real_scene_shadow_status')}")
+    print(f"perception_shadow_geometry_validity_status: {result.get('perception_shadow_geometry_validity_status')}")
+    print(f"perception_shadow_projector_status: {result.get('perception_shadow_projector_status')}")
+    print(f"perception_shadow_target_label: {result.get('perception_shadow_target_label')}")
+    print(f"perception_shadow_world_point_m: {perception.get('world_point_m')}")
+    print(f"no_motion_perception_passed: {result.get('no_motion_perception_passed')}")
+    print(f"perception_shadow_replay_ready: {result.get('perception_shadow_replay_ready')}")
+    print(f"perception_shadow_blocking_reasons: {result.get('perception_shadow_blocking_reasons')}")
+    print(f"perception_shadow_result_path: {result.get('perception_shadow_result_path')}")
+    print(f"perception_shadow_report_path: {result.get('perception_shadow_report_path')}")
     print(f"Report: {report_path}")
     if result.get("blocking_reasons"):
         print(f"Blocking reasons: {', '.join(result['blocking_reasons'])}")

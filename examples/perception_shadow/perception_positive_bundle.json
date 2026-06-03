@@ -1,0 +1,11 @@
+{
+  "bundle_id": "perception_positive_bundle_001",
+  "config_ref": "configs/perception_shadow_mock_positive.example.yaml",
+  "expected_status": "PASS",
+  "expected_world_point_m_available": true,
+  "offline_only": true,
+  "live_camera_used": false,
+  "live_vlm_called": false,
+  "robot_command_generated": false
+}
+

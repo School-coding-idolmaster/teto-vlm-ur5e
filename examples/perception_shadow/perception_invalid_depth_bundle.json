@@ -1,0 +1,10 @@
+{
+  "bundle_id": "perception_invalid_depth_bundle_001",
+  "config_ref": "configs/perception_shadow_invalid_depth.example.yaml",
+  "expected_status": "BLOCKED",
+  "expected_error_code": "E_INVALID_DEPTH",
+  "offline_only": true,
+  "live_camera_used": false,
+  "live_vlm_called": false,
+  "robot_command_generated": false
+}

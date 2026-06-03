@@ -14,6 +14,10 @@ from src.camera_source_adapter import build_camera_source_adapter_request, evalu
 from src.evidence_exporter import export_simulation_evidence
 from src.geometry_validity import build_geometry_validity_request, evaluate_geometry_validity
 from src.lab_readiness import build_lab_readiness_request, evaluate_lab_readiness
+from src.perception_shadow_pipeline import (
+    build_perception_shadow_request,
+    evaluate_perception_shadow_pipeline,
+)
 from src.projector_shadow import build_projector_shadow_request, evaluate_projector_shadow
 from src.real_scene_shadow_pipeline import (
     build_real_scene_shadow_request,
@@ -55,7 +59,7 @@ from src.vlm_grounding_adapter import build_vlm_grounding_adapter_request, evalu
 
 
 REPORT_VERSION = "teto_simulation_execution.v1"
-CURRENT_TETO_VERSION = "TETO V2.9.4"
+CURRENT_TETO_VERSION = "TETO V2.9.5"
 DEFAULT_STEPS = 5
 DEFAULT_SIMULATION_OBJECT_TYPE = "cube"
 DEFAULT_CUBE_PRIM_PATH = "/World/TETO_Cube"
@@ -123,6 +127,7 @@ def build_simulation_execution_result(
     geometry_validity_metadata: Dict[str, Any] | None = None,
     projector_shadow_metadata: Dict[str, Any] | None = None,
     real_scene_shadow_metadata: Dict[str, Any] | None = None,
+    perception_shadow_metadata: Dict[str, Any] | None = None,
     started_at: str | None = None,
     finished_at: str | None = None,
 ) -> Dict[str, Any]:
@@ -168,6 +173,7 @@ def build_simulation_execution_result(
     result.update(geometry_validity_metadata or _geometry_validity_report_fields())
     result.update(projector_shadow_metadata or _projector_shadow_report_fields())
     result.update(real_scene_shadow_metadata or _real_scene_shadow_report_fields())
+    result.update(perception_shadow_metadata or _perception_shadow_report_fields())
     if (
         result.get("semantic_simulation_bridge_requested") is True
         and result.get("semantic_gate_passed") is not True
@@ -272,6 +278,9 @@ def run_first_simulation_execution(
     real_scene_shadow_config: str | Path | None = None,
     grounding_result: str | Path | None = None,
     real_scene_shadow_report: bool = False,
+    run_perception_shadow_pipeline: bool = False,
+    perception_shadow_config: str | Path | None = None,
+    perception_shadow_report: bool = False,
     output_dir: str | Path | None = None,
     write_report: bool = False,
     demo_command: str | None = None,
@@ -284,6 +293,7 @@ def run_first_simulation_execution(
     projector_shadow_requested = check_projector_shadow or projector_shadow_report
     geometry_validity_requested = check_geometry_validity or geometry_validity_report
     real_scene_shadow_requested = run_real_scene_shadow or real_scene_shadow_report
+    perception_shadow_requested = run_perception_shadow_pipeline or perception_shadow_report
     lab_readiness_requested = (
         check_lab_readiness
         or check_camera_readiness
@@ -298,6 +308,7 @@ def run_first_simulation_execution(
         or geometry_validity_requested
         or projector_shadow_requested
         or real_scene_shadow_requested
+        or perception_shadow_requested
     ) and not dry_run:
         no_isaac = True
     lab_readiness_request = build_lab_readiness_request(
@@ -368,6 +379,20 @@ def run_first_simulation_execution(
     real_scene_shadow_metadata = _real_scene_shadow_report_fields(
         requested=real_scene_shadow_requested,
         shadow=evaluate_real_scene_shadow_pipeline(real_scene_shadow_request),
+    )
+    perception_shadow_request = build_perception_shadow_request(
+        requested=perception_shadow_requested,
+        config_path=perception_shadow_config,
+        user_command=user_command,
+        camera_source_config=camera_source_config,
+        camera_snapshot_config=camera_snapshot_config,
+        vlm_grounding_config=vlm_grounding_config,
+        geometry_validity_config=geometry_validity_config,
+        projector_shadow_config=projector_shadow_config,
+    )
+    perception_shadow_metadata = _perception_shadow_report_fields(
+        requested=perception_shadow_requested,
+        perception=evaluate_perception_shadow_pipeline(perception_shadow_request),
     )
     effective_move_object = move_object or move_cube
     effective_spawn_cube = spawn_cube or effective_move_object
@@ -489,6 +514,7 @@ def run_first_simulation_execution(
                 geometry_validity_metadata=geometry_validity_metadata,
                 projector_shadow_metadata=projector_shadow_metadata,
                 real_scene_shadow_metadata=real_scene_shadow_metadata,
+                perception_shadow_metadata=perception_shadow_metadata,
                 error_code="E_INVALID_STEPS",
                 error_message="steps must be a positive integer",
                 started_at=started_at,
@@ -542,6 +568,7 @@ def run_first_simulation_execution(
                 geometry_validity_metadata=geometry_validity_metadata,
                 projector_shadow_metadata=projector_shadow_metadata,
                 real_scene_shadow_metadata=real_scene_shadow_metadata,
+                perception_shadow_metadata=perception_shadow_metadata,
                 error_code="E_INVALID_SIMULATION_TASK",
                 error_message=f"missing simulation task fields: {', '.join(missing_fields)}",
                 started_at=started_at,
@@ -634,6 +661,7 @@ def run_first_simulation_execution(
                     geometry_validity_metadata=geometry_validity_metadata,
                     projector_shadow_metadata=projector_shadow_metadata,
                     real_scene_shadow_metadata=real_scene_shadow_metadata,
+                    perception_shadow_metadata=perception_shadow_metadata,
                     error_code="E_ROBOT_ASSET_LOAD_FAILED",
                     error_message="robot asset path is unavailable",
                     started_at=started_at,
@@ -673,6 +701,7 @@ def run_first_simulation_execution(
                 geometry_validity_metadata=geometry_validity_metadata,
                 projector_shadow_metadata=projector_shadow_metadata,
                 real_scene_shadow_metadata=real_scene_shadow_metadata,
+                perception_shadow_metadata=perception_shadow_metadata,
                 started_at=started_at,
                 finished_at=_timestamp(),
             ),
@@ -736,6 +765,8 @@ def write_simulation_execution_result(
     retry_fallback_recommendation_path = run_dir / "retry_fallback_recommendation.json"
     vlm_grounding_result_path = run_dir / "vlm_grounding_result.json"
     vlm_grounding_report_path = run_dir / "vlm_grounding_report.md"
+    perception_shadow_result_path = run_dir / "perception_shadow_result.json"
+    perception_shadow_report_path = run_dir / "perception_shadow_report.md"
     result["report_path"] = str(report_path)
     structure_report_requested = bool(result.get("robot_prim_inspection_requested"))
     result["robot_structure_report_generated"] = structure_report_requested
@@ -805,6 +836,16 @@ def write_simulation_execution_result(
     if isinstance(result.get("vlm_grounding"), dict):
         result["vlm_grounding"]["vlm_grounding_result_path"] = result["vlm_grounding_result_path"]
         result["vlm_grounding"]["vlm_grounding_report_path"] = result["vlm_grounding_report_path"]
+    perception_shadow_requested = bool(result.get("perception_shadow_requested"))
+    result["perception_shadow_result_path"] = (
+        str(perception_shadow_result_path) if perception_shadow_requested else None
+    )
+    result["perception_shadow_report_path"] = (
+        str(perception_shadow_report_path) if perception_shadow_requested else None
+    )
+    if isinstance(result.get("perception_shadow"), dict):
+        result["perception_shadow"]["perception_shadow_result_path"] = result["perception_shadow_result_path"]
+        result["perception_shadow"]["perception_shadow_report_path"] = result["perception_shadow_report_path"]
     result["semantic_bridge"] = _semantic_bridge_info(result)
     result["motion"] = _motion_info(result)
     result["precheck"] = _precheck_info(result)
@@ -1811,6 +1852,54 @@ def _real_scene_shadow_report_fields(
     if requested:
         fields["semantic_gate_passed"] = shadow.get("semantic_gate_passed", False) is True
     return fields
+
+
+def _perception_shadow_report_fields(
+    *,
+    requested: bool = False,
+    perception: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    perception = perception if isinstance(perception, dict) else {}
+    return {
+        "perception_shadow_requested": requested,
+        "perception_shadow": perception
+        or {
+            "requested": False,
+            "perception_shadow_requested": False,
+            "perception_shadow_status": "NOT_REQUESTED",
+            "semantic_gate_passed": False,
+            "no_motion_perception_passed": False,
+            "replay_ready": False,
+            "blocking_reasons": [],
+            "warnings": [],
+            "live_camera_used": False,
+            "live_vlm_called": False,
+            "real_robot_motion_executed": False,
+            "real_robot_command_enabled": False,
+            "robot_command_generated": False,
+            "trajectory_generated": False,
+            "joint_targets_generated": False,
+            "tcp_pose_world_generated": False,
+        },
+        "perception_shadow_status": perception.get("perception_shadow_status", "NOT_REQUESTED"),
+        "perception_shadow_snapshot_id": perception.get("snapshot_id"),
+        "perception_shadow_grounding_id": perception.get("grounding_id"),
+        "perception_shadow_scene_version": perception.get("scene_version"),
+        "perception_shadow_user_command": perception.get("user_command"),
+        "perception_shadow_normalized_command": perception.get("normalized_command"),
+        "perception_shadow_camera_source_status": perception.get("camera_source_status"),
+        "perception_shadow_camera_snapshot_validity_status": perception.get("camera_snapshot_validity_status"),
+        "perception_shadow_vlm_grounding_status": perception.get("vlm_grounding_status"),
+        "perception_shadow_real_scene_shadow_status": perception.get("real_scene_shadow_status"),
+        "perception_shadow_geometry_validity_status": perception.get("geometry_validity_status"),
+        "perception_shadow_projector_status": perception.get("projector_status"),
+        "perception_shadow_target_label": perception.get("target_label"),
+        "perception_shadow_blocking_reasons": list(perception.get("blocking_reasons") or []),
+        "perception_shadow_warnings": list(perception.get("warnings") or []),
+        "perception_shadow_next_safe_action": perception.get("next_safe_action"),
+        "no_motion_perception_passed": perception.get("no_motion_perception_passed", False) is True,
+        "perception_shadow_replay_ready": perception.get("replay_ready", False) is True,
+    }
 
 
 def _simulation_object_report_fields(

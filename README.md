@@ -1768,6 +1768,46 @@ pixel center, confidence fields, rejection fields, blocking reasons, warnings,
 `next_safe_action`, and safety flags proving no live camera, live VLM, real
 robot command, trajectory, joint targets, or `tcp_pose_world` were generated.
 
+## TETO V2.9.5 Full Perception Shadow Pipeline
+
+TETO V2.9.5 adds the full perception shadow pipeline. It composes a text
+command, camera source adapter, camera snapshot validation, VLM grounding,
+semantic gate, geometry validity, and 2D-to-3D projector shadow into one
+no-motion evidence path.
+
+The pipeline can output `world_point_m` evidence from declared `pixel_center`,
+offline depth, camera intrinsics, and mock/config transform inputs. This is
+perception-side shadow evidence only.
+
+V2.9.5 is still not a ROS2 bridge, not MoveIt planning, and not real UR5
+execution. It does not generate trajectory, `tcp_pose_world`, URScript, joint
+targets, robot commands, automatic retry motion, or any real execution request.
+It does not call live Qwen/VLM, does not open a continuous live camera loop,
+and does not use a real robot backend.
+
+Full perception positive smoke:
+
+```bash
+python3 scripts/run_first_simulation_execution.py \
+  --run-perception-shadow-pipeline \
+  --perception-shadow-config configs/perception_shadow_mock_positive.example.yaml \
+  --perception-shadow-report \
+  --output-dir /tmp/teto_v295_perception_shadow_positive
+```
+
+The evidence bundle includes `perception_shadow_result.json`,
+`perception_shadow_report.md`, `summary.md`, and `evidence_manifest.json`.
+`perception_shadow_report.md` states the no-motion / no-live-camera /
+no-live-VLM / no-real-robot / no-ROS2 / no-MoveIt safety boundary, and the
+manifest records stage statuses, semantic gate, target fields, `bbox_xyxy`,
+`pixel_center`, `depth_value_m`, `camera_point_m`, `world_point_m`, workspace
+check, replay readiness, blocking reasons, warnings, `next_safe_action`, and
+safety flags proving no robot command, trajectory, joint targets, or
+`tcp_pose_world` were generated.
+
+V2.9.5 is the final perception-side integration stage before the planned
+V2.10.x ROS2 Planner Gateway shadow bridge.
+
 Demo commands accept common image formats directly. TETO automatically
 creates a cached RGB JPEG under `data/processed/auto/`, with EXIF orientation
 applied, long edge resized, animated images reduced to the first frame, and
@@ -1987,4 +2027,5 @@ python3 -m src.cli prepare-images --input-dir data/raw --output-dir data/process
 - V2.9.2 = 2D-to-3D projector shadow contract
 - V2.9.3 = camera source adapter / manual snapshot no-motion
 - V2.9.4 = local/mock VLM grounding adapter no-motion
+- V2.9.5 = full perception shadow pipeline
 - Future ROS2 / MoveIt2 / RTDE / URScript / real UR5 controller integration remains outside the current implemented safety boundary

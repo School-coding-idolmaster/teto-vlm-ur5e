@@ -1,0 +1,11 @@
+vlm_grounding_adapter:
+  adapter_mode: mock_vlm
+  snapshot_id: perception_fixture_snapshot_001
+  scene_version: perception_fixture_scene_v1
+  user_command: hover over the red mug
+  expected_snapshot_id: perception_fixture_snapshot_001
+  expected_scene_version: perception_fixture_scene_v1
+  overall_confidence_threshold: 0.60
+  allow_live_vlm: false
+  live_vlm_called: false
+

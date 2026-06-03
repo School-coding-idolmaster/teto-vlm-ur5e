@@ -1,0 +1,11 @@
+{
+  "bundle_id": "perception_no_target_bundle_001",
+  "config_ref": "configs/perception_shadow_no_target.example.yaml",
+  "expected_status": "BLOCKED",
+  "expected_error_code": "E_NO_TARGET",
+  "offline_only": true,
+  "live_camera_used": false,
+  "live_vlm_called": false,
+  "robot_command_generated": false
+}
+

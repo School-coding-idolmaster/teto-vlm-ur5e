@@ -14,6 +14,7 @@ from src.simulation_micro_motion import (
     write_simulation_micro_motion_artifacts,
 )
 from src.lab_readiness import format_lab_readiness_report
+from src.perception_shadow_pipeline import format_perception_shadow_report
 from src.real_scene_shadow_pipeline import format_real_scene_shadow_report
 from src.semantic_simulation_bridge import format_semantic_simulation_bridge_report
 from src.simulated_task_execution import format_simulated_task_execution_report
@@ -73,6 +74,8 @@ def export_simulation_evidence(
     projector_shadow_report_path = output_dir / "projector_shadow_report.md"
     real_scene_shadow_result_path = output_dir / "real_scene_shadow_result.json"
     real_scene_shadow_report_path = output_dir / "real_scene_shadow_report.md"
+    perception_shadow_result_path = output_dir / "perception_shadow_result.json"
+    perception_shadow_report_path = output_dir / "perception_shadow_report.md"
 
     object_info = _simulation_object_info(result)
     robot_asset_info = _robot_asset_info(result)
@@ -90,6 +93,7 @@ def export_simulation_evidence(
     geometry_validity_info = _geometry_validity_info(result)
     projector_shadow_info = _projector_shadow_info(result)
     real_scene_shadow_info = _real_scene_shadow_info(result)
+    perception_shadow_info = _perception_shadow_info(result)
     structure_report_requested = bool(robot_prim_inspection_info.get("requested"))
     readiness_requested = bool(articulation_readiness_info.get("requested"))
     state_requested = bool(articulation_state_info.get("requested"))
@@ -106,6 +110,7 @@ def export_simulation_evidence(
     geometry_validity_requested = bool(geometry_validity_info.get("requested"))
     projector_shadow_requested = bool(projector_shadow_info.get("requested"))
     real_scene_shadow_requested = bool(real_scene_shadow_info.get("requested"))
+    perception_shadow_requested = bool(perception_shadow_info.get("requested"))
     run_id = output_dir.name
     created_at = result.get("finished_at") or result.get("started_at")
     report_path = result.get("report_path")
@@ -130,6 +135,7 @@ def export_simulation_evidence(
             geometry_validity_info=geometry_validity_info,
             projector_shadow_info=projector_shadow_info,
             real_scene_shadow_info=real_scene_shadow_info,
+            perception_shadow_info=perception_shadow_info,
             robot_structure_report_path=structure_report_ref,
             run_id=run_id,
             created_at=created_at,
@@ -328,6 +334,17 @@ def export_simulation_evidence(
         _write_json_artifact(real_scene_shadow_result_path, real_scene_shadow_info)
         real_scene_shadow_report_path.write_text(
             format_real_scene_shadow_report(real_scene_shadow_info),
+            encoding="utf-8",
+        )
+    if perception_shadow_requested:
+        perception_shadow_info["perception_shadow_result_path"] = str(perception_shadow_result_path)
+        perception_shadow_info["perception_shadow_report_path"] = str(perception_shadow_report_path)
+        perception_shadow_info["perception_shadow_evidence_files"] = _perception_shadow_evidence_files(
+            perception_shadow_info
+        )
+        _write_json_artifact(perception_shadow_result_path, perception_shadow_info)
+        perception_shadow_report_path.write_text(
+            format_perception_shadow_report(perception_shadow_info),
             encoding="utf-8",
         )
     motion_evidence_summary = summarize_motion_evidence(simulation_micro_motion_info)
@@ -756,6 +773,201 @@ def export_simulation_evidence(
         ),
         "real_scene_shadow_result_path": str(real_scene_shadow_result_path) if real_scene_shadow_requested else None,
         "real_scene_shadow_report_path": str(real_scene_shadow_report_path) if real_scene_shadow_requested else None,
+        "perception_shadow_evidence_available": perception_shadow_requested,
+        "perception_shadow_status": perception_shadow_info.get("perception_shadow_status"),
+        "perception_shadow_requested": perception_shadow_requested,
+        "user_command": perception_shadow_info.get("user_command")
+        if perception_shadow_requested
+        else vlm_grounding_info.get("user_command"),
+        "normalized_command": perception_shadow_info.get("normalized_command")
+        if perception_shadow_requested
+        else vlm_grounding_info.get("normalized_command"),
+        "snapshot_id": perception_shadow_info.get("snapshot_id")
+        or projector_shadow_info.get("snapshot_id")
+        or geometry_validity_info.get("snapshot_id")
+        or vlm_grounding_info.get("snapshot_id")
+        or real_scene_shadow_info.get("snapshot_id")
+        or camera_source_info.get("snapshot_id"),
+        "grounding_id": perception_shadow_info.get("grounding_id")
+        or projector_shadow_info.get("grounding_id")
+        or geometry_validity_info.get("grounding_id")
+        or vlm_grounding_info.get("grounding_id")
+        or real_scene_shadow_info.get("grounding_id"),
+        "scene_version": perception_shadow_info.get("scene_version")
+        or projector_shadow_info.get("scene_version")
+        or geometry_validity_info.get("scene_version")
+        or vlm_grounding_info.get("scene_version")
+        or real_scene_shadow_info.get("scene_version")
+        or camera_snapshot_info.get("scene_version")
+        or camera_source_info.get("scene_version")
+        or result.get("scene_version"),
+        "camera_source_status": perception_shadow_info.get("camera_source_status")
+        if perception_shadow_requested
+        else camera_source_info.get("camera_source_status"),
+        "vlm_grounding_status": perception_shadow_info.get("vlm_grounding_status")
+        if perception_shadow_requested
+        else vlm_grounding_info.get("vlm_grounding_status"),
+        "real_scene_shadow_status": perception_shadow_info.get("real_scene_shadow_status")
+        if perception_shadow_requested
+        else real_scene_shadow_info.get("shadow_pipeline_status"),
+        "geometry_validity_status": perception_shadow_info.get("geometry_validity_status")
+        if perception_shadow_requested
+        else geometry_validity_info.get("geometry_validity_status"),
+        "projector_status": perception_shadow_info.get("projector_status")
+        if perception_shadow_requested
+        else projector_shadow_info.get("projector_status"),
+        "semantic_gate_passed": perception_shadow_info.get("semantic_gate_passed")
+        if perception_shadow_requested
+        else (
+            real_scene_shadow_info.get("semantic_gate_passed", False)
+            if real_scene_shadow_requested
+            else semantic_bridge_info.get("gate_passed")
+        ),
+        "no_motion_perception_passed": perception_shadow_info.get("no_motion_perception_passed", False),
+        "target_label": perception_shadow_info.get("target_label") or vlm_grounding_info.get("target_label"),
+        "target_object_id": perception_shadow_info.get("target_object_id") or vlm_grounding_info.get("target_object_id"),
+        "bbox_xyxy": perception_shadow_info.get("bbox_xyxy") or vlm_grounding_info.get("bbox_xyxy"),
+        "pixel_center": perception_shadow_info.get("pixel_center")
+        or projector_shadow_info.get("pixel_center")
+        or vlm_grounding_info.get("pixel_center"),
+        "overall_confidence": perception_shadow_info.get("overall_confidence")
+        if perception_shadow_requested
+        else vlm_grounding_info.get("overall_confidence"),
+        "depth_value_m": perception_shadow_info.get("depth_value_m")
+        if perception_shadow_requested
+        else projector_shadow_info.get("depth_value_m"),
+        "camera_point_m": perception_shadow_info.get("camera_point_m")
+        if perception_shadow_requested
+        else projector_shadow_info.get("camera_point_m"),
+        "world_point_m": perception_shadow_info.get("world_point_m")
+        if perception_shadow_requested
+        else projector_shadow_info.get("world_point_m"),
+        "workspace_check_passed": perception_shadow_info.get("workspace_check_passed")
+        if perception_shadow_requested
+        else projector_shadow_info.get("workspace_check_passed"),
+        "replay_ready": perception_shadow_info.get("replay_ready")
+        if perception_shadow_requested
+        else (
+            real_scene_shadow_info.get("replay_ready", False)
+            if real_scene_shadow_requested
+            else simulated_task_execution_info.get("replay_ready", False)
+        ),
+        "blocking_reasons": perception_shadow_info.get("blocking_reasons")
+        if perception_shadow_requested
+        else (
+            projector_shadow_info.get("blocking_reasons")
+            if projector_shadow_requested
+            else geometry_validity_info.get("blocking_reasons")
+            if geometry_validity_requested
+            else vlm_grounding_info.get("blocking_reasons")
+            if vlm_grounding_requested
+            else real_scene_shadow_info.get("blocking_reasons")
+            if real_scene_shadow_requested
+            else camera_source_info.get("blocking_reasons")
+            if camera_source_requested
+            else list(lab_readiness_info.get("blocking_reasons") or result.get("blocking_reasons") or [])
+        ),
+        "warnings": perception_shadow_info.get("warnings", [])
+        if perception_shadow_requested
+        else (
+            projector_shadow_info.get("warnings", [])
+            if projector_shadow_requested
+            else geometry_validity_info.get("warnings", [])
+            if geometry_validity_requested
+            else vlm_grounding_info.get("warnings", [])
+            if vlm_grounding_requested
+            else real_scene_shadow_info.get("warnings", [])
+            if real_scene_shadow_requested
+            else camera_source_info.get("warnings", [])
+            if camera_source_requested
+            else []
+        ),
+        "next_safe_action": perception_shadow_info.get("next_safe_action")
+        if perception_shadow_requested
+        else (
+            projector_shadow_info.get("next_safe_action")
+            if projector_shadow_requested
+            else geometry_validity_info.get("next_safe_action")
+            if geometry_validity_requested
+            else vlm_grounding_info.get("next_safe_action")
+            if vlm_grounding_requested
+            else real_scene_shadow_info.get("next_safe_action")
+            if real_scene_shadow_requested
+            else camera_source_info.get("next_safe_action")
+            if camera_source_requested
+            else lab_readiness_info.get("next_safe_action")
+        ),
+        "live_camera_used": perception_shadow_info.get("live_camera_used", False)
+        if perception_shadow_requested
+        else (
+            camera_snapshot_info.get("live_capture_used", False)
+            or camera_source_info.get("live_camera_capture_used", False)
+            or lab_readiness_info.get("live_camera_used", False)
+        ),
+        "live_vlm_called": perception_shadow_info.get("live_vlm_called", False)
+        if perception_shadow_requested
+        else (
+            camera_snapshot_info.get("live_vlm_called", False)
+            or camera_source_info.get("live_vlm_called", False)
+            or vlm_grounding_info.get("live_vlm_called", False)
+            or lab_readiness_info.get("live_vlm_called", False)
+        ),
+        "real_robot_motion_executed": perception_shadow_info.get("real_robot_motion_executed", False)
+        if perception_shadow_requested
+        else (
+            camera_snapshot_info.get("real_robot_motion_executed", False)
+            or camera_source_info.get("real_robot_motion_executed", False)
+            or lab_readiness_info.get("real_robot_motion_executed", False)
+            or result.get("real_robot_motion_executed", False)
+        ),
+        "real_robot_command_enabled": perception_shadow_info.get("real_robot_command_enabled", False)
+        if perception_shadow_requested
+        else (
+            camera_snapshot_info.get("real_robot_command_enabled", False)
+            or camera_source_info.get("real_robot_command_enabled", False)
+            or lab_readiness_info.get("real_robot_command_enabled", False)
+        ),
+        "robot_command_generated": perception_shadow_info.get("robot_command_generated", False)
+        if perception_shadow_requested
+        else (
+            projector_shadow_info.get("robot_command_generated", False)
+            or vlm_grounding_info.get("robot_command_generated", False)
+            or camera_source_info.get("robot_command_generated", False)
+            or real_scene_shadow_info.get("robot_command_generated", False)
+        ),
+        "trajectory_generated": perception_shadow_info.get("trajectory_generated", False)
+        if perception_shadow_requested
+        else (
+            projector_shadow_info.get("trajectory_generated", False)
+            or vlm_grounding_info.get("trajectory_generated", False)
+            or camera_source_info.get("trajectory_generated", False)
+            or real_scene_shadow_info.get("trajectory_generated", False)
+        ),
+        "joint_targets_generated": perception_shadow_info.get("joint_targets_generated", False)
+        if perception_shadow_requested
+        else (
+            projector_shadow_info.get("joint_targets_generated", False)
+            or vlm_grounding_info.get("joint_targets_generated", False)
+            or camera_source_info.get("joint_targets_generated", False)
+            or real_scene_shadow_info.get("joint_targets_generated", False)
+        ),
+        "tcp_pose_world_generated": perception_shadow_info.get("tcp_pose_world_generated", False)
+        if perception_shadow_requested
+        else (
+            projector_shadow_info.get("tcp_pose_world_generated", False)
+            or vlm_grounding_info.get("tcp_pose_world_generated", False)
+            or camera_source_info.get("tcp_pose_world_generated", False)
+            or real_scene_shadow_info.get("tcp_pose_world_generated", False)
+        ),
+        "perception_shadow_evidence_files": (
+            _perception_shadow_evidence_files(perception_shadow_info) if perception_shadow_requested else []
+        ),
+        "perception_shadow_result_path": str(perception_shadow_result_path)
+        if perception_shadow_requested
+        else None,
+        "perception_shadow_report_path": str(perception_shadow_report_path)
+        if perception_shadow_requested
+        else None,
         "screenshot_before_path": None,
         "screenshot_after_path": None,
         "video_path": None,
@@ -806,6 +1018,8 @@ def export_simulation_evidence(
         "projector_shadow_report_path": projector_shadow_report_path,
         "real_scene_shadow_result_path": real_scene_shadow_result_path,
         "real_scene_shadow_report_path": real_scene_shadow_report_path,
+        "perception_shadow_result_path": perception_shadow_result_path,
+        "perception_shadow_report_path": perception_shadow_report_path,
     }
 
 
@@ -1574,6 +1788,93 @@ def _real_scene_shadow_evidence_files(real_scene_shadow_info: Dict[str, Any]) ->
     ]
 
 
+def _perception_shadow_info(result: Dict[str, Any]) -> Dict[str, Any]:
+    perception = result.get("perception_shadow") if isinstance(result.get("perception_shadow"), dict) else {}
+    return {
+        **perception,
+        "requested": result.get("perception_shadow_requested", perception.get("requested", False)) is True,
+        "perception_shadow_requested": result.get(
+            "perception_shadow_requested",
+            perception.get("perception_shadow_requested", False),
+        )
+        is True,
+        "perception_shadow_status": result.get(
+            "perception_shadow_status",
+            perception.get("perception_shadow_status", "NOT_REQUESTED"),
+        ),
+        "snapshot_id": result.get("perception_shadow_snapshot_id", perception.get("snapshot_id")),
+        "grounding_id": result.get("perception_shadow_grounding_id", perception.get("grounding_id")),
+        "scene_version": result.get("perception_shadow_scene_version", perception.get("scene_version")),
+        "user_command": result.get("perception_shadow_user_command", perception.get("user_command")),
+        "normalized_command": result.get(
+            "perception_shadow_normalized_command",
+            perception.get("normalized_command"),
+        ),
+        "camera_source_status": result.get(
+            "perception_shadow_camera_source_status",
+            perception.get("camera_source_status"),
+        ),
+        "camera_snapshot_validity_status": result.get(
+            "perception_shadow_camera_snapshot_validity_status",
+            perception.get("camera_snapshot_validity_status"),
+        ),
+        "vlm_grounding_status": result.get(
+            "perception_shadow_vlm_grounding_status",
+            perception.get("vlm_grounding_status"),
+        ),
+        "real_scene_shadow_status": result.get(
+            "perception_shadow_real_scene_shadow_status",
+            perception.get("real_scene_shadow_status"),
+        ),
+        "geometry_validity_status": result.get(
+            "perception_shadow_geometry_validity_status",
+            perception.get("geometry_validity_status"),
+        ),
+        "projector_status": result.get(
+            "perception_shadow_projector_status",
+            perception.get("projector_status"),
+        ),
+        "target_label": result.get("perception_shadow_target_label", perception.get("target_label")),
+        "semantic_gate_passed": perception.get("semantic_gate_passed", False) is True,
+        "no_motion_perception_passed": result.get(
+            "no_motion_perception_passed",
+            perception.get("no_motion_perception_passed", False),
+        )
+        is True,
+        "replay_ready": result.get("perception_shadow_replay_ready", perception.get("replay_ready", False)) is True,
+        "blocking_reasons": result.get(
+            "perception_shadow_blocking_reasons",
+            perception.get("blocking_reasons", []),
+        ),
+        "warnings": result.get("perception_shadow_warnings", perception.get("warnings", [])),
+        "next_safe_action": result.get(
+            "perception_shadow_next_safe_action",
+            perception.get("next_safe_action"),
+        ),
+        "live_camera_used": perception.get("live_camera_used", False) is True,
+        "live_vlm_called": perception.get("live_vlm_called", False) is True,
+        "real_robot_motion_executed": perception.get("real_robot_motion_executed", False) is True,
+        "real_robot_command_enabled": perception.get("real_robot_command_enabled", False) is True,
+        "robot_command_generated": perception.get("robot_command_generated", False) is True,
+        "trajectory_generated": perception.get("trajectory_generated", False) is True,
+        "joint_targets_generated": perception.get("joint_targets_generated", False) is True,
+        "tcp_pose_world_generated": perception.get("tcp_pose_world_generated", False) is True,
+    }
+
+
+def _perception_shadow_evidence_files(perception_shadow_info: Dict[str, Any]) -> list[Dict[str, str | None]]:
+    return [
+        {
+            "name": "perception_shadow_result.json",
+            "path": perception_shadow_info.get("perception_shadow_result_path"),
+        },
+        {
+            "name": "perception_shadow_report.md",
+            "path": perception_shadow_info.get("perception_shadow_report_path"),
+        },
+    ]
+
+
 def _latest_execution_summary(
     execution_info: Dict[str, Any],
     precheck_info: Dict[str, Any],
@@ -1682,6 +1983,7 @@ def _build_summary_markdown(
     geometry_validity_info: Dict[str, Any],
     projector_shadow_info: Dict[str, Any],
     real_scene_shadow_info: Dict[str, Any],
+    perception_shadow_info: Dict[str, Any],
     robot_structure_report_path: str | None,
     run_id: str,
     created_at: str | None,
@@ -1986,6 +2288,46 @@ def _build_summary_markdown(
             f"- joint_targets_generated: {_format_value(real_scene_shadow_info.get('joint_targets_generated'))}",
             f"- tcp_pose_world_generated: {_format_value(real_scene_shadow_info.get('tcp_pose_world_generated'))}",
             "This V2.9.0 real-scene shadow pipeline joins camera snapshot evidence with offline/mock grounding only. It does not capture live camera frames, call live Qwen/VLM, connect to a real UR5, use ROS2, MoveIt, RTDE, URScript, Dashboard, generate trajectory, execute tcp_pose_world, or produce robot commands.",
+            "",
+            "## Full Perception Shadow Pipeline Summary",
+            "",
+            f"- perception_shadow_evidence_available: {_format_value(perception_shadow_info.get('requested'))}",
+            f"- perception_shadow_status: {_format_value(perception_shadow_info.get('perception_shadow_status'))}",
+            f"- user_command: {_format_value(perception_shadow_info.get('user_command'))}",
+            f"- normalized_command: {_format_value(perception_shadow_info.get('normalized_command'))}",
+            f"- snapshot_id: {_format_value(perception_shadow_info.get('snapshot_id'))}",
+            f"- grounding_id: {_format_value(perception_shadow_info.get('grounding_id'))}",
+            f"- scene_version: {_format_value(perception_shadow_info.get('scene_version'))}",
+            f"- camera_source_status: {_format_value(perception_shadow_info.get('camera_source_status'))}",
+            f"- camera_snapshot_validity_status: {_format_value(perception_shadow_info.get('camera_snapshot_validity_status'))}",
+            f"- vlm_grounding_status: {_format_value(perception_shadow_info.get('vlm_grounding_status'))}",
+            f"- real_scene_shadow_status: {_format_value(perception_shadow_info.get('real_scene_shadow_status'))}",
+            f"- semantic_gate_passed: {_format_value(perception_shadow_info.get('semantic_gate_passed'))}",
+            f"- geometry_validity_status: {_format_value(perception_shadow_info.get('geometry_validity_status'))}",
+            f"- projector_status: {_format_value(perception_shadow_info.get('projector_status'))}",
+            f"- target_label: {_format_value(perception_shadow_info.get('target_label'))}",
+            f"- target_object_id: {_format_value(perception_shadow_info.get('target_object_id'))}",
+            f"- bbox_xyxy: {_format_value(perception_shadow_info.get('bbox_xyxy'))}",
+            f"- pixel_center: {_format_value(perception_shadow_info.get('pixel_center'))}",
+            f"- overall_confidence: {_format_value(perception_shadow_info.get('overall_confidence'))}",
+            f"- depth_value_m: {_format_value(perception_shadow_info.get('depth_value_m'))}",
+            f"- camera_point_m: {_format_value(perception_shadow_info.get('camera_point_m'))}",
+            f"- world_point_m: {_format_value(perception_shadow_info.get('world_point_m'))}",
+            f"- workspace_check_passed: {_format_value(perception_shadow_info.get('workspace_check_passed'))}",
+            f"- replay_ready: {_format_value(perception_shadow_info.get('replay_ready'))}",
+            f"- no_motion_perception_passed: {_format_value(perception_shadow_info.get('no_motion_perception_passed'))}",
+            f"- blocking_reasons: {_format_value(perception_shadow_info.get('blocking_reasons'))}",
+            f"- warnings: {_format_value(perception_shadow_info.get('warnings'))}",
+            f"- next_safe_action: {_format_value(perception_shadow_info.get('next_safe_action'))}",
+            f"- live_camera_used: {_format_value(perception_shadow_info.get('live_camera_used'))}",
+            f"- live_vlm_called: {_format_value(perception_shadow_info.get('live_vlm_called'))}",
+            f"- real_robot_motion_executed: {_format_value(perception_shadow_info.get('real_robot_motion_executed'))}",
+            f"- real_robot_command_enabled: {_format_value(perception_shadow_info.get('real_robot_command_enabled'))}",
+            f"- robot_command_generated: {_format_value(perception_shadow_info.get('robot_command_generated'))}",
+            f"- trajectory_generated: {_format_value(perception_shadow_info.get('trajectory_generated'))}",
+            f"- joint_targets_generated: {_format_value(perception_shadow_info.get('joint_targets_generated'))}",
+            f"- tcp_pose_world_generated: {_format_value(perception_shadow_info.get('tcp_pose_world_generated'))}",
+            "This V2.9.5 full perception shadow pipeline composes text command, camera source, camera snapshot, VLM grounding, semantic gate, geometry validity, and 2D-to-3D projector evidence into world_point_m evidence. It is no-motion, no-live-camera, no-live-VLM, no-real-robot, no-ROS2, and no-MoveIt evidence only; it does not generate trajectory, tcp_pose_world, URScript, joint targets, or robot commands.",
             "",
             "## Readiness Evidence Summary",
             "",
