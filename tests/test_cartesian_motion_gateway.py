@@ -145,6 +145,57 @@ def test_pipeline_without_real_motion_enabled_validates_but_does_not_execute():
     assert result["real_robot_motion_executed"] is False
 
 
+def test_real_moveit_mode_routes_plan_only_through_pose_executor(monkeypatch):
+    calls = []
+
+    def fake_plan(request):
+        calls.append(request)
+        return {
+            "moveit_pose_executor_status": "PASS",
+            "plan_success": True,
+            "moveit_plan_called": True,
+            "moveit_execute_called": False,
+            "trajectory_send_allowed": False,
+            "trajectory_sent": False,
+            "controller_command_sent": False,
+            "real_robot_motion_executed": False,
+            "blocking_reasons": [],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr("src.cartesian_motion_gateway.evaluate_moveit_pose_plan", fake_plan)
+
+    motion = evaluate_cartesian_motion_gateway(
+        CartesianMotionGatewayRequest(
+            requested=True,
+            command_to_task_result=_task([0.0, 0.0, 0.02]),
+            current_tcp_pose=[0.40, 0.0, 0.30],
+        )
+    )
+    result = evaluate_cartesian_motion_execution(
+        CartesianMotionExecutionRequest(
+            requested=True,
+            config={
+                "moveit_execution_mode": "real",
+                "enable_ros2_runtime": True,
+                "enable_moveit_plan": True,
+                "enable_moveit_execute": False,
+                "enable_real_robot_motion": False,
+                "manual_confirmation_required": True,
+            },
+            cartesian_motion_result=motion,
+            manual_confirmation_result={"manual_confirmation_accepted": False},
+        )
+    )
+
+    assert result["cartesian_motion_execution_status"] == "PASS"
+    assert result["real_moveit_mode"] is True
+    assert result["moveit_plan_success"] is True
+    assert result["moveit_execute_called"] is False
+    assert calls[0].target_pose == motion["target_pose"]
+    assert calls[0].current_tcp_pose == motion["current_tcp_pose"]
+
+
 def _task(offset):
     return {
         "command_to_task_status": "PASS",

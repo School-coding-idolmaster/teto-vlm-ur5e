@@ -20,6 +20,11 @@ from src.manual_confirmation_gate import (
     ManualConfirmationRequest,
     evaluate_manual_confirmation_gate,
 )
+from src.moveit_pose_executor import (
+    MoveItPoseExecutorRequest,
+    evaluate_moveit_pose_execute,
+    evaluate_moveit_pose_plan,
+)
 
 
 CONTRACT_VERSION = "teto_cartesian_motion_gateway.v1"
@@ -198,6 +203,9 @@ def evaluate_cartesian_motion_execution(request: CartesianMotionExecutionRequest
         return _not_requested_execution()
 
     config = request.config if isinstance(request.config, dict) else {}
+    if _real_moveit_mode(config):
+        return _evaluate_real_moveit_execution(request, config)
+
     motion = request.cartesian_motion_result if isinstance(request.cartesian_motion_result, dict) else {}
     confirmation = request.manual_confirmation_result if isinstance(request.manual_confirmation_result, dict) else {}
     state = request.ur5_state_result if isinstance(request.ur5_state_result, dict) else {}
@@ -343,7 +351,7 @@ def evaluate_cartesian_motion_pipeline(request: CartesianMotionPipelineRequest |
         )
         + (
             _string_list(execution.get("blocking_reasons"))
-            if config.get("enable_real_robot_motion") is True
+            if config.get("enable_real_robot_motion") is True or _real_moveit_mode(config)
             else []
         )
     )
@@ -402,6 +410,106 @@ def _not_requested_execution() -> Dict[str, Any]:
         "real_robot_motion_executed": False,
         "blocking_reasons": [],
         "warnings": [],
+    }
+
+
+def _evaluate_real_moveit_execution(
+    request: CartesianMotionExecutionRequest,
+    config: Dict[str, Any],
+) -> Dict[str, Any]:
+    motion = request.cartesian_motion_result if isinstance(request.cartesian_motion_result, dict) else {}
+    confirmation = request.manual_confirmation_result if isinstance(request.manual_confirmation_result, dict) else {}
+    state = request.ur5_state_result if isinstance(request.ur5_state_result, dict) else {}
+    blocking_reasons: list[str] = []
+    warnings = _string_list(config.get("warnings")) + _string_list(motion.get("warnings"))
+
+    if motion.get("cartesian_motion_gateway_status") != STATUS_PASS or not isinstance(motion.get("target_pose"), dict):
+        blocking_reasons.append(E_TARGET_NOT_READY)
+    if config.get("enable_ros2_runtime") is not True:
+        blocking_reasons.append(E_ROS2_RUNTIME_UNAVAILABLE)
+    if config.get("enable_moveit_plan") is not True:
+        blocking_reasons.append(E_MOVEIT_RUNTIME_UNAVAILABLE)
+    if motion.get("target_pose_generated_by_llm") is True or _forbidden_artifact(config):
+        blocking_reasons.append(E_FORBIDDEN_CONTROL_ARTIFACT)
+        warnings.append("forbidden_control_artifact_detected")
+
+    execute_requested = config.get("enable_moveit_execute") is True or config.get("enable_real_robot_motion") is True
+    if config.get("enable_real_robot_motion") is True and config.get("enable_moveit_execute") is not True:
+        blocking_reasons.append(E_MOVEIT_EXECUTE_NOT_ALLOWED)
+    if config.get("enable_moveit_execute") is True and config.get("enable_real_robot_motion") is not True:
+        blocking_reasons.append(E_REAL_MOTION_NOT_ENABLED)
+
+    if blocking_reasons:
+        return {
+            "contract_version": CONTRACT_VERSION,
+            "schema_version": CONTRACT_VERSION,
+            "teto_version": CURRENT_CARTESIAN_MOTION_VERSION,
+            "cartesian_motion_execution_requested": True,
+            "cartesian_motion_execution_status": STATUS_BLOCKED,
+            "task_id": motion.get("task_id"),
+            "real_moveit_mode": True,
+            "moveit_plan_requested": config.get("enable_moveit_plan") is True,
+            "moveit_plan_success": False,
+            "manual_confirmation_required": config.get("manual_confirmation_required", True) is True,
+            "manual_confirmation_accepted": confirmation.get("manual_confirmation_accepted") is True,
+            "moveit_execute_called": False,
+            "trajectory_send_allowed": False,
+            "trajectory_sent": False,
+            "controller_command_sent": False,
+            "real_robot_motion_executed": False,
+            "target_pose": motion.get("target_pose"),
+            "target_pose_generated_by_llm": False,
+            "urscript_generated": False,
+            "rtde_write_attempted": False,
+            "dashboard_command_attempted": False,
+            "raw_joint_targets_generated": False,
+            "blocking_reasons": _unique(blocking_reasons),
+            "warnings": _unique(warnings),
+            "safety_boundary": _safety_boundary(intent_only=False),
+        }
+
+    executor_request = MoveItPoseExecutorRequest(
+        requested=True,
+        target_pose=motion.get("target_pose"),
+        current_tcp_pose=motion.get("current_tcp_pose"),
+        config={**config, "current_tcp_pose": motion.get("current_tcp_pose")},
+        execute=execute_requested,
+        manual_confirmation_result=confirmation,
+        robot_state_result=state,
+    )
+    moveit_result = (
+        evaluate_moveit_pose_execute(executor_request)
+        if execute_requested
+        else evaluate_moveit_pose_plan(executor_request)
+    )
+    status = STATUS_PASS if moveit_result.get("moveit_pose_executor_status") == STATUS_PASS else STATUS_BLOCKED
+    return {
+        "contract_version": CONTRACT_VERSION,
+        "schema_version": CONTRACT_VERSION,
+        "teto_version": CURRENT_CARTESIAN_MOTION_VERSION,
+        "cartesian_motion_execution_requested": True,
+        "cartesian_motion_execution_status": status,
+        "task_id": motion.get("task_id"),
+        "real_moveit_mode": True,
+        "moveit_plan_requested": True,
+        "moveit_plan_success": moveit_result.get("plan_success") is True,
+        "manual_confirmation_required": config.get("manual_confirmation_required", True) is True,
+        "manual_confirmation_accepted": confirmation.get("manual_confirmation_accepted") is True,
+        "moveit_execute_called": moveit_result.get("moveit_execute_called") is True,
+        "trajectory_send_allowed": moveit_result.get("trajectory_send_allowed") is True,
+        "trajectory_sent": moveit_result.get("trajectory_sent") is True,
+        "controller_command_sent": moveit_result.get("controller_command_sent") is True,
+        "real_robot_motion_executed": moveit_result.get("real_robot_motion_executed") is True,
+        "target_pose": motion.get("target_pose"),
+        "target_pose_generated_by_llm": False,
+        "urscript_generated": False,
+        "rtde_write_attempted": False,
+        "dashboard_command_attempted": False,
+        "raw_joint_targets_generated": False,
+        "moveit_pose_executor_result": moveit_result,
+        "blocking_reasons": _unique(warnings[:0] + _string_list(moveit_result.get("blocking_reasons"))),
+        "warnings": _unique(warnings + _string_list(moveit_result.get("warnings"))),
+        "safety_boundary": _safety_boundary(intent_only=False),
     }
 
 
@@ -573,6 +681,14 @@ def _forbidden_artifact(config: Dict[str, Any]) -> bool:
             "target_pose_generated_by_llm",
         )
     )
+
+
+def _real_moveit_mode(config: Dict[str, Any]) -> bool:
+    return config.get("use_real_moveit") is True or _string(config.get("moveit_execution_mode")) in {
+        "real",
+        "real_moveit",
+        "ros2_action_clients",
+    }
 
 
 def _gateway_next_action(status: str) -> str:
