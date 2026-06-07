@@ -64,6 +64,25 @@ def test_gateway_blocks_excessive_motion_and_workspace_violation():
     assert out_of_workspace["target_pose"] is None
 
 
+def test_gateway_allows_exact_relative_max_motion_from_nonzero_tcp_pose():
+    result = evaluate_cartesian_motion_gateway(
+        CartesianMotionGatewayRequest(
+            requested=True,
+            config={"max_translation_m": 0.005},
+            command_to_task_result=_task([0.0, 0.0, 0.005000000000000004]),
+            current_tcp_pose={
+                "frame": "base_link",
+                "position_m": [-0.154964, 0.312309, 1.041042],
+                "orientation_xyzw": [0.0, 0.0, 0.0, 1.0],
+            },
+        )
+    )
+
+    assert result["cartesian_motion_gateway_status"] == "PASS"
+    assert E_EXCESSIVE_CARTESIAN_MOTION not in result["blocking_reasons"]
+    assert result["translation_distance_m"] == 0.005
+
+
 def test_execution_requires_manual_confirmation_before_moveit_execute():
     motion = evaluate_cartesian_motion_gateway(
         CartesianMotionGatewayRequest(

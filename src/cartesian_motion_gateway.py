@@ -39,6 +39,7 @@ STATUS_NOT_REQUESTED = "NOT_REQUESTED"
 
 DEFAULT_FRAME = "base_link"
 DEFAULT_MAX_TRANSLATION_M = 0.20
+MOTION_LIMIT_EPS = 1e-9
 DEFAULT_CONFIRMATION_TOKEN = "CONFIRM_REAL_UR5_CARTESIAN"
 DEFAULT_UNDERSTANDING_PHRASE = "I understand this will move the real UR5"
 DEFAULT_WORKSPACE_BOUNDS = {
@@ -147,7 +148,7 @@ def evaluate_cartesian_motion_gateway(request: CartesianMotionGatewayRequest | N
         blocking_reasons.append(E_OFFSET_MISSING)
     elif not _valid_vector3(offset) or not any(abs(value) > 0.0 for value in offset):
         blocking_reasons.append(E_INVALID_OFFSET)
-    elif _distance(offset) > max_translation_m:
+    elif _distance(offset) > max_translation_m + MOTION_LIMIT_EPS:
         blocking_reasons.append(E_EXCESSIVE_CARTESIAN_MOTION)
     if current_pose is None:
         blocking_reasons.append(E_CURRENT_TCP_POSE_MISSING)

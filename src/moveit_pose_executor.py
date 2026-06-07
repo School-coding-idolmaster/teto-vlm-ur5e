@@ -18,6 +18,7 @@ DEFAULT_END_EFFECTOR_LINK = "tool0"
 DEFAULT_MOVE_GROUP_ACTION = "/move_action"
 DEFAULT_EXECUTE_TRAJECTORY_ACTION = "/execute_trajectory"
 DEFAULT_MAX_TRANSLATION_M = 0.20
+MOTION_LIMIT_EPS = 1e-9
 DEFAULT_WORKSPACE_BOUNDS = {
     "x": [-1.0, 1.0],
     "y": [-1.0, 1.0],
@@ -238,7 +239,7 @@ def _validate_request(
     translation_distance_m = None
     if target_pose and current_pose and _valid_pose(target_pose, allowed_frames) and _valid_pose(current_pose, allowed_frames):
         translation_distance_m = _distance_between(current_pose["position_m"], target_pose["position_m"])
-        if translation_distance_m > max_translation_m:
+        if translation_distance_m > max_translation_m + MOTION_LIMIT_EPS:
             blocking_reasons.append(E_EXCESSIVE_CARTESIAN_MOTION)
         if not _point_in_workspace(target_pose["position_m"], workspace_bounds):
             blocking_reasons.append(E_OUT_OF_WORKSPACE)

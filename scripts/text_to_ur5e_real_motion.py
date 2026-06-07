@@ -25,6 +25,7 @@ from src.cartesian_motion_gateway import (  # noqa: E402
 
 DEFAULT_MAX_STEP_M = 0.005
 HARD_SAFETY_LIMIT_M = 0.01
+EPS = 1e-9
 CONFIRMATION_REPLY = "y"
 
 STATUS_PASS = "PASS"
@@ -85,16 +86,16 @@ class ParsedMotionCommand:
 def parse_motion_command(command: str, *, max_step_m: float = DEFAULT_MAX_STEP_M) -> ParsedMotionCommand:
     if not isinstance(command, str) or not command.strip():
         raise MotionParseError("E_EMPTY_COMMAND")
-    if max_step_m <= 0.0 or max_step_m > HARD_SAFETY_LIMIT_M:
+    if max_step_m <= 0.0 or max_step_m > HARD_SAFETY_LIMIT_M + EPS:
         raise MotionParseError("E_INVALID_MAX_STEP")
 
     normalized = _normalize(command)
     _reject_forbidden(normalized)
 
     distance_m, unit = _extract_distance_m(normalized)
-    if distance_m > HARD_SAFETY_LIMIT_M:
+    if distance_m > HARD_SAFETY_LIMIT_M + EPS:
         raise MotionParseError("E_EXCEEDS_HARD_SAFETY_LIMIT")
-    if distance_m > max_step_m:
+    if distance_m > max_step_m + EPS:
         raise MotionParseError("E_EXCEEDS_MAX_STEP")
 
     direction, delta = _extract_direction_delta(normalized, distance_m)

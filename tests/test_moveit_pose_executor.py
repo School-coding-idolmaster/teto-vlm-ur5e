@@ -1,5 +1,6 @@
 from src.moveit_pose_executor import (
     E_CURRENT_TCP_POSE_MISSING,
+    E_EXCESSIVE_CARTESIAN_MOTION,
     E_MANUAL_CONFIRMATION_REQUIRED,
     E_MOVEIT_PLAN_FAILED,
     MoveItPoseExecutorRequest,
@@ -63,6 +64,35 @@ def test_plan_success_comes_from_move_group_action_result(monkeypatch):
     assert result["moveit_plan_called"] is True
     assert result["plan_success_source"] == "actual_moveit_action_result"
     assert result["trajectory_point_count"] == 8
+
+
+def test_plan_allows_exact_relative_max_translation_from_nonzero_tcp_pose(monkeypatch):
+    monkeypatch.setattr(
+        "src.moveit_pose_executor._plan_with_move_group_action",
+        lambda _target_pose, _config: {
+            "action_call_attempted": True,
+            "action_server_available": True,
+            "goal_accepted": True,
+            "success": True,
+            "error_code": 1,
+            "error_code_name": "SUCCESS",
+            "planning_time_s": 0.1,
+            "trajectory_point_count": 3,
+        },
+    )
+
+    result = evaluate_moveit_pose_plan(
+        MoveItPoseExecutorRequest(
+            requested=True,
+            target_pose=_pose([-0.154964, 0.312309, 1.0460420000000001]),
+            current_tcp_pose=_pose([-0.154964, 0.312309, 1.041042]),
+            config={**_base_config(), "max_translation_m": 0.005},
+        )
+    )
+
+    assert result["moveit_pose_executor_status"] == "PASS"
+    assert E_EXCESSIVE_CARTESIAN_MOTION not in result["blocking_reasons"]
+    assert result["translation_distance_m"] == 0.005
 
 
 def test_plan_failure_blocks_on_moveit_error(monkeypatch):

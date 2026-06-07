@@ -53,6 +53,35 @@ def test_rejects_motion_over_hard_safety_limit():
     assert str(exc.value) == "E_EXCEEDS_HARD_SAFETY_LIMIT"
 
 
+def test_exact_default_max_step_is_allowed():
+    parsed = parse_motion_command("move up 5 mm", max_step_m=0.005)
+
+    assert parsed.distance_m == 0.005
+    assert parsed.delta_m == [0.0, 0.0, 0.005]
+
+
+def test_hard_safety_limit_is_allowed_when_max_step_allows_it():
+    parsed = parse_motion_command("move up 10 mm", max_step_m=0.01)
+
+    assert parsed.distance_m == 0.01
+    assert parsed.delta_m == [0.0, 0.0, 0.01]
+
+
+def test_floating_point_tolerance_allows_limit_equivalent(monkeypatch):
+    monkeypatch.setattr(cli, "_extract_distance_m", lambda _normalized: (0.005000000000000004, "mm"))
+
+    parsed = parse_motion_command("move up 5 mm", max_step_m=0.005)
+
+    assert parsed.delta_m == [0.0, 0.0, 0.005]
+
+
+def test_greater_than_hard_safety_limit_is_blocked():
+    with pytest.raises(MotionParseError) as exc:
+        parse_motion_command("move up 10.001 mm", max_step_m=0.01)
+
+    assert str(exc.value) == "E_EXCEEDS_HARD_SAFETY_LIMIT"
+
+
 def test_rejects_motion_over_default_step_limit():
     with pytest.raises(MotionParseError) as exc:
         parse_motion_command("move up 6 mm")
