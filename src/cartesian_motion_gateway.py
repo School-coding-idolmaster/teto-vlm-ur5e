@@ -7,7 +7,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict
 
-import yaml
+try:
+    import yaml
+except ImportError:  # pragma: no cover - supports ROS system Python without PyYAML.
+    yaml = None
 
 from src.command_to_task_adapter import (
     INTENT_CARTESIAN_OFFSET,
@@ -104,7 +107,12 @@ def load_cartesian_motion_config(path: str | Path | None) -> Dict[str, Any]:
     if not resolved.is_file():
         return {}
     with resolved.open("r", encoding="utf-8") as config_file:
-        data = json.load(config_file) if resolved.suffix.lower() == ".json" else yaml.safe_load(config_file)
+        if resolved.suffix.lower() == ".json":
+            data = json.load(config_file)
+        elif yaml is None:
+            return {}
+        else:
+            data = yaml.safe_load(config_file)
     if not isinstance(data, dict):
         return {}
     config = data.get("cartesian_motion_pipeline") or data.get("cartesian_motion_gateway")

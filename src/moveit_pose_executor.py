@@ -286,6 +286,8 @@ def _plan_with_move_group_action(target_pose: Dict[str, Any], config: Dict[str, 
         if not client.wait_for_server(timeout_sec=server_timeout_s):
             return _action_unavailable(action_name)
         goal = _build_move_group_goal(target_pose, config)
+        if config.get("debug_moveit") is True:
+            _debug_print_move_group_goal(goal, target_pose)
         send_future = client.send_goal_async(goal)
         if not _spin_until_future(rclpy, node, send_future, server_timeout_s):
             return _goal_timeout(action_name)
@@ -300,6 +302,8 @@ def _plan_with_move_group_action(target_pose: Dict[str, Any], config: Dict[str, 
         error_code = int(result_message.error_code.val)
         planned_trajectory = result_message.planned_trajectory
         point_count = _trajectory_point_count(planned_trajectory)
+        if config.get("debug_moveit") is True:
+            _debug_print_move_group_result(error_code, result_message.planning_time, point_count)
         return {
             "action_name": action_name,
             "action_call_attempted": True,
@@ -442,6 +446,48 @@ def _build_move_group_goal(target_pose: Dict[str, Any], config: Dict[str, Any]) 
     goal.planning_options.replan = False
     goal.planning_options.planning_scene_diff.is_diff = True
     return goal
+
+
+def _debug_print_move_group_goal(goal: Any, target_pose: Dict[str, Any]) -> None:
+    request = goal.request
+    constraints = request.goal_constraints[0] if request.goal_constraints else None
+    position_constraint = constraints.position_constraints[0] if constraints and constraints.position_constraints else None
+    orientation_constraint = constraints.orientation_constraints[0] if constraints and constraints.orientation_constraints else None
+    frame_id = position_constraint.header.frame_id if position_constraint else target_pose.get("frame")
+    link_name = position_constraint.link_name if position_constraint else None
+    print("[TETO MoveIt DEBUG] submitting MoveGroup.Goal", flush=True)
+    print(f"[TETO MoveIt DEBUG] position_xyz={target_pose.get('position_m')}", flush=True)
+    print(f"[TETO MoveIt DEBUG] orientation_xyzw={target_pose.get('orientation_xyzw')}", flush=True)
+    print(f"[TETO MoveIt DEBUG] frame_id={frame_id}", flush=True)
+    print(f"[TETO MoveIt DEBUG] group_name={request.group_name}", flush=True)
+    print(f"[TETO MoveIt DEBUG] link_name={link_name}", flush=True)
+    print(f"[TETO MoveIt DEBUG] pipeline_id={request.pipeline_id or None}", flush=True)
+    print(f"[TETO MoveIt DEBUG] planner_id={request.planner_id or None}", flush=True)
+    if position_constraint:
+        primitive = position_constraint.constraint_region.primitives[0]
+        pose = position_constraint.constraint_region.primitive_poses[0]
+        print(f"[TETO MoveIt DEBUG] position_constraint_radius={list(primitive.dimensions)}", flush=True)
+        print(
+            "[TETO MoveIt DEBUG] position_constraint_center="
+            f"[{pose.position.x}, {pose.position.y}, {pose.position.z}]",
+            flush=True,
+        )
+    if orientation_constraint:
+        print(
+            "[TETO MoveIt DEBUG] orientation_tolerances="
+            f"[{orientation_constraint.absolute_x_axis_tolerance}, "
+            f"{orientation_constraint.absolute_y_axis_tolerance}, "
+            f"{orientation_constraint.absolute_z_axis_tolerance}]",
+            flush=True,
+        )
+
+
+def _debug_print_move_group_result(error_code: int, planning_time_s: float, trajectory_point_count: int) -> None:
+    print("[TETO MoveIt DEBUG] MoveGroup result", flush=True)
+    print(f"[TETO MoveIt DEBUG] error_code={error_code}", flush=True)
+    print(f"[TETO MoveIt DEBUG] error_code_name={_moveit_error_code_name(error_code)}", flush=True)
+    print(f"[TETO MoveIt DEBUG] planning_time={float(planning_time_s)}", flush=True)
+    print(f"[TETO MoveIt DEBUG] trajectory_point_count={trajectory_point_count}", flush=True)
 
 
 def _import_ros_action_client() -> tuple[Any, Any]:

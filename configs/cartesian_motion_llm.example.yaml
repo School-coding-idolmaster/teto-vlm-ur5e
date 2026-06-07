@@ -26,6 +26,8 @@ cartesian_motion_pipeline:
   moveit_execution_mode: shadow
   move_group_action_name: /move_action
   execute_trajectory_action_name: /execute_trajectory
+  pipeline_id: move_group
+  planner_id: ur_manipulator[RRTConnectkConfigDefault]
   action_server_timeout_s: 5.0
   action_result_timeout_s: 30.0
   execute_result_timeout_s: 60.0
