@@ -11,7 +11,7 @@ import yaml
 
 
 CONTRACT_VERSION = "teto_command_to_task.v1"
-CURRENT_COMMAND_TO_TASK_VERSION = "TETO V3.0.1"
+CURRENT_COMMAND_TO_TASK_VERSION = "TETO V3.1.0"
 
 STATUS_PASS = "PASS"
 STATUS_BLOCKED = "BLOCKED"
@@ -33,17 +33,22 @@ SUPPORTED_MODES = {
 INTENT_HOVER_TO_OBJECT = "hover_to_object"
 INTENT_GO_HOME = "go_home"
 INTENT_MOVE_TO_WAYPOINT = "move_to_waypoint"
+INTENT_CARTESIAN_OFFSET = "cartesian_offset"
 INTENT_STOP = "stop"
 
 SUPPORTED_INTENTS = {
     INTENT_HOVER_TO_OBJECT,
     INTENT_GO_HOME,
     INTENT_MOVE_TO_WAYPOINT,
+    INTENT_CARTESIAN_OFFSET,
     INTENT_STOP,
 }
 
 DEFAULT_CONFIDENCE_THRESHOLD = 0.60
 DEFAULT_MODEL_NAME = "qwen2.5vl:3b"
+DEFAULT_CARTESIAN_FRAME = "base_link"
+DEFAULT_MAX_CARTESIAN_TRANSLATION_M = 0.20
+ALLOWED_CARTESIAN_FRAMES = {"base_link"}
 
 E_UNSUPPORTED_ADAPTER_MODE = "E_UNSUPPORTED_ADAPTER_MODE"
 E_LLM_DISABLED = "E_LLM_DISABLED"
@@ -52,6 +57,10 @@ E_PARSE_FAILED = "E_PARSE_FAILED"
 E_UNSUPPORTED_INTENT = "E_UNSUPPORTED_INTENT"
 E_TARGET_LABEL_REQUIRED = "E_TARGET_LABEL_REQUIRED"
 E_WAYPOINT_REQUIRED = "E_WAYPOINT_REQUIRED"
+E_CARTESIAN_OFFSET_REQUIRED = "E_CARTESIAN_OFFSET_REQUIRED"
+E_INVALID_CARTESIAN_OFFSET = "E_INVALID_CARTESIAN_OFFSET"
+E_EXCESSIVE_CARTESIAN_MOTION = "E_EXCESSIVE_CARTESIAN_MOTION"
+E_INVALID_FRAME = "E_INVALID_FRAME"
 E_LOW_CONFIDENCE = "E_LOW_CONFIDENCE"
 E_ROBOT_COMMAND_NOT_ALLOWED = "E_ROBOT_COMMAND_NOT_ALLOWED"
 
@@ -132,6 +141,10 @@ def evaluate_command_to_task_adapter(
     user_command = request.user_command or _string(config.get("user_command"))
     normalized_command = _normalize_text(user_command)
     confidence_threshold = _optional_float(config.get("confidence_threshold")) or DEFAULT_CONFIDENCE_THRESHOLD
+    max_cartesian_translation_m = (
+        _optional_float(config.get("max_cartesian_translation_m")) or DEFAULT_MAX_CARTESIAN_TRANSLATION_M
+    )
+    allowed_cartesian_frames = _allowed_cartesian_frames(config)
     warnings = _string_list(config.get("warnings"))
     blocking_reasons: list[str] = []
 
@@ -158,7 +171,14 @@ def evaluate_command_to_task_adapter(
         blocking_reasons.append(E_ROBOT_COMMAND_NOT_ALLOWED)
         warnings.append(f"forbidden_robot_control_fields={forbidden_fields}")
 
-    blocking_reasons.extend(validate_task_contract(raw_task, confidence_threshold=confidence_threshold))
+    blocking_reasons.extend(
+        validate_task_contract(
+            raw_task,
+            confidence_threshold=confidence_threshold,
+            max_cartesian_translation_m=max_cartesian_translation_m,
+            allowed_cartesian_frames=allowed_cartesian_frames,
+        )
+    )
     blocking_reasons = _unique([str(reason) for reason in blocking_reasons if reason])
     warnings = _unique([str(warning) for warning in warnings if warning])
     status = STATUS_PASS if not blocking_reasons else STATUS_SAFE_DISABLED if adapter_mode == MODE_LLM_DISABLED else STATUS_BLOCKED
@@ -183,6 +203,7 @@ def evaluate_command_to_task_adapter(
         "blocking_reasons": blocking_reasons,
         "warnings": warnings,
         "confidence_threshold": confidence_threshold,
+        "max_cartesian_translation_m": max_cartesian_translation_m,
         "llm_called": adapter_mode == MODE_LLM_QWEN and "E_LLM_CALL_FAILED" not in blocking_reasons,
         "live_camera_used": False,
         "ros2_publish_attempted": False,
@@ -199,10 +220,17 @@ def evaluate_command_to_task_adapter(
     }
 
 
-def validate_task_contract(task: Dict[str, Any], *, confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD) -> list[str]:
+def validate_task_contract(
+    task: Dict[str, Any],
+    *,
+    confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
+    max_cartesian_translation_m: float = DEFAULT_MAX_CARTESIAN_TRANSLATION_M,
+    allowed_cartesian_frames: set[str] | None = None,
+) -> list[str]:
     reasons: list[str] = []
     intent = _normalize_intent(task.get("intent") or task.get("intent_name"))
     confidence = _confidence(task)
+    allowed_cartesian_frames = allowed_cartesian_frames or set(ALLOWED_CARTESIAN_FRAMES)
 
     if intent not in SUPPORTED_INTENTS:
         reasons.append(E_UNSUPPORTED_INTENT)
@@ -210,6 +238,17 @@ def validate_task_contract(task: Dict[str, Any], *, confidence_threshold: float 
         reasons.append(E_TARGET_LABEL_REQUIRED)
     if intent == INTENT_MOVE_TO_WAYPOINT and not _string(task.get("waypoint")):
         reasons.append(E_WAYPOINT_REQUIRED)
+    if intent == INTENT_CARTESIAN_OFFSET:
+        frame = _string(task.get("frame")) or DEFAULT_CARTESIAN_FRAME
+        offset = _cartesian_offset(task)
+        if frame not in allowed_cartesian_frames:
+            reasons.append(E_INVALID_FRAME)
+        if offset is None:
+            reasons.append(E_CARTESIAN_OFFSET_REQUIRED)
+        elif not _valid_cartesian_offset(offset):
+            reasons.append(E_INVALID_CARTESIAN_OFFSET)
+        elif _translation_distance(offset) > float(max_cartesian_translation_m):
+            reasons.append(E_EXCESSIVE_CARTESIAN_MOTION)
     if confidence is None or confidence < float(confidence_threshold):
         reasons.append(E_LOW_CONFIDENCE)
     if _forbidden_robot_control_fields(task):
@@ -225,9 +264,13 @@ def build_task_prompt(user_command: str | None) -> str:
         "URScript, RTDE, Dashboard commands, poses, trajectories, joint targets, or coordinates.\n\n"
         "Allowed JSON schema:\n"
         "{\n"
-        '  "intent": "hover_to_object | go_home | move_to_waypoint | stop",\n'
+        '  "intent": "hover_to_object | go_home | move_to_waypoint | cartesian_offset | stop",\n'
         '  "target_label": "snake_case object label or null",\n'
         '  "waypoint": "snake_case waypoint name or null",\n'
+        '  "frame": "base_link or null",\n'
+        '  "dx": 0.0,\n'
+        '  "dy": 0.0,\n'
+        '  "dz": 0.0,\n'
         '  "confidence": 0.0,\n'
         '  "error_code": "OK or E_UNSUPPORTED_COMMAND"\n'
         "}\n\n"
@@ -235,6 +278,10 @@ def build_task_prompt(user_command: str | None) -> str:
         "- For commands like move above/hover over/go above an object, use intent hover_to_object.\n"
         "- For go home/return home, use intent go_home.\n"
         "- For move to inspection pose or named pose, use intent move_to_waypoint.\n"
+        "- For Cartesian nudges like move higher/lower/left/right/forward/back, use cartesian_offset.\n"
+        "- Cartesian offsets are meters in base_link: forward +dx, back -dx, left +dy, right -dy, up/higher +dz, down/lower -dz.\n"
+        "- Convert cm, millimeters, meters, slightly, and a little into numeric meter offsets; slightly/a little means 0.03 m.\n"
+        "- Never output a target pose, tcp_pose_world, trajectory, joint target, MoveIt goal, ROS topic, URScript, RTDE, or Dashboard command.\n"
         "- Use snake_case labels, e.g. red mug -> red_mug.\n"
         "- If unsupported, choose stop only for explicit stop/halt; otherwise use confidence 0.0 and error_code E_UNSUPPORTED_COMMAND.\n\n"
         f"User command: {command}"
@@ -252,6 +299,8 @@ def format_command_to_task_report(result: Dict[str, Any]) -> str:
             f"- intent: {_format_value(result.get('intent'))}",
             f"- target_label: {_format_value(result.get('target_label'))}",
             f"- waypoint: {_format_value(result.get('waypoint'))}",
+            f"- frame: {_format_value(result.get('frame'))}",
+            f"- cartesian_offset_m: {_format_value(result.get('cartesian_offset_m'))}",
             f"- confidence: {_format_value(result.get('confidence'))}",
             f"- blocking_reasons: {_format_value(result.get('blocking_reasons'))}",
             "",
@@ -271,6 +320,12 @@ def _not_requested_result() -> Dict[str, Any]:
         "intent": None,
         "target_label": None,
         "waypoint": None,
+        "frame": None,
+        "dx": None,
+        "dy": None,
+        "dz": None,
+        "cartesian_offset_m": None,
+        "translation_distance_m": None,
         "confidence": None,
         "accepted": False,
         "rejected": False,
@@ -406,6 +461,10 @@ def _task_from_llm_payload(payload: Dict[str, Any], user_command: str | None) ->
         "intent": _normalize_intent(payload.get("intent") or payload.get("intent_name")),
         "target_label": _snake_case(_string(payload.get("target_label"))),
         "waypoint": _snake_case(_string(payload.get("waypoint"))),
+        "frame": _string(payload.get("frame")) or DEFAULT_CARTESIAN_FRAME,
+        "dx": _optional_float(payload.get("dx")),
+        "dy": _optional_float(payload.get("dy")),
+        "dz": _optional_float(payload.get("dz")),
         "confidence": _confidence(payload),
         "error_code": error_code,
     }
@@ -416,6 +475,10 @@ def _base_task(user_command: str | None) -> Dict[str, Any]:
         "intent": None,
         "target_label": None,
         "waypoint": None,
+        "frame": None,
+        "dx": None,
+        "dy": None,
+        "dz": None,
         "confidence": None,
         "error_code": None,
         "user_command": user_command,
@@ -424,11 +487,18 @@ def _base_task(user_command: str | None) -> Dict[str, Any]:
 
 def _contract_fields(task: Dict[str, Any]) -> Dict[str, Any]:
     intent = _normalize_intent(task.get("intent") or task.get("intent_name"))
+    offset = _cartesian_offset(task) if intent == INTENT_CARTESIAN_OFFSET else None
     return {
         "intent": intent,
         "intent_name": intent,
         "target_label": _target_label(task),
         "waypoint": _string(task.get("waypoint")),
+        "frame": _string(task.get("frame")) if intent == INTENT_CARTESIAN_OFFSET else None,
+        "dx": offset[0] if offset else None,
+        "dy": offset[1] if offset else None,
+        "dz": offset[2] if offset else None,
+        "cartesian_offset_m": offset,
+        "translation_distance_m": round(_translation_distance(offset), 6) if offset else None,
         "confidence": _confidence(task),
     }
 
@@ -440,6 +510,12 @@ def _task_contract(task: Dict[str, Any], user_command: str | None, normalized_co
         "intent": fields["intent"],
         "target_label": fields["target_label"],
         "waypoint": fields["waypoint"],
+        "frame": fields["frame"],
+        "dx": fields["dx"],
+        "dy": fields["dy"],
+        "dz": fields["dz"],
+        "cartesian_offset_m": fields["cartesian_offset_m"],
+        "translation_distance_m": fields["translation_distance_m"],
         "confidence": fields["confidence"],
         "user_command": user_command,
         "normalized_command": normalized_command,
@@ -534,6 +610,41 @@ def _confidence(value: Dict[str, Any]) -> float | None:
     if confidence is not None:
         return confidence
     return _optional_float(value.get("overall_confidence"))
+
+
+def _cartesian_offset(task: Dict[str, Any]) -> list[float] | None:
+    values = [_optional_float(task.get(axis)) for axis in ("dx", "dy", "dz")]
+    if any(value is None for value in values):
+        return None
+    return [float(value) for value in values if value is not None]
+
+
+def _valid_cartesian_offset(offset: list[float]) -> bool:
+    if len(offset) != 3:
+        return False
+    if not all(_finite_number(value) for value in offset):
+        return False
+    return any(abs(value) > 0.0 for value in offset)
+
+
+def _translation_distance(offset: list[float] | None) -> float:
+    if not offset or len(offset) != 3:
+        return 0.0
+    return sum(float(value) ** 2 for value in offset) ** 0.5
+
+
+def _finite_number(value: Any) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return value == value and value not in {float("inf"), float("-inf")}
+
+
+def _allowed_cartesian_frames(config: Dict[str, Any]) -> set[str]:
+    frames = config.get("allowed_cartesian_frames")
+    if isinstance(frames, list):
+        values = {_string(frame) for frame in frames}
+        return {frame for frame in values if frame}
+    return set(ALLOWED_CARTESIAN_FRAMES)
 
 
 def _forbidden_robot_control_fields(value: Any, prefix: str = "") -> list[str]:

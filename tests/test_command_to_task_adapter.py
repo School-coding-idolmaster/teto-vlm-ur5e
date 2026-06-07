@@ -61,6 +61,58 @@ def test_rule_based_examples_match_task_contracts():
         assert result["task_contract"]["intent"] == intent
 
 
+def test_qwen_llm_callable_cartesian_offset_examples_pass_validation():
+    examples = [
+        ("move 10 cm higher", '{"intent":"cartesian_offset","frame":"base_link","dx":0.0,"dy":0.0,"dz":0.10,"confidence":0.94,"error_code":"OK"}', [0.0, 0.0, 0.10]),
+        ("move 5 cm to the left", '{"intent":"cartesian_offset","frame":"base_link","dx":0.0,"dy":0.05,"dz":0.0,"confidence":0.93,"error_code":"OK"}', [0.0, 0.05, 0.0]),
+        ("move forward 20 cm", '{"intent":"cartesian_offset","frame":"base_link","dx":0.20,"dy":0.0,"dz":0.0,"confidence":0.91,"error_code":"OK"}', [0.20, 0.0, 0.0]),
+        ("lower the robot slightly", '{"intent":"cartesian_offset","frame":"base_link","dx":0.0,"dy":0.0,"dz":-0.03,"confidence":0.88,"error_code":"OK"}', [0.0, 0.0, -0.03]),
+    ]
+
+    for command, response, expected_offset in examples:
+        result = evaluate_command_to_task_adapter(
+            CommandToTaskAdapterRequest(
+                requested=True,
+                user_command=command,
+                config={"adapter_mode": MODE_LLM_QWEN},
+                llm_callable=lambda _prompt, response=response: response,
+            )
+        )
+
+        assert result["command_to_task_status"] == STATUS_PASS
+        assert result["intent"] == "cartesian_offset"
+        assert result["frame"] == "base_link"
+        assert result["cartesian_offset_m"] == expected_offset
+        assert result["task_contract"]["cartesian_offset_m"] == expected_offset
+        assert result["task_contract"]["execution_policy"]["requires_validation_gates"] is True
+        assert result["tcp_pose_world_generated"] is False
+        assert result["joint_targets_generated"] is False
+
+
+def test_cartesian_offset_excessive_invalid_frame_and_malformed_outputs_block():
+    cases = [
+        ('{"intent":"cartesian_offset","frame":"base_link","dx":0.30,"dy":0.0,"dz":0.0,"confidence":0.95,"error_code":"OK"}', "E_EXCESSIVE_CARTESIAN_MOTION"),
+        ('{"intent":"cartesian_offset","frame":"tool0","dx":0.01,"dy":0.0,"dz":0.0,"confidence":0.95,"error_code":"OK"}', "E_INVALID_FRAME"),
+        ('{"intent":"cartesian_offset","frame":"base_link","dx":0.01,"dy":0.0,"confidence":0.95,"error_code":"OK"}', "E_CARTESIAN_OFFSET_REQUIRED"),
+        ('{"intent":"cartesian_offset","frame":"base_link","dx":0.0,"dy":0.0,"dz":0.0,"confidence":0.95,"error_code":"OK"}', "E_INVALID_CARTESIAN_OFFSET"),
+    ]
+
+    for response, reason in cases:
+        result = evaluate_command_to_task_adapter(
+            CommandToTaskAdapterRequest(
+                requested=True,
+                user_command="move somewhere",
+                config={"adapter_mode": MODE_LLM_QWEN},
+                llm_callable=lambda _prompt, response=response: response,
+            )
+        )
+
+        assert result["command_to_task_status"] == STATUS_BLOCKED
+        assert reason in result["blocking_reasons"]
+        assert result["moveit_called"] is False
+        assert result["real_robot_motion_executed"] is False
+
+
 def test_low_confidence_llm_output_blocks_before_planner_gateway():
     result = evaluate_command_to_task_adapter(
         CommandToTaskAdapterRequest(
