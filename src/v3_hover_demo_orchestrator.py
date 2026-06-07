@@ -8,6 +8,11 @@ from typing import Any, Dict
 
 import yaml
 
+from src.command_to_task_adapter import (
+    STATUS_PASS as COMMAND_TO_TASK_PASS,
+    CommandToTaskAdapterRequest,
+    evaluate_command_to_task_adapter,
+)
 from src.manual_confirmation_gate import (
     DEFAULT_CONFIRMATION_TIMEOUT_S,
     DEFAULT_CONFIRMATION_TOKEN,
@@ -123,8 +128,24 @@ def evaluate_v3_hover_demo(request: V3HoverDemoRequest | None = None) -> Dict[st
     blocking_reasons: list[str] = []
     warnings: list[str] = []
 
-    normalized = normalize_v3_command(user_command)
-    stages.append("COMMAND_NORMALIZED")
+    command_task = {}
+    command_to_task_config = _command_to_task_config(config)
+    if command_to_task_config:
+        command_task = evaluate_command_to_task_adapter(
+            CommandToTaskAdapterRequest(
+                requested=True,
+                user_command=user_command,
+                config_path=request.config_path,
+                config=command_to_task_config,
+            )
+        )
+        stages.append("COMMAND_TO_TASK_READY" if command_task.get("command_to_task_status") == COMMAND_TO_TASK_PASS else "COMMAND_TO_TASK_BLOCKED")
+        blocking_reasons.extend(_stage_blockers(command_task))
+        warnings.extend(_list(command_task.get("warnings")))
+        normalized = _normalized_from_task_contract(command_task, user_command)
+    else:
+        normalized = normalize_v3_command(user_command)
+        stages.append("COMMAND_NORMALIZED")
     if normalized.get("accepted") is not True:
         blocking_reasons.append(str(normalized.get("error_code") or "E_UNSUPPORTED_COMMAND"))
 
@@ -139,12 +160,13 @@ def evaluate_v3_hover_demo(request: V3HoverDemoRequest | None = None) -> Dict[st
     executor = {}
 
     if normalized.get("intent_name") == INTENT_HOVER_TO_OBJECT and not blocking_reasons:
+        perception_user_command = _perception_user_command(command_task, user_command)
         perception = evaluate_perception_shadow_pipeline(
             PerceptionShadowPipelineRequest(
                 requested=True,
                 config_path=request.config_path,
-                user_command=user_command,
-                config=_perception_config(config, user_command),
+                user_command=perception_user_command,
+                config=_perception_config(config, perception_user_command),
             )
         )
         _append_stages(
@@ -161,12 +183,15 @@ def evaluate_v3_hover_demo(request: V3HoverDemoRequest | None = None) -> Dict[st
         blocking_reasons.extend(_stage_blockers(perception))
         warnings.extend(_list(perception.get("warnings")))
 
+        planner_config = _planner_config(config)
+        if command_task.get("intent"):
+            planner_config["intent_name"] = command_task["intent"]
         planner = evaluate_planner_gateway_shadow(
             PlannerGatewayShadowRequest(
                 requested=True,
                 config_path=request.config_path,
                 perception_shadow_result=perception,
-                config=_planner_config(config),
+                config=planner_config,
             )
         )
         if planner.get("planner_input_ready") is True:
@@ -279,6 +304,7 @@ def evaluate_v3_hover_demo(request: V3HoverDemoRequest | None = None) -> Dict[st
         blocking_reasons=blocking_reasons,
         warnings=warnings,
         normalized=normalized,
+        command_task=command_task,
         perception=perception,
         planner=planner,
         ros2=ros2,
@@ -361,6 +387,7 @@ def _build_result(
     blocking_reasons: list[str],
     warnings: list[str],
     normalized: Dict[str, Any],
+    command_task: Dict[str, Any],
     perception: Dict[str, Any],
     planner: Dict[str, Any],
     ros2: Dict[str, Any],
@@ -424,6 +451,7 @@ def _build_result(
         "warnings": warnings,
         "stages": stages,
         "normalizer_result": normalized,
+        "command_to_task_result": command_task,
         "perception_shadow_result": perception,
         "planner_gateway_shadow_result": planner,
         "ros2_interface_readiness_result": ros2,
@@ -449,6 +477,49 @@ def _not_requested_result() -> Dict[str, Any]:
         "blocking_reasons": [],
         "warnings": [],
     }
+
+
+def _command_to_task_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    adapter = _nested(config, "command_to_task_adapter") or _nested(config, "command_to_task")
+    if adapter:
+        return dict(adapter)
+    if config.get("enable_command_to_task_adapter") is True:
+        return {
+            "adapter_mode": _string(config.get("command_to_task_adapter_mode")) or "llm_disabled",
+            "confidence_threshold": config.get("command_to_task_confidence_threshold", 0.60),
+        }
+    return {}
+
+
+def _normalized_from_task_contract(command_task: Dict[str, Any], user_command: str) -> Dict[str, Any]:
+    accepted = command_task.get("command_to_task_status") == COMMAND_TO_TASK_PASS
+    intent = _string(command_task.get("intent") or command_task.get("intent_name"))
+    target_label = _string(command_task.get("target_label"))
+    waypoint = _string(command_task.get("waypoint"))
+    target_query = target_label or waypoint
+    return {
+        "teto_version": command_task.get("teto_version"),
+        "intent_name": intent,
+        "target_query": target_query,
+        "target_label_hint": target_label,
+        "waypoint": waypoint,
+        "language": "unknown",
+        "accepted": accepted,
+        "rejected": not accepted,
+        "error_code": None if accepted else _string(command_task.get("error_code")),
+        "normalized_command": _string(command_task.get("normalized_command")) or _string(user_command) or "",
+        "user_command": user_command,
+        "task_contract": command_task.get("task_contract"),
+    }
+
+
+def _perception_user_command(command_task: Dict[str, Any], user_command: str) -> str:
+    if command_task.get("command_to_task_status") == COMMAND_TO_TASK_PASS:
+        intent = _string(command_task.get("intent") or command_task.get("intent_name"))
+        target_label = _string(command_task.get("target_label"))
+        if intent == INTENT_HOVER_TO_OBJECT and target_label:
+            return f"move above the {target_label.replace('_', ' ')}"
+    return user_command
 
 
 def _perception_config(config: Dict[str, Any], user_command: str) -> Dict[str, Any]:

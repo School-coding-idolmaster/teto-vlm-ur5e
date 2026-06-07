@@ -1,0 +1,9 @@
+command_to_task_adapter:
+  adapter_mode: qwen_llm
+  llm_backend: ollama
+  model_name: qwen2.5vl:3b
+  user_command: move above the red mug
+  confidence_threshold: 0.60
+  allow_ros_publish: false
+  allow_moveit_execute: false
+  allow_robot_motion: false
