@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import re
 import sys
 from dataclasses import dataclass
@@ -20,6 +21,10 @@ from src.cartesian_motion_gateway import (  # noqa: E402
     CartesianMotionGatewayRequest,
     evaluate_cartesian_motion_execution,
     evaluate_cartesian_motion_gateway,
+)
+from src.qwen_motion_parser import (  # noqa: E402
+    QwenMotionParserRequest,
+    evaluate_qwen_motion_parser,
 )
 
 
@@ -47,6 +52,13 @@ class ParsedMotionCommand:
     hard_safety_limit_m: float
     direction: str
     unit: str
+    parser_source: str = "rule_based"
+    llm_called: bool = False
+    model_name: str | None = None
+    qwen_endpoint: str | None = None
+    llm_latency_ms: float | None = None
+    raw_llm_output: str | None = None
+    parser_blocking_reasons: list[str] | None = None
 
     def task_contract(self, *, real_robot_motion_requested: bool, dry_run: bool) -> dict[str, Any]:
         return {
@@ -120,6 +132,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true", help="Parse and validate without executing.")
     parser.add_argument("--cmd", help='One-shot command, for example: --cmd "move up 5 mm".')
     parser.add_argument("--yes", action="store_true", help="Skip real-mode confirmation; only allowed together with --real --cmd.")
+    parser.add_argument("--parser", choices=["rule", "qwen", "auto"], default="qwen", help="Text parser mode. Default: qwen.")
+    parser.add_argument("--qwen-model", default=os.environ.get("TETO_QWEN_MODEL"), help="Qwen/Ollama model name.")
+    parser.add_argument("--qwen-endpoint", default=os.environ.get("TETO_QWEN_ENDPOINT"), help="Optional Ollama-compatible endpoint.")
+    parser.add_argument("--qwen-timeout-s", type=float, default=_env_float("TETO_QWEN_TIMEOUT_S"))
     parser.add_argument("--max-step-m", type=float, default=DEFAULT_MAX_STEP_M)
     parser.add_argument("--speed-scale", type=float, default=0.10)
     parser.add_argument("--acc-scale", type=float, default=0.10)
@@ -135,26 +151,74 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd is not None:
         command = args.cmd
+        input_mode = "cmd"
     else:
         try:
             command = input("Enter motion command: ")
+            input_mode = "manual"
         except EOFError:
-            print(_json({"final_status": STATUS_BLOCKED, "blocking_reasons": ["E_NO_INPUT"]}))
+            metadata = _parser_metadata(
+                input_mode="manual",
+                original_user_text="",
+                parser_mode=args.parser,
+                parser_source=None,
+                llm_called=False,
+                model_name=args.qwen_model,
+                qwen_endpoint=args.qwen_endpoint,
+                llm_latency_ms=None,
+                raw_llm_output=None,
+                normalized_contract=None,
+                parser_blocking_reasons=["E_NO_INPUT"],
+            )
+            print(_json({**metadata, "final_status": STATUS_BLOCKED, "blocking_reasons": ["E_NO_INPUT"], "real_robot_motion_executed": False}))
             return 2
 
-    try:
-        parsed = parse_motion_command(command, max_step_m=float(args.max_step_m))
-    except MotionParseError as exc:
-        print(_json({"final_status": STATUS_BLOCKED, "blocking_reasons": [str(exc)], "real_robot_motion_executed": False}))
+    parsed, parser_result = _parse_command_for_mode(
+        command,
+        parser_mode=args.parser,
+        real=bool(args.real),
+        dry_run=dry_run,
+        max_step_m=float(args.max_step_m),
+        input_mode=input_mode,
+        qwen_model=args.qwen_model,
+        qwen_endpoint=args.qwen_endpoint,
+        qwen_timeout_s=args.qwen_timeout_s,
+    )
+    parser_metadata = _metadata_from_parser_result(
+        parser_result,
+        input_mode=input_mode,
+        original_user_text=command,
+        parser_mode=args.parser,
+    )
+    _print_parser_summary(parser_metadata)
+
+    if parsed is None:
+        result = {
+            **parser_metadata,
+            "parsed_contract": None,
+            **_empty_motion_check(None),
+            "blocking_reasons": parser_metadata["parser_blocking_reasons"],
+            "goal_accepted": False,
+            "execute_accepted": False,
+            "trajectory_sent": False,
+            "controller_command_sent": False,
+            "real_robot_motion_executed": False,
+            "final_status": STATUS_BLOCKED,
+        }
+        print("Final execution evidence:")
+        print(_json(result))
         return 2
 
     printed_contract = parsed.task_contract(real_robot_motion_requested=bool(args.real), dry_run=dry_run)
+    parser_metadata["normalized_contract"] = printed_contract
+    print("Normalized TETO task contract:")
+    print(_json(printed_contract))
     print("Parsed TETO task contract:")
     print(_json(printed_contract))
 
     current_pose = _lookup_current_tcp_pose(timeout_s=3.0)
     if current_pose is None:
-        result = _blocked_result("E_CURRENT_TCP_POSE_MISSING", printed_contract)
+        result = _blocked_result("E_CURRENT_TCP_POSE_MISSING", printed_contract, parser_metadata)
         print("Final execution evidence:")
         print(_json(result))
         return 2
@@ -182,6 +246,7 @@ def main(argv: list[str] | None = None) -> int:
             motion=motion,
             execution={},
             parsed_contract=printed_contract,
+            parser_metadata=parser_metadata,
             blocking_reasons=motion.get("blocking_reasons", []),
         )
         print("Final execution evidence:")
@@ -189,7 +254,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if dry_run:
-        result = _evidence(status=STATUS_PASS, motion=motion, execution={}, parsed_contract=printed_contract)
+        result = _evidence(status=STATUS_PASS, motion=motion, execution={}, parsed_contract=printed_contract, parser_metadata=parser_metadata)
         print("Final execution evidence:")
         print(_json(result))
         return 0
@@ -202,6 +267,7 @@ def main(argv: list[str] | None = None) -> int:
                 motion=motion,
                 execution={},
                 parsed_contract=printed_contract,
+                parser_metadata=parser_metadata,
                 blocking_reasons=["E_CONFIRMATION_MISMATCH"],
             )
             print("Final execution evidence:")
@@ -215,6 +281,7 @@ def main(argv: list[str] | None = None) -> int:
             motion=motion,
             execution={},
             parsed_contract=printed_contract,
+            parser_metadata=parser_metadata,
             blocking_reasons=prereq_blockers,
         )
         print("Final execution evidence:")
@@ -239,10 +306,167 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     status = STATUS_PASS if execution.get("real_robot_motion_executed") is True else STATUS_BLOCKED
-    result = _evidence(status=status, motion=motion, execution=execution, parsed_contract=printed_contract)
+    result = _evidence(status=status, motion=motion, execution=execution, parsed_contract=printed_contract, parser_metadata=parser_metadata)
     print("Final execution evidence:")
     print(_json(result))
     return 0 if status == STATUS_PASS else 2
+
+
+def _parse_command_for_mode(
+    command: str,
+    *,
+    parser_mode: str,
+    real: bool,
+    dry_run: bool,
+    max_step_m: float,
+    input_mode: str,
+    qwen_model: str | None,
+    qwen_endpoint: str | None,
+    qwen_timeout_s: float | None,
+) -> tuple[ParsedMotionCommand | None, dict[str, Any]]:
+    if parser_mode == "rule":
+        return _parse_rule_result(command, max_step_m=max_step_m, input_mode=input_mode)
+
+    qwen_result = evaluate_qwen_motion_parser(
+        QwenMotionParserRequest(
+            user_text=command,
+            max_distance_m=max_step_m,
+            hard_safety_limit_m=HARD_SAFETY_LIMIT_M,
+            model_name=qwen_model,
+            endpoint=qwen_endpoint,
+            timeout_s=qwen_timeout_s,
+        )
+    )
+    if qwen_result.get("qwen_motion_parser_status") == STATUS_PASS:
+        return _parsed_from_qwen_result(command, qwen_result, max_step_m=max_step_m), qwen_result
+
+    if parser_mode == "auto" and dry_run and not real:
+        parsed, rule_result = _parse_rule_result(command, max_step_m=max_step_m, input_mode=input_mode)
+        if parsed is not None:
+            rule_result["warnings"] = _unique(_string_list(rule_result.get("warnings")) + ["qwen_failed_dry_run_rule_fallback"])
+            rule_result["raw_llm_output"] = qwen_result.get("raw_llm_output")
+            rule_result["qwen_blocking_reasons"] = qwen_result.get("parser_blocking_reasons", [])
+            return parsed, rule_result
+
+    return None, qwen_result
+
+
+def _parse_rule_result(command: str, *, max_step_m: float, input_mode: str) -> tuple[ParsedMotionCommand | None, dict[str, Any]]:
+    try:
+        parsed = parse_motion_command(command, max_step_m=max_step_m)
+    except MotionParseError as exc:
+        reasons = [str(exc)]
+        return None, {
+            "parser_source": "rule_based",
+            "llm_called": False,
+            "model_name": None,
+            "qwen_endpoint": None,
+            "llm_latency_ms": None,
+            "raw_llm_output": None,
+            "normalized_contract": None,
+            "parser_blocking_reasons": reasons,
+            "blocking_reasons": reasons,
+            "input_mode": input_mode,
+        }
+    return parsed, {
+        "parser_source": "rule_based",
+        "llm_called": False,
+        "model_name": None,
+        "qwen_endpoint": None,
+        "llm_latency_ms": None,
+        "raw_llm_output": None,
+        "normalized_contract": None,
+        "parser_blocking_reasons": [],
+        "blocking_reasons": [],
+        "input_mode": input_mode,
+    }
+
+
+def _parsed_from_qwen_result(command: str, result: dict[str, Any], *, max_step_m: float) -> ParsedMotionCommand:
+    delta = result.get("delta_m")
+    if not _vector3(delta):
+        raise MotionParseError("E_INVALID_QWEN_DELTA")
+    distance_m = float(result.get("distance_m"))
+    return ParsedMotionCommand(
+        command=command.strip(),
+        frame="base_link",
+        delta_m=[round(float(value), 6) for value in delta],
+        distance_m=round(distance_m, 6),
+        max_distance_m=max_step_m,
+        hard_safety_limit_m=HARD_SAFETY_LIMIT_M,
+        direction=f"{result.get('axis')}{result.get('direction')}",
+        unit="qwen_json",
+        parser_source="qwen_llm",
+        llm_called=True,
+        model_name=result.get("model_name"),
+        qwen_endpoint=result.get("qwen_endpoint"),
+        llm_latency_ms=result.get("llm_latency_ms"),
+        raw_llm_output=result.get("raw_llm_output"),
+        parser_blocking_reasons=result.get("parser_blocking_reasons", []),
+    )
+
+
+def _metadata_from_parser_result(
+    parser_result: dict[str, Any],
+    *,
+    input_mode: str,
+    original_user_text: str,
+    parser_mode: str,
+) -> dict[str, Any]:
+    return _parser_metadata(
+        input_mode=input_mode,
+        original_user_text=original_user_text,
+        parser_mode=parser_mode,
+        parser_source=parser_result.get("parser_source"),
+        llm_called=parser_result.get("llm_called") is True,
+        model_name=parser_result.get("model_name"),
+        qwen_endpoint=parser_result.get("qwen_endpoint"),
+        llm_latency_ms=parser_result.get("llm_latency_ms"),
+        raw_llm_output=parser_result.get("raw_llm_output"),
+        normalized_contract=parser_result.get("normalized_contract"),
+        parser_blocking_reasons=_string_list(parser_result.get("parser_blocking_reasons") or parser_result.get("blocking_reasons")),
+    )
+
+
+def _parser_metadata(
+    *,
+    input_mode: str,
+    original_user_text: str,
+    parser_mode: str,
+    parser_source: str | None,
+    llm_called: bool,
+    model_name: str | None,
+    qwen_endpoint: str | None,
+    llm_latency_ms: float | None,
+    raw_llm_output: str | None,
+    normalized_contract: dict[str, Any] | None,
+    parser_blocking_reasons: list[str],
+) -> dict[str, Any]:
+    return {
+        "input_mode": input_mode,
+        "original_user_text": original_user_text,
+        "parser_mode": parser_mode,
+        "parser_source": parser_source,
+        "llm_called": llm_called,
+        "model_name": model_name,
+        "qwen_endpoint": qwen_endpoint,
+        "llm_latency_ms": llm_latency_ms,
+        "raw_llm_output": raw_llm_output,
+        "normalized_contract": normalized_contract,
+        "parser_blocking_reasons": parser_blocking_reasons,
+    }
+
+
+def _print_parser_summary(metadata: dict[str, Any]) -> None:
+    print(f"Original user text: {metadata.get('original_user_text')}")
+    print(f"Parser mode: {metadata.get('parser_mode')}")
+    print(f"LLM called: {str(metadata.get('llm_called')).lower()}")
+    if metadata.get("raw_llm_output") is not None:
+        print("Raw Qwen output:")
+        print(metadata["raw_llm_output"])
+    if metadata.get("normalized_contract") is not None:
+        print("Normalized TETO task contract:")
+        print(_json(metadata["normalized_contract"]))
 
 
 def _normalize(command: str) -> str:
@@ -459,11 +683,13 @@ def _evidence(
     motion: dict[str, Any],
     execution: dict[str, Any],
     parsed_contract: dict[str, Any],
+    parser_metadata: dict[str, Any],
     blocking_reasons: list[str] | None = None,
 ) -> dict[str, Any]:
     moveit = execution.get("moveit_pose_executor_result") if isinstance(execution.get("moveit_pose_executor_result"), dict) else {}
     motion_check = _motion_check_fields(motion, moveit, parsed_contract)
     return {
+        **parser_metadata,
         "parsed_contract": parsed_contract,
         "cartesian_motion_gateway_status": motion.get("cartesian_motion_gateway_status"),
         "cartesian_motion_execution_status": execution.get("cartesian_motion_execution_status"),
@@ -482,9 +708,11 @@ def _evidence(
     }
 
 
-def _blocked_result(reason: str, parsed_contract: dict[str, Any]) -> dict[str, Any]:
+def _blocked_result(reason: str, parsed_contract: dict[str, Any], parser_metadata: dict[str, Any]) -> dict[str, Any]:
     return {
+        **parser_metadata,
         "parsed_contract": parsed_contract,
+        **_empty_motion_check(parsed_contract),
         "goal_accepted": False,
         "execute_accepted": False,
         "moveit_execute_error_code": None,
@@ -518,12 +746,52 @@ def _motion_check_fields(motion: dict[str, Any], moveit: dict[str, Any], parsed_
     }
 
 
+def _empty_motion_check(parsed_contract: dict[str, Any] | None) -> dict[str, Any]:
+    parsed_contract = parsed_contract if isinstance(parsed_contract, dict) else {}
+    return {
+        "motion_check_source": "moveit_pose_executor",
+        "motion_check_current_position_m": None,
+        "motion_check_target_position_m": None,
+        "motion_check_distance_m": None,
+        "motion_check_max_distance_m": parsed_contract.get("max_distance_m"),
+        "motion_check_hard_limit_m": parsed_contract.get("hard_safety_limit_m"),
+        "motion_check_eps": EPS,
+    }
+
+
 def _vector3(value: Any) -> bool:
     return (
         isinstance(value, list)
         and len(value) == 3
         and all(isinstance(item, (int, float)) and not isinstance(item, bool) and math.isfinite(float(item)) for item in value)
     )
+
+
+def _env_float(name: str) -> float | None:
+    value = os.environ.get(name)
+    if not value:
+        return None
+    try:
+        number = float(value)
+    except ValueError:
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item) for item in value if item]
+    if isinstance(value, str) and value:
+        return [value]
+    return []
+
+
+def _unique(values: list[str]) -> list[str]:
+    result = []
+    for value in values:
+        if value and value not in result:
+            result.append(value)
+    return result
 
 
 def _json(data: dict[str, Any]) -> str:

@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from scripts import text_to_ur5e_real_motion as cli
@@ -91,25 +93,51 @@ def test_rejects_motion_over_default_step_limit():
 
 def test_cmd_parses_without_interactive_prompt(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
+    monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_success)
     monkeypatch.setattr("builtins.input", lambda _prompt: pytest.fail("input prompt should not be used"))
 
-    exit_code = cli.main(["--dry-run", "--cmd", "move up 5 mm"])
+    exit_code = cli.main(["--dry-run", "--cmd", "raise the tcp by 5 millimeters"])
 
     output = capsys.readouterr().out
     assert exit_code == 0
     assert "Enter motion command:" not in output
+    assert '"input_mode": "cmd"' in output
+    assert '"original_user_text": "raise the tcp by 5 millimeters"' in output
+    assert '"parser_source": "qwen_llm"' in output
+    assert '"llm_called": true' in output
     assert '"final_status": "PASS"' in output
     assert '"real_robot_motion_executed": false' in output
+
+
+def test_manual_qwen_path_reads_stdin_and_preserves_text(monkeypatch, capsys):
+    prompts = []
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
+    monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_success)
+    monkeypatch.setattr("builtins.input", lambda prompt: prompts.append(prompt) or "raise the tcp by 5 millimeters")
+
+    exit_code = cli.main(["--dry-run"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert prompts == ["Enter motion command: "]
+    assert '"input_mode": "manual"' in output
+    assert '"original_user_text": "raise the tcp by 5 millimeters"' in output
+    assert '"parser_mode": "qwen"' in output
+    assert '"parser_source": "qwen_llm"' in output
+    assert '"llm_called": true' in output
+    assert '"delta_m": [\n      0.0,\n      0.0,\n      0.005\n    ]' in output
 
 
 def test_dry_run_with_cmd_works(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
 
-    exit_code = cli.main(["--cmd", "move left 5 mm"])
+    exit_code = cli.main(["--parser", "rule", "--cmd", "move left 5 mm"])
 
     output = capsys.readouterr().out
     assert exit_code == 0
     assert '"dry_run": true' in output
+    assert '"parser_source": "rule_based"' in output
+    assert '"llm_called": false' in output
     assert '"final_status": "PASS"' in output
     assert '"motion_check_source": "moveit_pose_executor"' in output
     assert '"motion_check_distance_m": 0.005' in output
@@ -117,15 +145,18 @@ def test_dry_run_with_cmd_works(monkeypatch, capsys):
 
 def test_real_confirmation_accepts_exact_lowercase_y(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
+    monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_success)
     monkeypatch.setattr(cli, "_execution_prereq_blockers", lambda timeout_s: [])
     monkeypatch.setattr(cli, "evaluate_cartesian_motion_execution", _fake_success_execution)
     monkeypatch.setattr("builtins.input", lambda prompt: "y")
 
-    exit_code = cli.main(["--real", "--cmd", "move up 5 mm"])
+    exit_code = cli.main(["--real", "--cmd", "raise the tcp by 5 millimeters"])
 
     output = capsys.readouterr().out
     assert exit_code == 0
     assert "Execute on real UR5e? Type y to continue:" not in output
+    assert '"llm_called": true' in output
+    assert '"parser_source": "qwen_llm"' in output
     assert '"final_status": "PASS"' in output
     assert '"real_robot_motion_executed": true' in output
     assert '"moveit_execute_error_code": 1' in output
@@ -133,11 +164,12 @@ def test_real_confirmation_accepts_exact_lowercase_y(monkeypatch, capsys):
 
 def test_confirmation_mismatch_aborts(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
+    monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_success)
     monkeypatch.setattr(cli, "_execution_prereq_blockers", lambda timeout_s: pytest.fail("prereq check should not run"))
     monkeypatch.setattr(cli, "evaluate_cartesian_motion_execution", lambda request: pytest.fail("execution should not run"))
     monkeypatch.setattr("builtins.input", lambda prompt: "Y")
 
-    exit_code = cli.main(["--real", "--cmd", "move up 5 mm"])
+    exit_code = cli.main(["--real", "--cmd", "raise the tcp by 5 millimeters"])
 
     output = capsys.readouterr().out
     assert exit_code == 2
@@ -147,14 +179,16 @@ def test_confirmation_mismatch_aborts(monkeypatch, capsys):
 
 def test_real_yes_with_cmd_is_allowed(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
+    monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_success)
     monkeypatch.setattr(cli, "_execution_prereq_blockers", lambda timeout_s: [])
     monkeypatch.setattr(cli, "evaluate_cartesian_motion_execution", _fake_success_execution)
     monkeypatch.setattr("builtins.input", lambda _prompt: pytest.fail("confirmation prompt should not be used"))
 
-    exit_code = cli.main(["--real", "--yes", "--cmd", "move up 5 mm"])
+    exit_code = cli.main(["--real", "--yes", "--cmd", "raise the tcp by 5 millimeters"])
 
     output = capsys.readouterr().out
     assert exit_code == 0
+    assert '"llm_called": true' in output
     assert '"final_status": "PASS"' in output
     assert '"real_robot_motion_executed": true' in output
 
@@ -175,6 +209,43 @@ def _pose():
         "frame": "base_link",
         "position_m": [0.4, 0.0, 0.3],
         "orientation_xyzw": [0.0, 0.0, 0.0, 1.0],
+    }
+
+
+def _fake_qwen_success(request):
+    raw = json.dumps(
+        {
+            "intent": "relative_cartesian_motion",
+            "axis": "z",
+            "direction": "+",
+            "distance_m": 0.005,
+            "confidence": 0.95,
+            "reason": "small upward relative motion",
+        }
+    )
+    return {
+        "qwen_motion_parser_status": "PASS",
+        "parser_source": "qwen_llm",
+        "llm_called": True,
+        "model_name": request.model_name or "qwen2.5vl:3b",
+        "qwen_endpoint": request.endpoint,
+        "llm_latency_ms": 1.2,
+        "raw_llm_output": raw,
+        "normalized_contract": {
+            "intent": "relative_cartesian_motion",
+            "frame": "base_link",
+            "delta_m": [0.0, 0.0, 0.005],
+            "max_distance_m": request.max_distance_m,
+            "hard_safety_limit_m": request.hard_safety_limit_m,
+            "must_confirm": True,
+        },
+        "axis": "z",
+        "direction": "+",
+        "distance_m": 0.005,
+        "confidence": 0.95,
+        "delta_m": [0.0, 0.0, 0.005],
+        "parser_blocking_reasons": [],
+        "blocking_reasons": [],
     }
 
 
