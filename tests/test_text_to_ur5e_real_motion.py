@@ -1,5 +1,6 @@
 import pytest
 
+from scripts import text_to_ur5e_real_motion as cli
 from scripts.text_to_ur5e_real_motion import MotionParseError, parse_motion_command
 
 
@@ -57,3 +58,107 @@ def test_rejects_motion_over_default_step_limit():
         parse_motion_command("move up 6 mm")
 
     assert str(exc.value) == "E_EXCEEDS_MAX_STEP"
+
+
+def test_cmd_parses_without_interactive_prompt(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
+    monkeypatch.setattr("builtins.input", lambda _prompt: pytest.fail("input prompt should not be used"))
+
+    exit_code = cli.main(["--dry-run", "--cmd", "move up 5 mm"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "Enter motion command:" not in output
+    assert '"final_status": "PASS"' in output
+    assert '"real_robot_motion_executed": false' in output
+
+
+def test_dry_run_with_cmd_works(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
+
+    exit_code = cli.main(["--cmd", "move left 5 mm"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert '"dry_run": true' in output
+    assert '"final_status": "PASS"' in output
+
+
+def test_real_confirmation_accepts_exact_lowercase_y(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
+    monkeypatch.setattr(cli, "_execution_prereq_blockers", lambda timeout_s: [])
+    monkeypatch.setattr(cli, "evaluate_cartesian_motion_execution", _fake_success_execution)
+    monkeypatch.setattr("builtins.input", lambda prompt: "y")
+
+    exit_code = cli.main(["--real", "--cmd", "move up 5 mm"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "Execute on real UR5e? Type y to continue:" not in output
+    assert '"final_status": "PASS"' in output
+    assert '"real_robot_motion_executed": true' in output
+    assert '"moveit_execute_error_code": 1' in output
+
+
+def test_confirmation_mismatch_aborts(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
+    monkeypatch.setattr(cli, "_execution_prereq_blockers", lambda timeout_s: pytest.fail("prereq check should not run"))
+    monkeypatch.setattr(cli, "evaluate_cartesian_motion_execution", lambda request: pytest.fail("execution should not run"))
+    monkeypatch.setattr("builtins.input", lambda prompt: "Y")
+
+    exit_code = cli.main(["--real", "--cmd", "move up 5 mm"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 2
+    assert '"E_CONFIRMATION_MISMATCH"' in output
+    assert '"real_robot_motion_executed": false' in output
+
+
+def test_real_yes_with_cmd_is_allowed(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
+    monkeypatch.setattr(cli, "_execution_prereq_blockers", lambda timeout_s: [])
+    monkeypatch.setattr(cli, "evaluate_cartesian_motion_execution", _fake_success_execution)
+    monkeypatch.setattr("builtins.input", lambda _prompt: pytest.fail("confirmation prompt should not be used"))
+
+    exit_code = cli.main(["--real", "--yes", "--cmd", "move up 5 mm"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert '"final_status": "PASS"' in output
+    assert '"real_robot_motion_executed": true' in output
+
+
+def test_real_yes_without_cmd_is_rejected(monkeypatch, capsys):
+    monkeypatch.setattr("builtins.input", lambda _prompt: pytest.fail("command prompt should not be used"))
+
+    exit_code = cli.main(["--real", "--yes"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 2
+    assert '"E_YES_REQUIRES_CMD"' in output
+    assert '"real_robot_motion_executed": false' in output
+
+
+def _pose():
+    return {
+        "frame": "base_link",
+        "position_m": [0.4, 0.0, 0.3],
+        "orientation_xyzw": [0.0, 0.0, 0.0, 1.0],
+    }
+
+
+def _fake_success_execution(request):
+    return {
+        "cartesian_motion_execution_status": "PASS",
+        "trajectory_sent": True,
+        "controller_command_sent": True,
+        "real_robot_motion_executed": True,
+        "blocking_reasons": [],
+        "warnings": [],
+        "moveit_pose_executor_result": {
+            "goal_accepted": True,
+            "execute_success": True,
+            "moveit_execute_error_code": 1,
+            "moveit_execute_error_code_name": "SUCCESS",
+        },
+    }

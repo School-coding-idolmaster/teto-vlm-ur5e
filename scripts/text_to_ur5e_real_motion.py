@@ -25,7 +25,7 @@ from src.cartesian_motion_gateway import (  # noqa: E402
 
 DEFAULT_MAX_STEP_M = 0.005
 HARD_SAFETY_LIMIT_M = 0.01
-CONFIRMATION_TOKEN = "EXECUTE_REAL_UR5E"
+CONFIRMATION_REPLY = "y"
 
 STATUS_PASS = "PASS"
 STATUS_BLOCKED = "BLOCKED"
@@ -117,6 +117,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Interactive text-to-UR5e relative Cartesian motion entrypoint.")
     parser.add_argument("--real", action="store_true", help="Enable real MoveIt ExecuteTrajectory.")
     parser.add_argument("--dry-run", action="store_true", help="Parse and validate without executing.")
+    parser.add_argument("--cmd", help='One-shot command, for example: --cmd "move up 5 mm".')
+    parser.add_argument("--yes", action="store_true", help="Skip real-mode confirmation; only allowed together with --real --cmd.")
     parser.add_argument("--max-step-m", type=float, default=DEFAULT_MAX_STEP_M)
     parser.add_argument("--speed-scale", type=float, default=0.10)
     parser.add_argument("--acc-scale", type=float, default=0.10)
@@ -125,13 +127,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.real and args.dry_run:
         print(_json({"final_status": STATUS_BLOCKED, "blocking_reasons": ["E_REAL_AND_DRY_RUN_CONFLICT"]}))
         return 2
+    if args.real and args.yes and args.cmd is None:
+        print(_json({"final_status": STATUS_BLOCKED, "blocking_reasons": ["E_YES_REQUIRES_CMD"], "real_robot_motion_executed": False}))
+        return 2
     dry_run = not args.real or args.dry_run
 
-    try:
-        command = input("Enter motion command: ")
-    except EOFError:
-        print(_json({"final_status": STATUS_BLOCKED, "blocking_reasons": ["E_NO_INPUT"]}))
-        return 2
+    if args.cmd is not None:
+        command = args.cmd
+    else:
+        try:
+            command = input("Enter motion command: ")
+        except EOFError:
+            print(_json({"final_status": STATUS_BLOCKED, "blocking_reasons": ["E_NO_INPUT"]}))
+            return 2
 
     try:
         parsed = parse_motion_command(command, max_step_m=float(args.max_step_m))
@@ -185,18 +193,19 @@ def main(argv: list[str] | None = None) -> int:
         print(_json(result))
         return 0
 
-    confirmation = input(f"Type {CONFIRMATION_TOKEN} to continue: ").strip()
-    if confirmation != CONFIRMATION_TOKEN:
-        result = _evidence(
-            status=STATUS_BLOCKED,
-            motion=motion,
-            execution={},
-            parsed_contract=printed_contract,
-            blocking_reasons=["E_CONFIRMATION_MISMATCH"],
-        )
-        print("Final execution evidence:")
-        print(_json(result))
-        return 2
+    if not args.yes:
+        confirmation = input(f"Execute on real UR5e? Type {CONFIRMATION_REPLY} to continue: ")
+        if confirmation != CONFIRMATION_REPLY:
+            result = _evidence(
+                status=STATUS_BLOCKED,
+                motion=motion,
+                execution={},
+                parsed_contract=printed_contract,
+                blocking_reasons=["E_CONFIRMATION_MISMATCH"],
+            )
+            print("Final execution evidence:")
+            print(_json(result))
+            return 2
 
     prereq_blockers = _execution_prereq_blockers(timeout_s=3.0)
     if prereq_blockers:
