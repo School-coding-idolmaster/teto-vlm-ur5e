@@ -16,8 +16,9 @@ CONTRACT_VERSION = "teto_qwen_motion_parser.v1"
 STATUS_PASS = "PASS"
 STATUS_BLOCKED = "BLOCKED"
 
-DEFAULT_MODEL_NAME = "qwen2.5vl:3b"
-DEFAULT_TIMEOUT_S = 15.0
+DEFAULT_MODEL_NAME = "Qwen/Qwen2.5-VL-3B-Instruct"
+DEFAULT_ENDPOINT = "http://127.0.0.1:18080/api/generate"
+DEFAULT_TIMEOUT_S = 60.0
 DEFAULT_CONFIDENCE_THRESHOLD = 0.80
 DEFAULT_FRAME = "base_link"
 EPS = 1e-9
@@ -88,7 +89,7 @@ class QwenMotionParserRequest:
 def evaluate_qwen_motion_parser(request: QwenMotionParserRequest) -> Dict[str, Any]:
     user_text = _string(request.user_text)
     model_name = _string(request.model_name) or os.environ.get("TETO_QWEN_MODEL") or DEFAULT_MODEL_NAME
-    endpoint = _string(request.endpoint) or os.environ.get("TETO_QWEN_ENDPOINT")
+    endpoint = _string(request.endpoint) or os.environ.get("TETO_QWEN_ENDPOINT") or DEFAULT_ENDPOINT
     timeout_s = _optional_float(request.timeout_s) or _optional_float(os.environ.get("TETO_QWEN_TIMEOUT_S")) or DEFAULT_TIMEOUT_S
     prompt = build_qwen_motion_prompt(user_text)
     start = time.monotonic()
@@ -184,15 +185,17 @@ def evaluate_qwen_motion_parser(request: QwenMotionParserRequest) -> Dict[str, A
 
 def build_qwen_motion_prompt(user_text: str) -> str:
     return (
-        "You are a safety-bounded parser for TETO UR5e relative Cartesian motion.\n"
+        "You are a strict motion-command parser for a UR5e robot.\n"
         "Return STRICT JSON ONLY. No markdown, no prose, no code fences.\n"
-        "Supported action: ONLY one small relative TCP translation along base_link x, y, or z.\n"
-        "Allowed directions: up/down/left/right/forward/backward, or explicit +/- x/y/z axis moves.\n"
-        "Allowed units: millimeters, mm, meters, m. Convert distance_m to meters.\n"
-        "Reject ambiguous commands and any command involving objects, vision, hover, grasp, pick, rotate,\n"
-        "joint motion, velocity, force, URScript, RTDE, dashboard, trajectories, or large motion.\n"
-        "If unsupported, still return JSON with intent \"unsupported\", confidence below 0.80, and a reason.\n"
-        "Required JSON schema:\n"
+        "Supported commands are ONLY small relative Cartesian TCP motions:\n"
+        "- up/down\n"
+        "- left/right\n"
+        "- forward/backward\n"
+        "- +x/-x/+y/-y/+z/-z\n"
+        "Distance must be 5 mm or less. Convert distance_m to meters.\n"
+        "Reject object, vision, grasp, pick, hover-above-object, rotate, joint, velocity, force,\n"
+        "URScript, RTDE, dashboard, trajectories, and ambiguous commands.\n"
+        "Valid output schema:\n"
         "{\n"
         "  \"intent\": \"relative_cartesian_motion\",\n"
         "  \"axis\": \"x\" | \"y\" | \"z\",\n"
@@ -201,13 +204,22 @@ def build_qwen_motion_prompt(user_text: str) -> str:
         "  \"confidence\": number,\n"
         "  \"reason\": string\n"
         "}\n"
+        "If unsafe/unsupported/ambiguous, return:\n"
+        "{\n"
+        "  \"intent\": \"reject\",\n"
+        "  \"axis\": null,\n"
+        "  \"direction\": null,\n"
+        "  \"distance_m\": 0.0,\n"
+        "  \"confidence\": 0.0,\n"
+        "  \"reason\": \"...\"\n"
+        "}\n"
         f"User command: {user_text}"
     )
 
 
 def _call_qwen(*, prompt: str, model_name: str, endpoint: str | None, timeout_s: float) -> str:
     if endpoint:
-        return _call_ollama_http(prompt=prompt, model_name=model_name, endpoint=endpoint, timeout_s=timeout_s)
+        return _call_http_endpoint(prompt=prompt, model_name=model_name, endpoint=endpoint, timeout_s=timeout_s)
     try:
         from ollama import chat
     except ImportError as exc:
@@ -224,17 +236,23 @@ def _call_qwen(*, prompt: str, model_name: str, endpoint: str | None, timeout_s:
     raise RuntimeError("Qwen response did not contain message.content")
 
 
-def _call_ollama_http(*, prompt: str, model_name: str, endpoint: str, timeout_s: float) -> str:
+def _call_http_endpoint(*, prompt: str, model_name: str, endpoint: str, timeout_s: float) -> str:
     url = endpoint.rstrip("/")
-    if not url.endswith("/api/chat"):
-        url = f"{url}/api/chat"
+    generate_style = url.endswith("/api/generate")
+    if not (url.endswith("/api/generate") or url.endswith("/api/chat")):
+        url = f"{url}/api/generate"
+        generate_style = True
+    body = {
+        "model": model_name,
+        "stream": False,
+        "options": {"temperature": 0.0, "num_predict": 128},
+    }
+    if generate_style:
+        body["prompt"] = prompt
+    else:
+        body["messages"] = [{"role": "user", "content": prompt}]
     payload = json.dumps(
-        {
-            "model": model_name,
-            "messages": [{"role": "user", "content": prompt}],
-            "stream": False,
-            "options": {"temperature": 0.0},
-        }
+        body
     ).encode("utf-8")
     request = urllib.request.Request(
         url,
@@ -247,6 +265,8 @@ def _call_ollama_http(*, prompt: str, model_name: str, endpoint: str, timeout_s:
             data = json.loads(response.read().decode("utf-8"))
     except urllib.error.URLError as exc:
         raise RuntimeError(f"Qwen endpoint request failed: {exc}") from exc
+    if isinstance(data, dict) and isinstance(data.get("response"), str):
+        return data["response"]
     message = data.get("message") if isinstance(data, dict) else None
     if isinstance(message, dict) and isinstance(message.get("content"), str):
         return message["content"]
