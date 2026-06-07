@@ -67,6 +67,9 @@ def test_plan_success_comes_from_move_group_action_result(monkeypatch):
 
 
 def test_plan_allows_exact_relative_max_translation_from_nonzero_tcp_pose(monkeypatch):
+    current_position = [-0.153217, 0.315916, 1.046994]
+    target_position = [-0.153217, 0.315916, 1.051994]
+
     monkeypatch.setattr(
         "src.moveit_pose_executor._plan_with_move_group_action",
         lambda _target_pose, _config: {
@@ -84,15 +87,79 @@ def test_plan_allows_exact_relative_max_translation_from_nonzero_tcp_pose(monkey
     result = evaluate_moveit_pose_plan(
         MoveItPoseExecutorRequest(
             requested=True,
-            target_pose=_pose([-0.154964, 0.312309, 1.0460420000000001]),
-            current_tcp_pose=_pose([-0.154964, 0.312309, 1.041042]),
-            config={**_base_config(), "max_translation_m": 0.005},
+            target_pose=_pose(target_position),
+            current_tcp_pose=_pose(current_position),
+            config={**_base_config(), "max_translation_m": 0.005, "hard_safety_limit_m": 0.01},
         )
     )
 
     assert result["moveit_pose_executor_status"] == "PASS"
     assert E_EXCESSIVE_CARTESIAN_MOTION not in result["blocking_reasons"]
     assert result["translation_distance_m"] == 0.005
+    assert result["motion_check_source"] == "moveit_pose_executor"
+    assert result["motion_check_current_position_m"] == current_position
+    assert result["motion_check_target_position_m"] == target_position
+    assert result["motion_check_distance_m"] == 0.005
+    assert result["motion_check_max_distance_m"] == 0.005
+    assert result["motion_check_hard_limit_m"] == 0.01
+    assert result["motion_check_eps"] == 1e-9
+
+
+def test_plan_blocks_relative_motion_above_hard_safety_limit_before_moveit(monkeypatch):
+    current_position = [-0.153217, 0.315916, 1.046994]
+    target_position = [-0.153217, 0.315916, 1.066994]
+    called = False
+
+    def fake_plan(_target_pose, _config):
+        nonlocal called
+        called = True
+        return {"success": True}
+
+    monkeypatch.setattr("src.moveit_pose_executor._plan_with_move_group_action", fake_plan)
+
+    result = evaluate_moveit_pose_plan(
+        MoveItPoseExecutorRequest(
+            requested=True,
+            target_pose=_pose(target_position),
+            current_tcp_pose=_pose(current_position),
+            config={**_base_config(), "max_translation_m": 0.005, "hard_safety_limit_m": 0.01},
+        )
+    )
+
+    assert result["moveit_pose_executor_status"] == "BLOCKED"
+    assert E_EXCESSIVE_CARTESIAN_MOTION in result["blocking_reasons"]
+    assert result["moveit_plan_called"] is False
+    assert called is False
+    assert result["motion_check_distance_m"] == 0.02
+
+
+def test_plan_allows_exact_hard_limit_when_max_allows_it(monkeypatch):
+    monkeypatch.setattr(
+        "src.moveit_pose_executor._plan_with_move_group_action",
+        lambda _target_pose, _config: {
+            "action_call_attempted": True,
+            "action_server_available": True,
+            "goal_accepted": True,
+            "success": True,
+            "error_code": 1,
+            "error_code_name": "SUCCESS",
+            "planning_time_s": 0.1,
+            "trajectory_point_count": 3,
+        },
+    )
+
+    result = evaluate_moveit_pose_plan(
+        MoveItPoseExecutorRequest(
+            requested=True,
+            target_pose=_pose([-0.153217, 0.315916, 1.056994]),
+            current_tcp_pose=_pose([-0.153217, 0.315916, 1.046994]),
+            config={**_base_config(), "max_translation_m": 0.01, "hard_safety_limit_m": 0.01},
+        )
+    )
+
+    assert result["moveit_pose_executor_status"] == "PASS"
+    assert E_EXCESSIVE_CARTESIAN_MOTION not in result["blocking_reasons"]
+    assert result["motion_check_distance_m"] == 0.01
 
 
 def test_plan_failure_blocks_on_moveit_error(monkeypatch):

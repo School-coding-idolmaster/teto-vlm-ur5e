@@ -438,6 +438,7 @@ def _build_gateway_config(
         "planner_id": "ur_manipulator[RRTConnectkConfigDefault]",
         "allowed_frames": ["base_link"],
         "max_translation_m": max_step_m,
+        "hard_safety_limit_m": HARD_SAFETY_LIMIT_M,
         "workspace_bounds": {"x": [-1.0, 1.0], "y": [-1.0, 1.0], "z": [0.0, 2.0]},
         "position_tolerance_m": 0.005,
         "orientation_tolerance_rad": 0.05,
@@ -461,6 +462,7 @@ def _evidence(
     blocking_reasons: list[str] | None = None,
 ) -> dict[str, Any]:
     moveit = execution.get("moveit_pose_executor_result") if isinstance(execution.get("moveit_pose_executor_result"), dict) else {}
+    motion_check = _motion_check_fields(motion, moveit, parsed_contract)
     return {
         "parsed_contract": parsed_contract,
         "cartesian_motion_gateway_status": motion.get("cartesian_motion_gateway_status"),
@@ -473,6 +475,7 @@ def _evidence(
         "controller_command_sent": execution.get("controller_command_sent", False),
         "real_robot_motion_executed": execution.get("real_robot_motion_executed", False),
         "target_pose": motion.get("target_pose"),
+        **motion_check,
         "blocking_reasons": blocking_reasons if blocking_reasons is not None else execution.get("blocking_reasons", []),
         "warnings": execution.get("warnings", []),
         "final_status": status,
@@ -492,6 +495,35 @@ def _blocked_result(reason: str, parsed_contract: dict[str, Any]) -> dict[str, A
         "blocking_reasons": [reason],
         "final_status": STATUS_BLOCKED,
     }
+
+
+def _motion_check_fields(motion: dict[str, Any], moveit: dict[str, Any], parsed_contract: dict[str, Any]) -> dict[str, Any]:
+    current = moveit.get("motion_check_current_position_m")
+    target = moveit.get("motion_check_target_position_m")
+    distance = moveit.get("motion_check_distance_m")
+    if current is None and isinstance(motion.get("current_tcp_pose"), dict):
+        current = motion["current_tcp_pose"].get("position_m")
+    if target is None and isinstance(motion.get("target_pose"), dict):
+        target = motion["target_pose"].get("position_m")
+    if distance is None and _vector3(current) and _vector3(target):
+        distance = round(math.sqrt(sum((float(right) - float(left)) ** 2 for left, right in zip(current, target))), 6)
+    return {
+        "motion_check_source": moveit.get("motion_check_source") or "moveit_pose_executor",
+        "motion_check_current_position_m": list(current) if _vector3(current) else current,
+        "motion_check_target_position_m": list(target) if _vector3(target) else target,
+        "motion_check_distance_m": distance,
+        "motion_check_max_distance_m": moveit.get("motion_check_max_distance_m", parsed_contract.get("max_distance_m")),
+        "motion_check_hard_limit_m": moveit.get("motion_check_hard_limit_m", parsed_contract.get("hard_safety_limit_m")),
+        "motion_check_eps": moveit.get("motion_check_eps", EPS),
+    }
+
+
+def _vector3(value: Any) -> bool:
+    return (
+        isinstance(value, list)
+        and len(value) == 3
+        and all(isinstance(item, (int, float)) and not isinstance(item, bool) and math.isfinite(float(item)) for item in value)
+    )
 
 
 def _json(data: dict[str, Any]) -> str:

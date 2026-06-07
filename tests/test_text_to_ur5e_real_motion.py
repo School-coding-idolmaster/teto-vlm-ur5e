@@ -111,6 +111,8 @@ def test_dry_run_with_cmd_works(monkeypatch, capsys):
     assert exit_code == 0
     assert '"dry_run": true' in output
     assert '"final_status": "PASS"' in output
+    assert '"motion_check_source": "moveit_pose_executor"' in output
+    assert '"motion_check_distance_m": 0.005' in output
 
 
 def test_real_confirmation_accepts_exact_lowercase_y(monkeypatch, capsys):

@@ -18,6 +18,7 @@ DEFAULT_END_EFFECTOR_LINK = "tool0"
 DEFAULT_MOVE_GROUP_ACTION = "/move_action"
 DEFAULT_EXECUTE_TRAJECTORY_ACTION = "/execute_trajectory"
 DEFAULT_MAX_TRANSLATION_M = 0.20
+DEFAULT_HARD_SAFETY_LIMIT_M = DEFAULT_MAX_TRANSLATION_M
 MOTION_LIMIT_EPS = 1e-9
 DEFAULT_WORKSPACE_BOUNDS = {
     "x": [-1.0, 1.0],
@@ -223,6 +224,7 @@ def _validate_request(
     allowed_frames = _allowed_frames(config)
     workspace_bounds = _workspace_bounds(config)
     max_translation_m = _optional_float(config.get("max_translation_m")) or DEFAULT_MAX_TRANSLATION_M
+    hard_safety_limit_m = _optional_float(config.get("hard_safety_limit_m")) or DEFAULT_HARD_SAFETY_LIMIT_M
 
     if not target_pose:
         blocking_reasons.append(E_TARGET_POSE_MISSING)
@@ -237,9 +239,15 @@ def _validate_request(
         blocking_reasons.append(E_INVALID_CURRENT_TCP_POSE)
 
     translation_distance_m = None
+    current_position_m = None
+    target_position_m = None
     if target_pose and current_pose and _valid_pose(target_pose, allowed_frames) and _valid_pose(current_pose, allowed_frames):
+        current_position_m = list(current_pose["position_m"])
+        target_position_m = list(target_pose["position_m"])
         translation_distance_m = _distance_between(current_pose["position_m"], target_pose["position_m"])
-        if translation_distance_m > max_translation_m + MOTION_LIMIT_EPS:
+        if translation_distance_m > hard_safety_limit_m + MOTION_LIMIT_EPS:
+            blocking_reasons.append(E_EXCESSIVE_CARTESIAN_MOTION)
+        elif translation_distance_m > max_translation_m + MOTION_LIMIT_EPS:
             blocking_reasons.append(E_EXCESSIVE_CARTESIAN_MOTION)
         if not _point_in_workspace(target_pose["position_m"], workspace_bounds):
             blocking_reasons.append(E_OUT_OF_WORKSPACE)
@@ -263,7 +271,15 @@ def _validate_request(
         "warnings": _unique(warnings),
         "workspace_bounds": workspace_bounds,
         "max_translation_m": max_translation_m,
+        "hard_safety_limit_m": hard_safety_limit_m,
         "translation_distance_m": round(float(translation_distance_m), 6) if translation_distance_m is not None else None,
+        "motion_check_source": "moveit_pose_executor",
+        "motion_check_current_position_m": current_position_m,
+        "motion_check_target_position_m": target_position_m,
+        "motion_check_distance_m": round(float(translation_distance_m), 6) if translation_distance_m is not None else None,
+        "motion_check_max_distance_m": max_translation_m,
+        "motion_check_hard_limit_m": hard_safety_limit_m,
+        "motion_check_eps": MOTION_LIMIT_EPS,
         "workspace_check_passed": bool(target_pose and _point_in_workspace(target_pose["position_m"], workspace_bounds)),
     }
 
@@ -519,6 +535,14 @@ def _common_result(*, config: Dict[str, Any], target_pose: Dict[str, Any] | None
         "target_pose": target_pose,
         "translation_distance_m": validation.get("translation_distance_m"),
         "max_translation_m": validation.get("max_translation_m"),
+        "hard_safety_limit_m": validation.get("hard_safety_limit_m"),
+        "motion_check_source": validation.get("motion_check_source"),
+        "motion_check_current_position_m": validation.get("motion_check_current_position_m"),
+        "motion_check_target_position_m": validation.get("motion_check_target_position_m"),
+        "motion_check_distance_m": validation.get("motion_check_distance_m"),
+        "motion_check_max_distance_m": validation.get("motion_check_max_distance_m"),
+        "motion_check_hard_limit_m": validation.get("motion_check_hard_limit_m"),
+        "motion_check_eps": validation.get("motion_check_eps"),
         "workspace_bounds": validation.get("workspace_bounds"),
         "workspace_check_passed": validation.get("workspace_check_passed") is True,
         "plan_success_source": "actual_moveit_action_result",
