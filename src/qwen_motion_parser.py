@@ -277,10 +277,84 @@ def _strict_json_object(text: str) -> Dict[str, Any]:
     raw = text.strip() if isinstance(text, str) else ""
     if not raw:
         raise ValueError("empty Qwen response")
-    payload = json.loads(raw)
+    payload = json.loads(_extract_json_object_text(raw))
     if not isinstance(payload, dict):
         raise ValueError("Qwen JSON response must be an object")
     return payload
+
+
+def _extract_json_object_text(raw: str) -> str:
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+    else:
+        if not isinstance(payload, dict):
+            raise ValueError("Qwen JSON response must be an object")
+        return raw
+
+    fenced_payloads = _fenced_json_payloads(raw)
+    if fenced_payloads:
+        if len(fenced_payloads) > 1:
+            raise ValueError("ambiguous Qwen JSON response: multiple fenced JSON blocks")
+        return _single_json_object_text(fenced_payloads[0])
+
+    return _single_json_object_text(raw)
+
+
+def _fenced_json_payloads(raw: str) -> list[str]:
+    pattern = re.compile(r"```[ \t]*(?:json)?[ \t]*\r?\n(?P<body>.*?)```", re.IGNORECASE | re.DOTALL)
+    return [match.group("body").strip() for match in pattern.finditer(raw)]
+
+
+def _single_json_object_text(raw: str) -> str:
+    candidates = _balanced_json_object_candidates(raw)
+    if not candidates:
+        raise ValueError("Qwen response did not contain a JSON object")
+    if len(candidates) > 1:
+        raise ValueError("ambiguous Qwen JSON response: multiple JSON objects")
+    candidate = candidates[0]
+    try:
+        payload = json.loads(candidate)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Qwen JSON parse failed: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("Qwen JSON response must be an object")
+    return candidate
+
+
+def _balanced_json_object_candidates(raw: str) -> list[str]:
+    candidates: list[str] = []
+    start: int | None = None
+    depth = 0
+    in_string = False
+    escaped = False
+
+    for index, char in enumerate(raw):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+            continue
+        if char == "{":
+            if depth == 0:
+                start = index
+            depth += 1
+            continue
+        if char == "}" and depth > 0:
+            depth -= 1
+            if depth == 0 and start is not None:
+                candidates.append(raw[start : index + 1])
+                start = None
+
+    return candidates
 
 
 def _delta_from_axis_direction(axis: str, direction: str, distance_m: float) -> list[float]:

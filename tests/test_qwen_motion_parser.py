@@ -7,6 +7,9 @@ from src.qwen_motion_parser import (
     DEFAULT_ENDPOINT,
     DEFAULT_MODEL_NAME,
     E_EXCESSIVE_CARTESIAN_MOTION,
+    E_INVALID_AXIS,
+    E_INVALID_DIRECTION,
+    E_INVALID_DISTANCE,
     E_INVALID_JSON,
     E_LLM_CALL_FAILED,
     E_LOW_CONFIDENCE,
@@ -89,6 +92,66 @@ def test_qwen_valid_json_produces_relative_delta():
     assert result["normalized_contract"]["delta_m"] == [0.0, 0.0, 0.005]
 
 
+def test_qwen_fenced_json_with_language_label_produces_relative_delta():
+    result = _parse_text(
+        """```json
+{"intent":"relative_cartesian_motion","axis":"z","direction":"-","distance_m":0.002,"confidence":1.0}
+```"""
+    )
+
+    assert result["qwen_motion_parser_status"] == "PASS"
+    assert result["delta_m"] == [0.0, 0.0, -0.002]
+    assert result["normalized_contract"]["delta_m"] == [0.0, 0.0, -0.002]
+
+
+def test_qwen_fenced_json_without_language_label_produces_relative_delta():
+    result = _parse_text(
+        """```
+{"intent":"relative_cartesian_motion","axis":"x","direction":"+","distance_m":0.001,"confidence":1.0}
+```"""
+    )
+
+    assert result["qwen_motion_parser_status"] == "PASS"
+    assert result["delta_m"] == [0.001, 0.0, 0.0]
+
+
+def test_qwen_fenced_json_with_surrounding_whitespace_produces_relative_delta():
+    result = _parse_text(
+        """
+
+```json
+{"intent":"relative_cartesian_motion","axis":"y","direction":"+","distance_m":0.003,"confidence":1.0}
+```
+
+"""
+    )
+
+    assert result["qwen_motion_parser_status"] == "PASS"
+    assert result["delta_m"] == [0.0, 0.003, 0.0]
+
+
+def test_qwen_short_prose_plus_single_fenced_json_produces_relative_delta():
+    result = _parse_text(
+        """Here is the parsed command:
+```json
+{"intent":"relative_cartesian_motion","axis":"z","direction":"+","distance_m":0.004,"confidence":1.0}
+```
+Done."""
+    )
+
+    assert result["qwen_motion_parser_status"] == "PASS"
+    assert result["delta_m"] == [0.0, 0.0, 0.004]
+
+
+def test_qwen_short_prose_plus_single_json_object_produces_relative_delta():
+    result = _parse_text(
+        'Parsed command: {"intent":"relative_cartesian_motion","axis":"z","direction":"+","distance_m":0.001,"confidence":1.0}'
+    )
+
+    assert result["qwen_motion_parser_status"] == "PASS"
+    assert result["delta_m"] == [0.0, 0.0, 0.001]
+
+
 def test_qwen_invalid_json_blocks():
     result = evaluate_qwen_motion_parser(
         QwenMotionParserRequest(
@@ -103,6 +166,60 @@ def test_qwen_invalid_json_blocks():
     assert E_INVALID_JSON in result["parser_blocking_reasons"]
 
 
+def test_qwen_empty_response_blocks():
+    result = _parse_text("")
+
+    assert result["qwen_motion_parser_status"] == "BLOCKED"
+    assert E_INVALID_JSON in result["parser_blocking_reasons"]
+
+
+def test_qwen_no_json_object_blocks():
+    result = _parse_text("I cannot parse this command.")
+
+    assert result["qwen_motion_parser_status"] == "BLOCKED"
+    assert E_INVALID_JSON in result["parser_blocking_reasons"]
+
+
+def test_qwen_multiple_json_objects_blocks_as_ambiguous():
+    result = _parse_text(
+        '{"intent":"relative_cartesian_motion","axis":"z","direction":"+","distance_m":0.001,"confidence":1.0}'
+        '{"intent":"relative_cartesian_motion","axis":"z","direction":"-","distance_m":0.001,"confidence":1.0}'
+    )
+
+    assert result["qwen_motion_parser_status"] == "BLOCKED"
+    assert E_INVALID_JSON in result["parser_blocking_reasons"]
+    assert any("ambiguous" in warning for warning in result["warnings"])
+
+
+def test_qwen_multiple_fenced_json_objects_blocks_as_ambiguous():
+    result = _parse_text(
+        """```json
+{"intent":"relative_cartesian_motion","axis":"z","direction":"+","distance_m":0.001,"confidence":1.0}
+```
+```json
+{"intent":"relative_cartesian_motion","axis":"z","direction":"-","distance_m":0.001,"confidence":1.0}
+```"""
+    )
+
+    assert result["qwen_motion_parser_status"] == "BLOCKED"
+    assert E_INVALID_JSON in result["parser_blocking_reasons"]
+    assert any("ambiguous" in warning for warning in result["warnings"])
+
+
+def test_qwen_top_level_array_blocks():
+    result = _parse_text('[{"intent":"relative_cartesian_motion","axis":"z","direction":"+","distance_m":0.001,"confidence":1.0}]')
+
+    assert result["qwen_motion_parser_status"] == "BLOCKED"
+    assert E_INVALID_JSON in result["parser_blocking_reasons"]
+
+
+def test_qwen_missing_intent_blocks():
+    result = _parse_payload({"axis": "z", "direction": "+", "distance_m": 0.005, "confidence": 0.95})
+
+    assert result["qwen_motion_parser_status"] == "BLOCKED"
+    assert E_UNSUPPORTED_INTENT in result["parser_blocking_reasons"]
+
+
 def test_qwen_low_confidence_blocks():
     result = _parse_payload({"intent": "relative_cartesian_motion", "axis": "z", "direction": "+", "distance_m": 0.005, "confidence": 0.50})
 
@@ -115,6 +232,41 @@ def test_qwen_unsupported_intent_blocks():
 
     assert result["qwen_motion_parser_status"] == "BLOCKED"
     assert E_UNSUPPORTED_INTENT in result["parser_blocking_reasons"]
+
+
+def test_qwen_unsupported_axis_blocks():
+    result = _parse_payload({"intent": "relative_cartesian_motion", "axis": "yaw", "direction": "+", "distance_m": 0.005, "confidence": 0.95})
+
+    assert result["qwen_motion_parser_status"] == "BLOCKED"
+    assert E_INVALID_AXIS in result["parser_blocking_reasons"]
+
+
+def test_qwen_unsupported_direction_blocks():
+    result = _parse_payload({"intent": "relative_cartesian_motion", "axis": "z", "direction": "up", "distance_m": 0.005, "confidence": 0.95})
+
+    assert result["qwen_motion_parser_status"] == "BLOCKED"
+    assert E_INVALID_DIRECTION in result["parser_blocking_reasons"]
+
+
+def test_qwen_missing_distance_blocks():
+    result = _parse_payload({"intent": "relative_cartesian_motion", "axis": "z", "direction": "+", "confidence": 0.95})
+
+    assert result["qwen_motion_parser_status"] == "BLOCKED"
+    assert E_INVALID_DISTANCE in result["parser_blocking_reasons"]
+
+
+def test_qwen_non_numeric_distance_blocks():
+    result = _parse_payload({"intent": "relative_cartesian_motion", "axis": "z", "direction": "+", "distance_m": "five millimeters", "confidence": 0.95})
+
+    assert result["qwen_motion_parser_status"] == "BLOCKED"
+    assert E_INVALID_DISTANCE in result["parser_blocking_reasons"]
+
+
+def test_qwen_negative_distance_blocks():
+    result = _parse_payload({"intent": "relative_cartesian_motion", "axis": "z", "direction": "+", "distance_m": -0.001, "confidence": 0.95})
+
+    assert result["qwen_motion_parser_status"] == "BLOCKED"
+    assert E_INVALID_DISTANCE in result["parser_blocking_reasons"]
 
 
 def test_qwen_reject_intent_blocks():
@@ -203,12 +355,16 @@ def test_qwen_wrapper_scripts_have_valid_bash_syntax():
 
 
 def _parse_payload(payload):
+    return _parse_text(json.dumps(payload))
+
+
+def _parse_text(text):
     return evaluate_qwen_motion_parser(
         QwenMotionParserRequest(
             user_text="move up 5 mm",
             max_distance_m=0.005,
             hard_safety_limit_m=0.01,
-            llm_callable=lambda _prompt: json.dumps(payload),
+            llm_callable=lambda _prompt: text,
         )
     )
 
