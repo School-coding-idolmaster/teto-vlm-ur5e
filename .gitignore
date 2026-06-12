@@ -1,4 +1,5 @@
 outputs/
+.venv_lab/
 __pycache__/
 .pytest_cache/
 *.pyc
