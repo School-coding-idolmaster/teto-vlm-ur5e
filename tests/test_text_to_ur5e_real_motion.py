@@ -458,6 +458,9 @@ def test_acceptance_dry_run_two_mm_up_has_workflow_evidence(monkeypatch, capsys)
     assert evidence["post_motion_verification_status"] == "NOT_RUN"
     assert evidence["post_motion_verification"]["reason"] == "real_robot_motion_executed=false"
     assert evidence["post_motion_verification"]["intended_delta_m"] == [0.0, 0.0, 0.002]
+    assert evidence["post_motion_verification"]["tcp_pose_sample_settle_s"] is None
+    assert evidence["post_motion_verification"]["tcp_pose_sample_attempts"] is None
+    assert evidence["post_motion_verification"]["tcp_pose_stale_check_passed"] is None
     assert evidence["actual_displacement_m"] is None
 
 
@@ -567,6 +570,78 @@ def test_real_small_motion_acceptance_without_confirmation_blocks(monkeypatch, c
     assert workflow["manual_confirmation_received"] is False
     assert workflow["real_robot_motion_executed"] is False
     assert "E_CONFIRMATION_MISMATCH" in workflow["blocking_reasons"]
+    _assert_real_small_two_mm_gate_allowed(evidence, direction="+")
+    assert evidence["planner_acceptance"]["planner_acceptance_context"] == "plan_only_safety_audit"
+    assert evidence["planner_acceptance"]["planner_acceptance_blocks_real_execution"] is False
+    assert evidence["target_frame"] == "base_link"
+    assert evidence["current_tcp_frame"] == "base_link"
+    assert evidence["moveit_end_effector_link"] == "tool0"
+    assert evidence["moveit_planning_frame"] == "base_link"
+    assert evidence["moveit_group_name"] == "ur_manipulator"
+
+
+def test_real_small_motion_lower_two_mm_allowed_until_confirmation(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
+    monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_down_success)
+    monkeypatch.setattr(cli, "_execution_prereq_blockers", lambda timeout_s: pytest.fail("execution prereq should not run without confirmation"))
+    monkeypatch.setattr("builtins.input", lambda _prompt: (_ for _ in ()).throw(EOFError))
+
+    exit_code = cli.main(["--real-small-motion", "--cmd", "lower the tcp by 2 millimeters"])
+
+    evidence = _final_evidence(capsys.readouterr().out)
+    workflow = evidence["acceptance_workflow"]
+    assert exit_code == 2
+    assert workflow["status"] == "BLOCKED"
+    assert workflow["mode"] == "real_small_motion"
+    assert "E_CONFIRMATION_MISMATCH" in workflow["blocking_reasons"]
+    assert "E_REAL_SMALL_MOTION_COMMAND_NOT_ALLOWED" not in evidence["blocking_reasons"]
+    assert evidence["execution_preview"]["delta_m"] == [0.0, 0.0, -0.002]
+    _assert_real_small_two_mm_gate_allowed(evidence, direction="-")
+    assert evidence["trajectory_sent"] is False
+    assert evidence["execute_trajectory_called"] is False
+    assert evidence["controller_command_sent"] is False
+    assert evidence["real_robot_motion_executed"] is False
+
+
+def test_real_small_motion_lower_five_mm_remains_blocked_by_normalized_gate(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
+    monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_down_five_mm_success)
+    monkeypatch.setattr(cli, "_execution_prereq_blockers", lambda timeout_s: pytest.fail("execution prereq should not run for blocked gate"))
+    monkeypatch.setattr("builtins.input", lambda _prompt: pytest.fail("confirmation prompt should not be reached"))
+
+    exit_code = cli.main(["--real-small-motion", "--cmd", "lower the tcp by 5 millimeters"])
+
+    evidence = _final_evidence(capsys.readouterr().out)
+    assert exit_code == 2
+    assert evidence["final_status"] == "BLOCKED"
+    assert "E_REAL_SMALL_MOTION_DISTANCE_NOT_ALLOWED" in evidence["blocking_reasons"]
+    assert "E_REAL_SMALL_MOTION_COMMAND_NOT_ALLOWED" not in evidence["blocking_reasons"]
+    assert evidence["real_small_motion_command_allowed"] is False
+    assert evidence["real_small_motion_gate_basis"] == "normalized_contract"
+    assert evidence["real_small_motion_gate"]["normalized_distance_m"] == 0.005
+    assert evidence["allowed_distance_m"] is None
+    assert evidence["trajectory_sent"] is False
+    assert evidence["execute_trajectory_called"] is False
+    assert evidence["controller_command_sent"] is False
+    assert evidence["real_robot_motion_executed"] is False
+
+
+def test_real_small_motion_vague_motion_remains_blocked_before_execution(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: pytest.fail("pose lookup should not run for parser-blocked command"))
+    monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_vague_motion_blocked)
+    monkeypatch.setattr(cli, "_execution_prereq_blockers", lambda timeout_s: pytest.fail("execution prereq should not run for parser-blocked command"))
+    monkeypatch.setattr("builtins.input", lambda _prompt: pytest.fail("confirmation prompt should not be reached"))
+
+    exit_code = cli.main(["--real-small-motion", "--cmd", "go down a little"])
+
+    evidence = _final_evidence(capsys.readouterr().out)
+    assert exit_code == 2
+    assert evidence["final_status"] == "BLOCKED"
+    assert "E_DISTANCE_MM_REQUIRED" in evidence["blocking_reasons"]
+    assert evidence["trajectory_sent"] is False
+    assert evidence["execute_trajectory_called"] is False
+    assert evidence["controller_command_sent"] is False
+    assert evidence["real_robot_motion_executed"] is False
 
 
 def test_real_small_motion_rejects_mock_current_tcp_pose(capsys):
@@ -696,6 +771,128 @@ def test_real_confirmation_accepts_exact_lowercase_y(monkeypatch, capsys):
     assert post_motion["actual_direction"] == "z+"
     assert post_motion["direction_check_passed"] is True
     assert post_motion["orientation_change_rad"] == 0.0
+    assert post_motion["tcp_pose_sample_settle_s"] == 0.25
+    assert post_motion["tcp_pose_sample_attempts"] == 1
+    assert post_motion["tcp_pose_stale_check_passed"] is None
+
+
+def test_direction_verification_fails_opposite_displacement(monkeypatch, capsys):
+    poses = iter([_pose(), _pose_z_offset(-0.002)])
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: next(poses))
+    monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_two_mm_up_success)
+    monkeypatch.setattr(cli, "_execution_prereq_blockers", lambda timeout_s: [])
+    monkeypatch.setattr(cli, "evaluate_cartesian_motion_execution", _fake_success_execution)
+    monkeypatch.setattr(cli.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr("builtins.input", lambda _prompt: pytest.fail("confirmation prompt should not be used"))
+
+    exit_code = cli.main(["--real", "--yes", "--cmd", "raise the tcp by 2 millimeters"])
+
+    evidence = _final_evidence(capsys.readouterr().out)
+    post_motion = evidence["post_motion_verification"]
+    assert exit_code == 2
+    assert evidence["final_status"] == "FAILED"
+    assert post_motion["post_motion_verification_status"] == "FAILED"
+    assert post_motion["intended_direction"] == "z+"
+    assert post_motion["actual_direction"] == "z-"
+    assert post_motion["direction_check_passed"] is False
+    assert post_motion["reason"] == "post_motion_direction_distance_or_orientation_check_failed"
+
+
+def test_post_motion_z_minus_with_negative_actual_z_passes():
+    result = cli._post_motion_verification(
+        real_robot_motion_executed=True,
+        before_tcp_pose=_pose(),
+        target_tcp_pose=_pose_z_offset(-0.002),
+        after_tcp_pose=_pose_z_offset(-0.002),
+        intended_delta_m=[0.0, 0.0, -0.002],
+    )
+
+    assert result["post_motion_verification_status"] == "PASS"
+    assert result["intended_direction"] == "z-"
+    assert result["actual_direction"] == "z-"
+    assert result["direction_check_passed"] is True
+
+
+def test_post_motion_z_minus_with_positive_actual_z_fails():
+    result = cli._post_motion_verification(
+        real_robot_motion_executed=True,
+        before_tcp_pose=_pose(),
+        target_tcp_pose=_pose_z_offset(-0.002),
+        after_tcp_pose=_pose_z_offset(0.002),
+        intended_delta_m=[0.0, 0.0, -0.002],
+    )
+
+    assert result["post_motion_verification_status"] == "FAILED"
+    assert result["intended_direction"] == "z-"
+    assert result["actual_direction"] == "z+"
+    assert result["direction_check_passed"] is False
+
+
+def test_post_motion_z_plus_with_positive_actual_z_passes():
+    result = cli._post_motion_verification(
+        real_robot_motion_executed=True,
+        before_tcp_pose=_pose(),
+        target_tcp_pose=_pose_z_offset(0.002),
+        after_tcp_pose=_pose_z_offset(0.002),
+        intended_delta_m=[0.0, 0.0, 0.002],
+    )
+
+    assert result["post_motion_verification_status"] == "PASS"
+    assert result["intended_direction"] == "z+"
+    assert result["actual_direction"] == "z+"
+    assert result["direction_check_passed"] is True
+
+
+def test_post_motion_z_plus_with_negative_actual_z_fails():
+    result = cli._post_motion_verification(
+        real_robot_motion_executed=True,
+        before_tcp_pose=_pose(),
+        target_tcp_pose=_pose_z_offset(0.002),
+        after_tcp_pose=_pose_z_offset(-0.002),
+        intended_delta_m=[0.0, 0.0, 0.002],
+    )
+
+    assert result["post_motion_verification_status"] == "FAILED"
+    assert result["intended_direction"] == "z+"
+    assert result["actual_direction"] == "z-"
+    assert result["direction_check_passed"] is False
+
+
+def test_recorded_lower_two_mm_evidence_passes_with_cross_axis_drift():
+    result = cli._post_motion_verification(
+        real_robot_motion_executed=True,
+        before_tcp_pose={
+            **_pose(),
+            "position_m": [0.0, 0.0, 0.0],
+            "orientation_xyzw": [0.0, 0.0, 0.0, 1.0],
+            "tcp_pose_age_s": 0.001,
+        },
+        target_tcp_pose={
+            **_pose(),
+            "position_m": [0.0, 0.0, -0.002],
+            "orientation_xyzw": [0.0, 0.0, 0.0, 1.0],
+        },
+        after_tcp_pose={
+            **_pose(),
+            "position_m": [-0.000206, -0.000073, -0.002073],
+            "orientation_xyzw": [0.0, 0.0, 0.0022595, 0.999997447],
+            "tcp_pose_age_s": 0.001,
+            "tcp_pose_sample_settle_s": 0.25,
+            "tcp_pose_sample_attempts": 1,
+        },
+        intended_delta_m=[0.0, 0.0, -0.002],
+    )
+
+    assert result["post_motion_verification_status"] == "PASS"
+    assert result["actual_displacement_m"] == [-0.000206, -7.3e-05, -0.002073]
+    assert result["actual_direction"] == "z-"
+    assert result["direction_check_passed"] is True
+    assert result["actual_displacement_distance_m"] == 0.002084
+    assert result["actual_distance_error_m"] == 8.4e-05
+    assert result["orientation_change_rad"] == 0.004519
+    assert result["orientation_check_passed"] is True
+    assert result["post_motion_distance_tolerance_m"] == 0.005
+    assert result["post_motion_orientation_tolerance_rad"] == 0.005
 
 
 def test_confirmation_mismatch_aborts(monkeypatch, capsys):
@@ -714,10 +911,12 @@ def test_confirmation_mismatch_aborts(monkeypatch, capsys):
 
 
 def test_real_yes_with_cmd_is_allowed(monkeypatch, capsys):
-    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
+    poses = iter([_pose(), _pose_z_offset(0.005)])
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: next(poses))
     monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_success)
     monkeypatch.setattr(cli, "_execution_prereq_blockers", lambda timeout_s: [])
     monkeypatch.setattr(cli, "evaluate_cartesian_motion_execution", _fake_success_execution)
+    monkeypatch.setattr(cli.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr("builtins.input", lambda _prompt: pytest.fail("confirmation prompt should not be used"))
 
     exit_code = cli.main(["--real", "--yes", "--cmd", "raise the tcp by 5 millimeters"])
@@ -752,6 +951,25 @@ def _pose_z_offset(offset_m):
     pose = _pose()
     pose["position_m"] = [0.4, 0.0, round(0.3 + offset_m, 12)]
     return pose
+
+
+def _assert_real_small_two_mm_gate_allowed(evidence, *, direction):
+    assert evidence["requested_distance_m"] == 0.002
+    assert evidence["moveit_position_tolerance_m"] <= 0.0005
+    assert evidence["moveit_position_tolerance_m"] < evidence["requested_distance_m"]
+    assert evidence["moveit_orientation_tolerance_rad"] == 0.005
+    assert evidence["tolerance_to_requested_distance_ratio"] == 0.25
+    assert "real_small_motion_strict_v3.0.3" in evidence["small_motion_tolerance_policy"]
+    assert evidence["real_small_motion_gate_policy"].startswith("real_small_motion_normalized_contract_v3.0.3")
+    assert evidence["real_small_motion_gate_basis"] == "normalized_contract"
+    assert evidence["allowed_axis"] == "z"
+    assert evidence["allowed_direction"] == direction
+    assert evidence["allowed_distance_m"] == 0.002
+    assert evidence["real_small_motion_command_allowed"] is True
+    assert evidence["real_small_motion_gate"]["blocking_reasons"] == []
+    assert evidence["real_small_motion_gate"]["normalized_axis"] == "z"
+    assert evidence["real_small_motion_gate"]["normalized_direction"] == direction
+    assert evidence["real_small_motion_gate"]["normalized_distance_m"] == 0.002
 
 
 def _gateway_with_plan_metrics(metrics):
@@ -941,10 +1159,73 @@ def _fake_qwen_down_success(request):
     }
 
 
+def _fake_qwen_down_five_mm_success(request):
+    raw = json.dumps(
+        {
+            "intent": "relative_cartesian_motion",
+            "axis": "z",
+            "direction": "-",
+            "distance_m": 0.005,
+            "confidence": 0.96,
+            "reason": "larger downward relative motion",
+        }
+    )
+    return {
+        "qwen_motion_parser_status": "PASS",
+        "parser_source": "qwen_llm",
+        "llm_called": True,
+        "model_name": request.model_name or "qwen2.5vl:3b",
+        "qwen_endpoint": request.endpoint,
+        "llm_latency_ms": 1.1,
+        "raw_llm_output": raw,
+        "normalized_contract": {
+            "intent": "relative_cartesian_motion",
+            "frame": "base_link",
+            "delta_m": [0.0, 0.0, -0.005],
+            "max_distance_m": request.max_distance_m,
+            "hard_safety_limit_m": request.hard_safety_limit_m,
+            "must_confirm": True,
+        },
+        "axis": "z",
+        "direction": "-",
+        "distance_m": 0.005,
+        "confidence": 0.96,
+        "delta_m": [0.0, 0.0, -0.005],
+        "parser_blocking_reasons": [],
+        "blocking_reasons": [],
+    }
+
+
+def _fake_qwen_vague_motion_blocked(request):
+    return {
+        "qwen_motion_parser_status": "BLOCKED",
+        "parser_source": "qwen_llm",
+        "llm_called": True,
+        "model_name": request.model_name or "qwen2.5vl:3b",
+        "qwen_endpoint": request.endpoint,
+        "llm_latency_ms": 1.0,
+        "raw_llm_output": json.dumps(
+            {
+                "intent": "relative_cartesian_motion",
+                "axis": "z",
+                "direction": "-",
+                "confidence": 0.5,
+            }
+        ),
+        "normalized_contract": None,
+        "parser_blocking_reasons": ["E_DISTANCE_MM_REQUIRED"],
+        "blocking_reasons": ["E_DISTANCE_MM_REQUIRED"],
+    }
+
+
 def _fake_plan_only_execution(request):
     assert request.config["enable_moveit_execute"] is False
     assert request.config["enable_real_robot_motion"] is False
     assert request.config["trajectory_send_allowed"] is False
+    assert request.config["requested_distance_m"] == 0.002
+    assert request.config["position_tolerance_m"] <= 0.0005
+    assert request.config["position_tolerance_m"] < request.config["requested_distance_m"]
+    assert request.config["orientation_tolerance_rad"] == 0.005
     return {
         "cartesian_motion_execution_status": "PASS",
         "moveit_plan_requested": True,

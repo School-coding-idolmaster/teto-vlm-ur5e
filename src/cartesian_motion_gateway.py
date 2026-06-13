@@ -532,12 +532,25 @@ def _moveit_plan_request(task_id: str, frame: str, target_pose: Dict[str, Any] |
         "planning_frame": frame,
         "end_effector_frame": _string(config.get("end_effector_frame")) or "tool0",
         "target_pose": target_pose,
+        "requested_distance_m": _optional_float(config.get("requested_distance_m")),
+        "moveit_position_tolerance_m": _optional_float(config.get("position_tolerance_m")),
+        "moveit_orientation_tolerance_rad": _optional_float(config.get("orientation_tolerance_rad")),
+        "tolerance_to_requested_distance_ratio": _tolerance_ratio(config),
+        "small_motion_tolerance_policy": _string(config.get("small_motion_tolerance_policy")),
         "max_speed_scale": _optional_float(config.get("max_speed_scale")) or 0.10,
         "max_acc_scale": _optional_float(config.get("max_acc_scale")) or 0.10,
         "manual_confirmation_required": True,
         "generated_by_teto": True,
         "generated_by_llm": False,
     }
+
+
+def _tolerance_ratio(config: Dict[str, Any]) -> float | None:
+    requested_distance = _optional_float(config.get("requested_distance_m"))
+    position_tolerance = _optional_float(config.get("position_tolerance_m"))
+    if requested_distance is None or requested_distance <= 0.0 or position_tolerance is None:
+        return None
+    return round(position_tolerance / requested_distance, 6)
 
 
 def _normalize_pose(value: Any) -> Dict[str, Any] | None:

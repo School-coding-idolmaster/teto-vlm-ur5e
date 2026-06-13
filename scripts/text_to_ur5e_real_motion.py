@@ -7,6 +7,7 @@ import math
 import os
 import re
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -32,12 +33,14 @@ DEFAULT_MAX_STEP_M = 0.005
 HARD_SAFETY_LIMIT_M = 0.01
 EPS = 1e-9
 CONFIRMATION_REPLY = "y"
-REAL_SMALL_MOTION_ALLOWED_COMMANDS = {
-    "raise the tcp by 2 millimeters",
-    "tcp down 2mm",
-    "move up 5 mm",
-}
-REAL_SMALL_MOTION_ALLOWED_DISTANCES_M = {0.002, 0.005}
+REAL_SMALL_MOTION_ALLOWED_AXES = {"z"}
+REAL_SMALL_MOTION_ALLOWED_DIRECTIONS = {"+", "-"}
+REAL_SMALL_MOTION_ALLOWED_DISTANCE_M = 0.002
+REAL_SMALL_MOTION_GATE_POLICY = (
+    "real_small_motion_normalized_contract_v3.0.3:"
+    "intent=relative_cartesian_motion;frame=base_link;axis=z;direction=+|-;"
+    "distance_m=0.002;must_confirm=true"
+)
 MOCK_CURRENT_TCP_POSE_FOR_DRY_RUN_ONLY = {
     "available": True,
     "frame": "base_link",
@@ -54,6 +57,11 @@ STATUS_WARNING = "WARNING"
 
 SUSPICIOUS_TINY_MOTION_JOINT_DELTA_RAD = 1.0
 SUSPICIOUS_TINY_MOTION_ORIENTATION_CHANGE_RAD = 0.25
+SMALL_MOTION_MAX_POSITION_TOLERANCE_M = 0.0005
+SMALL_MOTION_ORIENTATION_TOLERANCE_RAD = 0.005
+POST_EXECUTE_TCP_SETTLE_S = 0.25
+POST_EXECUTE_TCP_SAMPLE_ATTEMPTS = 3
+TCP_POSE_STALE_AFTER_S = 1.0
 
 
 class MotionParseError(ValueError):
@@ -310,6 +318,7 @@ def main(argv: list[str] | None = None) -> int:
             "goal_accepted": False,
             "execute_accepted": False,
             "trajectory_sent": False,
+            "execute_trajectory_called": False,
             "controller_command_sent": False,
             "real_robot_motion_executed": False,
             **_post_motion_top_level_fields(post_motion),
@@ -366,6 +375,8 @@ def main(argv: list[str] | None = None) -> int:
         acc_scale=float(args.acc_scale),
         real=real_requested,
         dry_run=dry_run,
+        requested_distance_m=parsed.distance_m,
+        real_small_motion=args.real_small_motion,
     )
 
     motion = evaluate_cartesian_motion_gateway(
@@ -404,6 +415,7 @@ def main(argv: list[str] | None = None) -> int:
             max_step_m=float(args.max_step_m),
             speed_scale=float(args.speed_scale),
             acc_scale=float(args.acc_scale),
+            requested_distance_m=parsed.distance_m,
         )
         execution = evaluate_cartesian_motion_execution(
             CartesianMotionExecutionRequest(
@@ -451,16 +463,17 @@ def main(argv: list[str] | None = None) -> int:
         print(_json(result))
         return 0
 
-    real_small_blockers = (
-        _real_small_motion_blockers(
+    real_small_gate = (
+        _real_small_motion_gate(
             parsed=parsed,
             execution_preview=execution_preview,
             planner_acceptance=planner_acceptance,
             parser_metadata=parser_metadata,
         )
         if args.real_small_motion
-        else []
+        else None
     )
+    real_small_blockers = real_small_gate.get("blocking_reasons", []) if isinstance(real_small_gate, dict) else []
     if real_small_blockers:
         result = _evidence(
             status=STATUS_BLOCKED,
@@ -472,6 +485,7 @@ def main(argv: list[str] | None = None) -> int:
             acceptance_mode=acceptance_mode,
             current_tcp_pose=current_pose_evidence,
             blocking_reasons=real_small_blockers,
+            real_small_motion_gate=real_small_gate,
         )
         print("Final execution evidence:")
         print(_json(result))
@@ -494,6 +508,7 @@ def main(argv: list[str] | None = None) -> int:
                 current_tcp_pose=current_pose_evidence,
                 manual_confirmation_received=False,
                 blocking_reasons=["E_CONFIRMATION_MISMATCH"],
+                real_small_motion_gate=real_small_gate,
             )
             print("Final execution evidence:")
             print(_json(result))
@@ -512,6 +527,7 @@ def main(argv: list[str] | None = None) -> int:
             current_tcp_pose=current_pose_evidence,
             manual_confirmation_received=bool(args.yes),
             blocking_reasons=prereq_blockers,
+            real_small_motion_gate=real_small_gate,
         )
         print("Final execution evidence:")
         print(_json(result))
@@ -535,7 +551,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     post_motion_tcp_pose = None
     if execution.get("real_robot_motion_executed") is True:
-        post_motion_tcp_pose = _lookup_current_tcp_pose(timeout_s=3.0)
+        post_motion_tcp_pose = _sample_tcp_pose_after_execution(
+            timeout_s=3.0,
+            settle_s=POST_EXECUTE_TCP_SETTLE_S,
+            attempts=POST_EXECUTE_TCP_SAMPLE_ATTEMPTS,
+        )
 
     status = STATUS_PASS if execution.get("real_robot_motion_executed") is True else STATUS_BLOCKED
     planner_acceptance = _planner_acceptance(
@@ -555,10 +575,11 @@ def main(argv: list[str] | None = None) -> int:
         current_tcp_pose=current_pose_evidence,
         post_motion_tcp_pose=post_motion_tcp_pose,
         manual_confirmation_received=True,
+        real_small_motion_gate=real_small_gate,
     )
     print("Final execution evidence:")
     print(_json(result))
-    return 0 if status == STATUS_PASS else 2
+    return 0 if result.get("final_status") == STATUS_PASS else 2
 
 
 def _parse_command_for_mode(
@@ -823,10 +844,15 @@ def _lookup_current_tcp_pose(*, timeout_s: float) -> dict[str, Any] | None:
                 tf = buffer.lookup_transform("base_link", "tool0", rclpy.time.Time())
                 t = tf.transform.translation
                 q = tf.transform.rotation
+                stamp = _stamp_seconds(getattr(tf, "header", None))
+                now_s = _clock_seconds(node)
+                age_s = round(now_s - stamp, 6) if stamp is not None and now_s is not None else None
                 return {
                     "frame": "base_link",
                     "position_m": [t.x, t.y, t.z],
                     "orientation_xyzw": [q.x, q.y, q.z, q.w],
+                    "tcp_pose_stamp": stamp,
+                    "tcp_pose_age_s": age_s,
                 }
             except Exception:
                 pass
@@ -843,6 +869,59 @@ def _lookup_current_tcp_pose(*, timeout_s: float) -> dict[str, Any] | None:
                 rclpy.shutdown()
             except Exception:
                 pass
+
+
+def _sample_tcp_pose_after_execution(*, timeout_s: float, settle_s: float, attempts: int) -> dict[str, Any] | None:
+    settle_s = max(0.0, float(settle_s))
+    attempts = max(1, int(attempts))
+    if settle_s > 0.0:
+        time.sleep(settle_s)
+    last_pose = None
+    for attempt in range(1, attempts + 1):
+        last_pose = _lookup_current_tcp_pose(timeout_s=timeout_s)
+        if last_pose is not None:
+            pose = dict(last_pose)
+            pose["tcp_pose_sample_settle_s"] = round(settle_s, 6)
+            pose["tcp_pose_sample_attempts"] = attempt
+            return pose
+    if last_pose is not None:
+        pose = dict(last_pose)
+        pose["tcp_pose_sample_settle_s"] = round(settle_s, 6)
+        pose["tcp_pose_sample_attempts"] = attempts
+        return pose
+    return None
+
+
+def _stamp_seconds(header: Any) -> float | None:
+    stamp = getattr(header, "stamp", None)
+    if stamp is None and isinstance(header, dict):
+        stamp = header.get("stamp")
+    if stamp is None:
+        return None
+    sec = _optional_number(stamp.get("sec") if isinstance(stamp, dict) else getattr(stamp, "sec", None))
+    nanosec = _optional_number(stamp.get("nanosec") if isinstance(stamp, dict) else getattr(stamp, "nanosec", None))
+    if sec is None:
+        return None
+    return round(sec + (nanosec or 0.0) / 1_000_000_000.0, 6)
+
+
+def _clock_seconds(node: Any) -> float | None:
+    try:
+        now = node.get_clock().now()
+    except Exception:
+        return None
+    nanoseconds = getattr(now, "nanoseconds", None)
+    if isinstance(nanoseconds, int):
+        return nanoseconds / 1_000_000_000.0
+    try:
+        msg = now.to_msg()
+    except Exception:
+        return None
+    sec = _optional_number(getattr(msg, "sec", None))
+    nanosec = _optional_number(getattr(msg, "nanosec", None))
+    if sec is None:
+        return None
+    return sec + (nanosec or 0.0) / 1_000_000_000.0
 
 
 def _resolve_current_tcp_pose(args: argparse.Namespace, *, real_requested: bool) -> tuple[dict[str, Any] | None, dict[str, Any], str | None]:
@@ -896,6 +975,13 @@ def _current_tcp_pose_evidence(
         "orientation_xyzw": [round(float(value), 15) for value in orientation],
         "source": source,
         "allowed_for_real_execution": allowed_for_real_execution,
+        "tcp_pose_stamp": _optional_number(pose.get("tcp_pose_stamp")),
+        "tcp_pose_age_s": _optional_number(pose.get("tcp_pose_age_s")),
+        "tcp_pose_sample_settle_s": _optional_number(pose.get("tcp_pose_sample_settle_s")),
+        "tcp_pose_sample_attempts": int(pose["tcp_pose_sample_attempts"])
+        if isinstance(pose.get("tcp_pose_sample_attempts"), int)
+        and not isinstance(pose.get("tcp_pose_sample_attempts"), bool)
+        else None,
     }
 
 
@@ -968,7 +1054,13 @@ def _build_gateway_config(
     acc_scale: float,
     real: bool,
     dry_run: bool,
+    requested_distance_m: float | None = None,
+    real_small_motion: bool = False,
 ) -> dict[str, Any]:
+    tolerance = _small_motion_tolerance_config(
+        requested_distance_m=requested_distance_m,
+        enabled=real_small_motion and real and not dry_run,
+    )
     return {
         "moveit_execution_mode": "real" if real and not dry_run else "shadow",
         "enable_ros2_runtime": bool(real and not dry_run),
@@ -988,8 +1080,11 @@ def _build_gateway_config(
         "max_translation_m": max_step_m,
         "hard_safety_limit_m": HARD_SAFETY_LIMIT_M,
         "workspace_bounds": {"x": [-1.0, 1.0], "y": [-1.0, 1.0], "z": [0.0, 2.0]},
-        "position_tolerance_m": 0.005,
-        "orientation_tolerance_rad": 0.05,
+        "requested_distance_m": tolerance["requested_distance_m"],
+        "position_tolerance_m": tolerance["position_tolerance_m"],
+        "orientation_tolerance_rad": tolerance["orientation_tolerance_rad"],
+        "tolerance_to_requested_distance_ratio": tolerance["tolerance_to_requested_distance_ratio"],
+        "small_motion_tolerance_policy": tolerance["small_motion_tolerance_policy"],
         "max_speed_scale": min(float(speed_scale), 0.10),
         "max_acc_scale": min(float(acc_scale), 0.10),
         "current_tcp_pose": current_pose,
@@ -1007,6 +1102,7 @@ def _build_plan_only_smoke_config(
     max_step_m: float,
     speed_scale: float,
     acc_scale: float,
+    requested_distance_m: float | None = None,
 ) -> dict[str, Any]:
     return {
         **_build_gateway_config(
@@ -1016,6 +1112,8 @@ def _build_plan_only_smoke_config(
             acc_scale=acc_scale,
             real=True,
             dry_run=False,
+            requested_distance_m=requested_distance_m,
+            real_small_motion=True,
         ),
         "moveit_execution_mode": "real",
         "enable_ros2_runtime": True,
@@ -1026,6 +1124,31 @@ def _build_plan_only_smoke_config(
         "trajectory_send_allowed": False,
         "execution_allowed": False,
         "manual_confirmation_required": True,
+    }
+
+
+def _small_motion_tolerance_config(*, requested_distance_m: float | None, enabled: bool) -> dict[str, Any]:
+    requested = _optional_number(requested_distance_m)
+    position_tolerance = 0.005
+    orientation_tolerance = 0.05
+    policy = "default_moveit_pose_tolerance"
+    if enabled and requested is not None and requested > 0.0:
+        position_tolerance = min(SMALL_MOTION_MAX_POSITION_TOLERANCE_M, requested * 0.25)
+        orientation_tolerance = SMALL_MOTION_ORIENTATION_TOLERANCE_RAD
+        policy = (
+            "real_small_motion_strict_v3.0.3:"
+            "position_tolerance_m<=min(0.0005,requested_distance_m*0.25);"
+            "orientation_tolerance_rad=0.005"
+        )
+    ratio = None
+    if requested is not None and requested > 0.0:
+        ratio = round(position_tolerance / requested, 6)
+    return {
+        "requested_distance_m": round(requested, 6) if requested is not None else None,
+        "position_tolerance_m": round(position_tolerance, 6),
+        "orientation_tolerance_rad": round(orientation_tolerance, 6),
+        "tolerance_to_requested_distance_ratio": ratio,
+        "small_motion_tolerance_policy": policy,
     }
 
 
@@ -1040,7 +1163,13 @@ def _planner_acceptance(
     requested_distance = _optional_number(execution_preview.get("distance_m"))
     gateway_distance = _optional_number(motion.get("translation_distance_m"))
     moveit_result = _moveit_result_from(motion, execution)
+    moveit_plan_request = motion.get("moveit_plan_request") if isinstance(motion.get("moveit_plan_request"), dict) else {}
     trajectory_metrics = _trajectory_metrics(moveit_result)
+    tolerance_evidence = _moveit_tolerance_evidence(
+        requested_distance=requested_distance,
+        moveit_result=moveit_result,
+        moveit_plan_request=moveit_plan_request,
+    )
 
     trajectory_sent = (
         execution.get("trajectory_sent") is True
@@ -1121,6 +1250,9 @@ def _planner_acceptance(
     status = STATUS_BLOCKED if blocking_reasons else STATUS_WARNING if warnings else STATUS_PASS
     return {
         "status": status,
+        "planner_acceptance_context": "plan_only_safety_audit",
+        "planner_acceptance_blocks_real_execution": False,
+        "real_execution_audit_status": _real_execution_audit_status(real_robot_motion_executed, execution),
         "plan_only": dry_run and not execution_allowed,
         "execution_allowed": execution_allowed,
         "trajectory_sent": trajectory_sent,
@@ -1129,7 +1261,13 @@ def _planner_acceptance(
         "real_robot_motion_executed": real_robot_motion_executed,
         "requested_delta_m": requested_delta if _vector3(requested_delta) else None,
         "requested_distance_m": requested_distance,
+        **tolerance_evidence,
         "planned_goal_frame": motion.get("frame") or execution_preview.get("frame"),
+        "target_frame": _first_not_none(moveit_result.get("target_frame"), moveit_plan_request.get("planning_frame"), motion.get("frame"), execution_preview.get("frame")),
+        "current_tcp_frame": _first_not_none(moveit_result.get("current_tcp_frame"), (motion.get("current_tcp_pose") or {}).get("frame") if isinstance(motion.get("current_tcp_pose"), dict) else None),
+        "moveit_end_effector_link": _first_not_none(moveit_result.get("moveit_end_effector_link"), moveit_plan_request.get("end_effector_frame")),
+        "moveit_planning_frame": _first_not_none(moveit_result.get("moveit_planning_frame"), moveit_plan_request.get("planning_frame")),
+        "moveit_group_name": _first_not_none(moveit_result.get("moveit_group_name"), moveit_plan_request.get("planning_group")),
         "metrics_source": trajectory_metrics["metrics_source"],
         "planned_waypoint_count": trajectory_metrics["planned_waypoint_count"],
         "estimated_cartesian_path_length_m": trajectory_metrics["estimated_cartesian_path_length_m"],
@@ -1143,27 +1281,75 @@ def _planner_acceptance(
     }
 
 
-def _real_small_motion_blockers(
+def _moveit_tolerance_evidence(
+    *,
+    requested_distance: float | None,
+    moveit_result: dict[str, Any],
+    moveit_plan_request: dict[str, Any],
+) -> dict[str, Any]:
+    position_tolerance = _first_not_none(
+        _optional_number(moveit_result.get("moveit_position_tolerance_m")),
+        _optional_number(moveit_plan_request.get("moveit_position_tolerance_m")),
+    )
+    orientation_tolerance = _first_not_none(
+        _optional_number(moveit_result.get("moveit_orientation_tolerance_rad")),
+        _optional_number(moveit_plan_request.get("moveit_orientation_tolerance_rad")),
+    )
+    ratio = _first_not_none(
+        _optional_number(moveit_result.get("tolerance_to_requested_distance_ratio")),
+        _optional_number(moveit_plan_request.get("tolerance_to_requested_distance_ratio")),
+    )
+    if ratio is None and requested_distance is not None and requested_distance > 0.0 and position_tolerance is not None:
+        ratio = round(float(position_tolerance) / requested_distance, 6)
+    return {
+        "moveit_position_tolerance_m": position_tolerance,
+        "moveit_orientation_tolerance_rad": orientation_tolerance,
+        "tolerance_to_requested_distance_ratio": ratio,
+        "small_motion_tolerance_policy": _first_not_none(
+            moveit_result.get("small_motion_tolerance_policy"),
+            moveit_plan_request.get("small_motion_tolerance_policy"),
+        ),
+    }
+
+
+def _real_execution_audit_status(real_robot_motion_executed: bool, execution: dict[str, Any]) -> str:
+    if real_robot_motion_executed:
+        return STATUS_PASS
+    if execution.get("cartesian_motion_execution_status") == STATUS_BLOCKED:
+        return STATUS_BLOCKED
+    return "NOT_RUN"
+
+
+def _real_small_motion_gate(
     *,
     parsed: ParsedMotionCommand,
     execution_preview: dict[str, Any],
     planner_acceptance: dict[str, Any],
     parser_metadata: dict[str, Any],
-) -> list[str]:
+) -> dict[str, Any]:
     blockers: list[str] = []
-    axis, _sign = _axis_direction_from_delta(parsed.delta_m)
-    normalized_command = _normalize(parsed.command)
+    axis, sign = _axis_direction_from_delta(parsed.delta_m)
+    distance_allowed = abs(parsed.distance_m - REAL_SMALL_MOTION_ALLOWED_DISTANCE_M) <= EPS
+    intent_allowed = execution_preview.get("intent") == "relative_cartesian_motion"
+    frame_allowed = parsed.frame == "base_link"
+    axis_allowed = axis in REAL_SMALL_MOTION_ALLOWED_AXES
+    direction_allowed = sign in REAL_SMALL_MOTION_ALLOWED_DIRECTIONS
+    must_confirm = True
 
     if parser_metadata.get("parser_source") != "qwen_llm":
         blockers.append("E_REAL_SMALL_MOTION_QWEN_REQUIRED")
-    if normalized_command not in REAL_SMALL_MOTION_ALLOWED_COMMANDS:
-        blockers.append("E_REAL_SMALL_MOTION_COMMAND_NOT_ALLOWED")
-    if parsed.frame != "base_link":
+    if not intent_allowed:
+        blockers.append("E_REAL_SMALL_MOTION_INTENT_NOT_ALLOWED")
+    if not frame_allowed:
         blockers.append("E_REAL_SMALL_MOTION_FRAME_NOT_ALLOWED")
-    if axis != "z":
+    if not axis_allowed:
         blockers.append("E_REAL_SMALL_MOTION_AXIS_NOT_ALLOWED")
-    if not any(abs(parsed.distance_m - allowed) <= EPS for allowed in REAL_SMALL_MOTION_ALLOWED_DISTANCES_M):
+    if not direction_allowed:
+        blockers.append("E_REAL_SMALL_MOTION_DIRECTION_NOT_ALLOWED")
+    if not distance_allowed:
         blockers.append("E_REAL_SMALL_MOTION_DISTANCE_NOT_ALLOWED")
+    if execution_preview.get("manual_confirmation_required") is not True:
+        blockers.append("E_REAL_SMALL_MOTION_CONFIRMATION_NOT_REQUIRED")
     if execution_preview.get("preview_status") != STATUS_PASS:
         blockers.append("E_REAL_SMALL_MOTION_PREVIEW_NOT_PASS")
     if planner_acceptance.get("status") != STATUS_PASS:
@@ -1172,7 +1358,23 @@ def _real_small_motion_blockers(
         blockers.append("E_REAL_SMALL_MOTION_TRAJECTORY_ALREADY_SENT")
     if planner_acceptance.get("execute_trajectory_called") is True:
         blockers.append("E_REAL_SMALL_MOTION_EXECUTE_ALREADY_CALLED")
-    return _unique(blockers)
+    blockers = _unique(blockers)
+    return {
+        "real_small_motion_gate_policy": REAL_SMALL_MOTION_GATE_POLICY,
+        "real_small_motion_gate_basis": "normalized_contract",
+        "allowed_axis": axis if axis_allowed else None,
+        "allowed_direction": sign if direction_allowed else None,
+        "allowed_distance_m": REAL_SMALL_MOTION_ALLOWED_DISTANCE_M if distance_allowed else None,
+        "real_small_motion_command_allowed": not blockers,
+        "normalized_intent": execution_preview.get("intent"),
+        "normalized_frame": parsed.frame,
+        "normalized_axis": axis,
+        "normalized_direction": sign,
+        "normalized_distance_m": parsed.distance_m,
+        "normalized_delta_m": list(parsed.delta_m),
+        "must_confirm": must_confirm,
+        "blocking_reasons": blockers,
+    }
 
 
 def _moveit_result_from(motion: dict[str, Any], execution: dict[str, Any]) -> dict[str, Any]:
@@ -1424,6 +1626,7 @@ def _evidence(
     post_motion_tcp_pose: dict[str, Any] | None = None,
     manual_confirmation_received: bool = False,
     blocking_reasons: list[str] | None = None,
+    real_small_motion_gate: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     moveit = execution.get("moveit_pose_executor_result") if isinstance(execution.get("moveit_pose_executor_result"), dict) else {}
     motion_check = _motion_check_fields(motion, moveit, parsed_contract)
@@ -1442,6 +1645,11 @@ def _evidence(
         after_tcp_pose=post_motion_tcp_pose,
         intended_delta_m=_intended_delta_from_contract(parsed_contract),
         reason=None if real_robot_motion_executed is True else "real_robot_motion_executed=false",
+    )
+    final_status = (
+        STATUS_FAILED
+        if real_robot_motion_executed is True and post_motion.get("post_motion_verification_status") == STATUS_FAILED
+        else status
     )
     return {
         **parser_metadata,
@@ -1473,12 +1681,37 @@ def _evidence(
         "execute_trajectory_called": execute_trajectory_called,
         "controller_command_sent": controller_command_sent,
         "real_robot_motion_executed": real_robot_motion_executed,
+        **_real_small_motion_gate_fields(real_small_motion_gate),
+        "requested_distance_m": planner_acceptance.get("requested_distance_m") if isinstance(planner_acceptance, dict) else None,
+        "moveit_position_tolerance_m": planner_acceptance.get("moveit_position_tolerance_m") if isinstance(planner_acceptance, dict) else None,
+        "moveit_orientation_tolerance_rad": planner_acceptance.get("moveit_orientation_tolerance_rad") if isinstance(planner_acceptance, dict) else None,
+        "tolerance_to_requested_distance_ratio": planner_acceptance.get("tolerance_to_requested_distance_ratio") if isinstance(planner_acceptance, dict) else None,
+        "small_motion_tolerance_policy": planner_acceptance.get("small_motion_tolerance_policy") if isinstance(planner_acceptance, dict) else None,
+        "target_frame": planner_acceptance.get("target_frame") if isinstance(planner_acceptance, dict) else None,
+        "current_tcp_frame": planner_acceptance.get("current_tcp_frame") if isinstance(planner_acceptance, dict) else None,
+        "moveit_end_effector_link": planner_acceptance.get("moveit_end_effector_link") if isinstance(planner_acceptance, dict) else None,
+        "moveit_planning_frame": planner_acceptance.get("moveit_planning_frame") if isinstance(planner_acceptance, dict) else None,
+        "moveit_group_name": planner_acceptance.get("moveit_group_name") if isinstance(planner_acceptance, dict) else None,
         "target_pose": motion.get("target_pose"),
         **_post_motion_top_level_fields(post_motion),
         **motion_check,
         "blocking_reasons": reasons,
         "warnings": execution.get("warnings", []),
-        "final_status": status,
+        "final_status": final_status,
+    }
+
+
+def _real_small_motion_gate_fields(gate: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(gate, dict):
+        return {}
+    return {
+        "real_small_motion_gate": gate,
+        "real_small_motion_gate_policy": gate.get("real_small_motion_gate_policy"),
+        "real_small_motion_gate_basis": gate.get("real_small_motion_gate_basis"),
+        "allowed_axis": gate.get("allowed_axis"),
+        "allowed_direction": gate.get("allowed_direction"),
+        "allowed_distance_m": gate.get("allowed_distance_m"),
+        "real_small_motion_command_allowed": gate.get("real_small_motion_command_allowed") is True,
     }
 
 
@@ -1541,6 +1774,7 @@ def _post_motion_verification(
     intended_delta_m: list[float] | None,
     reason: str | None = None,
     distance_tolerance_m: float = 0.005,
+    orientation_tolerance_rad: float = SMALL_MOTION_ORIENTATION_TOLERANCE_RAD,
 ) -> dict[str, Any]:
     before = _tcp_pose_for_evidence(before_tcp_pose)
     target = _tcp_pose_for_evidence(target_tcp_pose)
@@ -1551,6 +1785,14 @@ def _post_motion_verification(
         "tcp_pose_before_execution": before,
         "target_tcp_pose": target,
         "tcp_pose_after_execution": None,
+        "tcp_pose_before_stamp": before.get("tcp_pose_stamp") if isinstance(before, dict) else None,
+        "tcp_pose_after_stamp": None,
+        "tcp_pose_before_age_s": before.get("tcp_pose_age_s") if isinstance(before, dict) else None,
+        "tcp_pose_after_age_s": None,
+        "tcp_pose_sample_settle_s": None,
+        "tcp_pose_sample_attempts": None,
+        "tcp_pose_stale_check_passed": None,
+        "tcp_pose_stale_after_s": TCP_POSE_STALE_AFTER_S,
         "intended_delta_m": intended_delta,
         "actual_displacement_m": None,
         "actual_displacement_distance_m": None,
@@ -1559,6 +1801,9 @@ def _post_motion_verification(
         "actual_direction": None,
         "direction_check_passed": False,
         "orientation_change_rad": None,
+        "post_motion_distance_tolerance_m": distance_tolerance_m,
+        "post_motion_orientation_tolerance_rad": orientation_tolerance_rad,
+        "orientation_check_passed": None,
         "post_motion_verification_status": "NOT_RUN",
         "reason": reason,
     }
@@ -1572,9 +1817,20 @@ def _post_motion_verification(
         allowed_for_real_execution=True,
     )
     result["tcp_pose_after_execution"] = after
+    result["tcp_pose_after_stamp"] = after.get("tcp_pose_stamp") if isinstance(after, dict) else None
+    result["tcp_pose_after_age_s"] = after.get("tcp_pose_age_s") if isinstance(after, dict) else None
+    result["tcp_pose_sample_settle_s"] = after.get("tcp_pose_sample_settle_s") if isinstance(after, dict) else None
+    result["tcp_pose_sample_attempts"] = after.get("tcp_pose_sample_attempts") if isinstance(after, dict) else None
     if before is None or target is None or after is None:
         result["post_motion_verification_status"] = STATUS_FAILED
         result["reason"] = "tcp_pose_before_target_or_after_unavailable"
+        return result
+
+    stale_check = _tcp_pose_stale_check(before, after)
+    result["tcp_pose_stale_check_passed"] = stale_check
+    if stale_check is False:
+        result["post_motion_verification_status"] = STATUS_FAILED
+        result["reason"] = "tcp_pose_stamp_stale"
         return result
 
     before_position = before.get("position_m")
@@ -1587,14 +1843,23 @@ def _post_motion_verification(
     actual_displacement = [float(right) - float(left) for left, right in zip(before_position, after_position)]
     actual_distance = math.sqrt(sum(value**2 for value in actual_displacement))
     intended_distance = math.sqrt(sum(float(value) ** 2 for value in intended_delta)) if intended_delta is not None else None
-    actual_direction = _direction_label_from_delta(actual_displacement)
-    direction_passed = intended_direction is not None and actual_direction == intended_direction
+    intended_axis, intended_sign = _axis_direction_from_delta(intended_delta) if intended_delta is not None else (None, None)
+    actual_direction = _actual_direction_for_intended_axis(actual_displacement, intended_axis)
+    direction_passed = _direction_check_passed(
+        actual_displacement,
+        intended_axis=intended_axis,
+        intended_sign=intended_sign,
+    )
     actual_distance_error = abs(actual_distance - intended_distance) if intended_distance is not None else None
     orientation_change = None
     before_orientation = before.get("orientation_xyzw")
     after_orientation = after.get("orientation_xyzw")
     if _quaternion(before_orientation) and _quaternion(after_orientation):
         orientation_change = _quaternion_angle(before_orientation, after_orientation)
+    orientation_passed = (
+        orientation_change is None
+        or orientation_change <= float(orientation_tolerance_rad) + EPS
+    )
 
     result.update(
         {
@@ -1604,18 +1869,20 @@ def _post_motion_verification(
             "actual_direction": actual_direction,
             "direction_check_passed": direction_passed,
             "orientation_change_rad": orientation_change,
+            "orientation_check_passed": orientation_passed,
             "post_motion_verification_status": (
                 STATUS_PASS
                 if direction_passed
                 and actual_distance_error is not None
                 and actual_distance_error <= float(distance_tolerance_m) + EPS
+                and orientation_passed
                 else STATUS_FAILED
             ),
             "reason": None,
         }
     )
     if result["post_motion_verification_status"] != STATUS_PASS:
-        result["reason"] = "post_motion_direction_or_distance_check_failed"
+        result["reason"] = "post_motion_direction_distance_or_orientation_check_failed"
     return result
 
 
@@ -1630,12 +1897,30 @@ def _tcp_pose_for_evidence(pose: dict[str, Any] | None) -> dict[str, Any] | None
             "orientation_xyzw": [round(float(value), 15) for value in pose["orientation_xyzw"]],
             "source": pose.get("source"),
             "allowed_for_real_execution": pose.get("allowed_for_real_execution"),
+            "tcp_pose_stamp": _optional_number(pose.get("tcp_pose_stamp")),
+            "tcp_pose_age_s": _optional_number(pose.get("tcp_pose_age_s")),
+            "tcp_pose_sample_settle_s": _optional_number(pose.get("tcp_pose_sample_settle_s")),
+            "tcp_pose_sample_attempts": int(pose["tcp_pose_sample_attempts"])
+            if isinstance(pose.get("tcp_pose_sample_attempts"), int)
+            and not isinstance(pose.get("tcp_pose_sample_attempts"), bool)
+            else None,
         }
     return _current_tcp_pose_evidence(
         pose,
         source=str(pose.get("source") or "target_tcp_pose"),
         allowed_for_real_execution=pose.get("allowed_for_real_execution") is not False,
     )
+
+
+def _tcp_pose_stale_check(before: dict[str, Any], after: dict[str, Any]) -> bool | None:
+    ages = [
+        _optional_number(before.get("tcp_pose_age_s")),
+        _optional_number(after.get("tcp_pose_age_s")),
+    ]
+    available = [age for age in ages if age is not None]
+    if not available:
+        return None
+    return all(age <= TCP_POSE_STALE_AFTER_S + EPS for age in available)
 
 
 def _post_motion_top_level_fields(post_motion: dict[str, Any]) -> dict[str, Any]:
@@ -1646,6 +1931,17 @@ def _post_motion_top_level_fields(post_motion: dict[str, Any]) -> dict[str, Any]
         "actual_displacement_distance_m": post_motion.get("actual_displacement_distance_m"),
         "actual_distance_error_m": post_motion.get("actual_distance_error_m"),
         "orientation_change_rad": post_motion.get("orientation_change_rad"),
+        "direction_check_passed": post_motion.get("direction_check_passed"),
+        "orientation_check_passed": post_motion.get("orientation_check_passed"),
+        "post_motion_distance_tolerance_m": post_motion.get("post_motion_distance_tolerance_m"),
+        "post_motion_orientation_tolerance_rad": post_motion.get("post_motion_orientation_tolerance_rad"),
+        "tcp_pose_before_stamp": post_motion.get("tcp_pose_before_stamp"),
+        "tcp_pose_after_stamp": post_motion.get("tcp_pose_after_stamp"),
+        "tcp_pose_before_age_s": post_motion.get("tcp_pose_before_age_s"),
+        "tcp_pose_after_age_s": post_motion.get("tcp_pose_after_age_s"),
+        "tcp_pose_sample_settle_s": post_motion.get("tcp_pose_sample_settle_s"),
+        "tcp_pose_sample_attempts": post_motion.get("tcp_pose_sample_attempts"),
+        "tcp_pose_stale_check_passed": post_motion.get("tcp_pose_stale_check_passed"),
     }
 
 
@@ -1681,6 +1977,31 @@ def _direction_label_from_delta(delta_m: list[float] | None) -> str | None:
     if axis is None or sign is None:
         return None
     return f"{axis}{sign}"
+
+
+def _actual_direction_for_intended_axis(delta_m: list[float], intended_axis: str | None) -> str | None:
+    if not _vector3(delta_m) or intended_axis not in {"x", "y", "z"}:
+        return _direction_label_from_delta(delta_m)
+    index = {"x": 0, "y": 1, "z": 2}[intended_axis]
+    value = float(delta_m[index])
+    if value > 0.0:
+        return f"{intended_axis}+"
+    if value < 0.0:
+        return f"{intended_axis}-"
+    return None
+
+
+def _direction_check_passed(
+    delta_m: list[float],
+    *,
+    intended_axis: str | None,
+    intended_sign: str | None,
+) -> bool:
+    if not _vector3(delta_m) or intended_axis not in {"x", "y", "z"} or intended_sign not in {"+", "-"}:
+        return False
+    index = {"x": 0, "y": 1, "z": 2}[intended_axis]
+    value = float(delta_m[index])
+    return value > 0.0 if intended_sign == "+" else value < 0.0
 
 
 def _acceptance_workflow(

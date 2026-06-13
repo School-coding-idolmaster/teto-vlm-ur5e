@@ -19,6 +19,10 @@ DEFAULT_MOVE_GROUP_ACTION = "/move_action"
 DEFAULT_EXECUTE_TRAJECTORY_ACTION = "/execute_trajectory"
 DEFAULT_MAX_TRANSLATION_M = 0.20
 DEFAULT_HARD_SAFETY_LIMIT_M = DEFAULT_MAX_TRANSLATION_M
+DEFAULT_POSITION_TOLERANCE_M = 0.005
+DEFAULT_ORIENTATION_TOLERANCE_RAD = 0.05
+SMALL_MOTION_MAX_POSITION_TOLERANCE_M = 0.0005
+SMALL_MOTION_MAX_ORIENTATION_TOLERANCE_RAD = 0.005
 MOTION_LIMIT_EPS = 1e-9
 DEFAULT_WORKSPACE_BOUNDS = {
     "x": [-1.0, 1.0],
@@ -47,6 +51,7 @@ E_MOVEIT_GOAL_REJECTED = "E_MOVEIT_GOAL_REJECTED"
 E_MOVEIT_PLAN_FAILED = "E_MOVEIT_PLAN_FAILED"
 E_MOVEIT_EXECUTE_FAILED = "E_MOVEIT_EXECUTE_FAILED"
 E_MOVEIT_API_ERROR = "E_MOVEIT_API_ERROR"
+E_SMALL_MOTION_TOLERANCE_POLICY_VIOLATION = "E_SMALL_MOTION_TOLERANCE_POLICY_VIOLATION"
 
 
 @dataclass(frozen=True)
@@ -78,6 +83,7 @@ def evaluate_moveit_pose_plan(request: MoveItPoseExecutorRequest | None = None) 
     )
     if validation["blocking_reasons"]:
         return _blocked_result(plan=True, validation=validation, config=config)
+    config = _config_with_resolved_tolerance(config, validation)
 
     try:
         api_result = _plan_with_move_group_action(target_pose, config)
@@ -137,6 +143,7 @@ def evaluate_moveit_pose_execute(request: MoveItPoseExecutorRequest | None = Non
     )
     if validation["blocking_reasons"]:
         return _blocked_result(plan=False, validation=validation, config=config)
+    config = _config_with_resolved_tolerance(config, validation)
 
     try:
         plan_result = _plan_with_move_group_action(target_pose, config)
@@ -252,6 +259,18 @@ def _validate_request(
         if not _point_in_workspace(target_pose["position_m"], workspace_bounds):
             blocking_reasons.append(E_OUT_OF_WORKSPACE)
 
+    tolerance = _resolved_tolerance_policy(config, translation_distance_m)
+    if (
+        tolerance["small_motion_tolerance_policy_enabled"] is True
+        and tolerance["requested_distance_m"] is not None
+        and tolerance["position_tolerance_policy_limit_m"] is not None
+        and (
+            tolerance["moveit_position_tolerance_m"] > tolerance["position_tolerance_policy_limit_m"] + MOTION_LIMIT_EPS
+            or tolerance["moveit_position_tolerance_m"] >= tolerance["requested_distance_m"] - MOTION_LIMIT_EPS
+        )
+    ):
+        blocking_reasons.append(E_SMALL_MOTION_TOLERANCE_POLICY_VIOLATION)
+
     require_robot_state = execute or config.get("require_robot_state_for_plan") is True
     if require_robot_state:
         blocking_reasons.extend(_robot_state_blockers(config, robot_state if isinstance(robot_state, dict) else {}))
@@ -276,11 +295,13 @@ def _validate_request(
         "motion_check_source": "moveit_pose_executor",
         "motion_check_current_position_m": current_position_m,
         "motion_check_target_position_m": target_position_m,
+        "current_tcp_frame": current_pose.get("frame") if isinstance(current_pose, dict) else None,
         "motion_check_distance_m": round(float(translation_distance_m), 6) if translation_distance_m is not None else None,
         "motion_check_max_distance_m": max_translation_m,
         "motion_check_hard_limit_m": hard_safety_limit_m,
         "motion_check_eps": MOTION_LIMIT_EPS,
         "workspace_check_passed": bool(target_pose and _point_in_workspace(target_pose["position_m"], workspace_bounds)),
+        **tolerance,
     }
 
 
@@ -420,8 +441,9 @@ def _build_move_group_goal(target_pose: Dict[str, Any], config: Dict[str, Any]) 
     request.workspace_parameters.max_corner.z = workspace["z"][1]
 
     link_name = _string(config.get("end_effector_link")) or _string(config.get("end_effector_frame")) or DEFAULT_END_EFFECTOR_LINK
-    position_tolerance_m = float(_optional_float(config.get("position_tolerance_m")) or 0.005)
-    orientation_tolerance_rad = float(_optional_float(config.get("orientation_tolerance_rad")) or 0.05)
+    tolerance = _resolved_tolerance_policy(config)
+    position_tolerance_m = tolerance["moveit_position_tolerance_m"]
+    orientation_tolerance_rad = tolerance["moveit_orientation_tolerance_rad"]
 
     region_pose = Pose()
     region_pose.position.x = float(position[0])
@@ -532,6 +554,16 @@ def _common_result(*, config: Dict[str, Any], target_pose: Dict[str, Any] | None
         "planning_group": _string(config.get("planning_group")) or DEFAULT_PLANNING_GROUP,
         "planning_frame": target_pose.get("frame") if target_pose else _string(config.get("planning_frame")) or DEFAULT_FRAME,
         "end_effector_link": _string(config.get("end_effector_link")) or _string(config.get("end_effector_frame")) or DEFAULT_END_EFFECTOR_LINK,
+        "requested_distance_m": validation.get("requested_distance_m"),
+        "moveit_position_tolerance_m": validation.get("moveit_position_tolerance_m"),
+        "moveit_orientation_tolerance_rad": validation.get("moveit_orientation_tolerance_rad"),
+        "tolerance_to_requested_distance_ratio": validation.get("tolerance_to_requested_distance_ratio"),
+        "small_motion_tolerance_policy": validation.get("small_motion_tolerance_policy"),
+        "target_frame": target_pose.get("frame") if target_pose else None,
+        "current_tcp_frame": validation.get("current_tcp_frame"),
+        "moveit_end_effector_link": _string(config.get("end_effector_link")) or _string(config.get("end_effector_frame")) or DEFAULT_END_EFFECTOR_LINK,
+        "moveit_planning_frame": target_pose.get("frame") if target_pose else _string(config.get("planning_frame")) or DEFAULT_FRAME,
+        "moveit_group_name": _string(config.get("planning_group")) or DEFAULT_PLANNING_GROUP,
         "target_pose": target_pose,
         "translation_distance_m": validation.get("translation_distance_m"),
         "max_translation_m": validation.get("max_translation_m"),
@@ -784,6 +816,51 @@ def _point_in_workspace(point: list[float], bounds: Dict[str, list[float]]) -> b
 
 def _distance_between(left: list[float], right: list[float]) -> float:
     return sum((float(lvalue) - float(rvalue)) ** 2 for lvalue, rvalue in zip(left, right)) ** 0.5
+
+
+def _resolved_tolerance_policy(config: Dict[str, Any], fallback_distance_m: float | None = None) -> Dict[str, Any]:
+    requested_distance = _optional_float(config.get("requested_distance_m"))
+    if requested_distance is None:
+        requested_distance = fallback_distance_m
+    position_tolerance = float(_optional_float(config.get("position_tolerance_m")) or DEFAULT_POSITION_TOLERANCE_M)
+    orientation_tolerance = float(_optional_float(config.get("orientation_tolerance_rad")) or DEFAULT_ORIENTATION_TOLERANCE_RAD)
+    configured_policy = _string(config.get("small_motion_tolerance_policy")) or ""
+    policy_enabled = configured_policy.startswith(
+        ("real_small_motion_strict_v3.0.3", "tiny_relative_cartesian_strict_v3.0.3")
+    )
+    policy_limit = None
+    policy = "default_moveit_pose_tolerance"
+    if policy_enabled and requested_distance is not None and requested_distance > 0.0:
+        policy_limit = min(SMALL_MOTION_MAX_POSITION_TOLERANCE_M, float(requested_distance) * 0.25)
+        position_tolerance = min(position_tolerance, policy_limit)
+        orientation_tolerance = min(orientation_tolerance, SMALL_MOTION_MAX_ORIENTATION_TOLERANCE_RAD)
+        policy = (
+            "real_small_motion_strict_v3.0.3:"
+            "position_tolerance_m=min(configured_or_default,0.0005,requested_distance_m*0.25);"
+            "orientation_tolerance_rad<=0.005"
+        )
+    ratio = None
+    if requested_distance is not None and requested_distance > 0.0:
+        ratio = round(position_tolerance / float(requested_distance), 6)
+    return {
+        "requested_distance_m": round(float(requested_distance), 6) if requested_distance is not None else None,
+        "moveit_position_tolerance_m": round(float(position_tolerance), 6),
+        "moveit_orientation_tolerance_rad": round(float(orientation_tolerance), 6),
+        "tolerance_to_requested_distance_ratio": ratio,
+        "small_motion_tolerance_policy": policy,
+        "small_motion_tolerance_policy_enabled": policy_enabled,
+        "position_tolerance_policy_limit_m": round(float(policy_limit), 6) if policy_limit is not None else None,
+    }
+
+
+def _config_with_resolved_tolerance(config: Dict[str, Any], validation: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        **config,
+        "requested_distance_m": validation.get("requested_distance_m"),
+        "position_tolerance_m": validation.get("moveit_position_tolerance_m"),
+        "orientation_tolerance_rad": validation.get("moveit_orientation_tolerance_rad"),
+        "small_motion_tolerance_policy": config.get("small_motion_tolerance_policy"),
+    }
 
 
 def _flag_from(config: Dict[str, Any], state: Dict[str, Any], name: str, default: Any = None) -> Any:

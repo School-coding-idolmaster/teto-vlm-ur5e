@@ -105,6 +105,50 @@ def test_plan_allows_exact_relative_max_translation_from_nonzero_tcp_pose(monkey
     assert result["motion_check_eps"] == 1e-9
 
 
+def test_real_small_motion_policy_tightens_two_mm_tolerance(monkeypatch):
+    monkeypatch.setattr(
+        "src.moveit_pose_executor._plan_with_move_group_action",
+        lambda _target_pose, _config: {
+            "action_call_attempted": True,
+            "action_server_available": True,
+            "goal_accepted": True,
+            "success": True,
+            "error_code": 1,
+            "error_code_name": "SUCCESS",
+            "planning_time_s": 0.1,
+            "trajectory_point_count": 2,
+        },
+    )
+
+    result = evaluate_moveit_pose_plan(
+        MoveItPoseExecutorRequest(
+            requested=True,
+            target_pose=_pose([0.40, 0.0, 0.302]),
+            current_tcp_pose=_pose([0.40, 0.0, 0.30]),
+            config={
+                **_base_config(),
+                "requested_distance_m": 0.002,
+                "position_tolerance_m": 0.005,
+                "orientation_tolerance_rad": 0.05,
+                "small_motion_tolerance_policy": "real_small_motion_strict_v3.0.3",
+            },
+        )
+    )
+
+    assert result["moveit_pose_executor_status"] == "PASS"
+    assert result["requested_distance_m"] == 0.002
+    assert result["moveit_position_tolerance_m"] <= 0.0005
+    assert result["moveit_position_tolerance_m"] < result["requested_distance_m"]
+    assert result["moveit_orientation_tolerance_rad"] == 0.005
+    assert result["tolerance_to_requested_distance_ratio"] == 0.25
+    assert "real_small_motion_strict_v3.0.3" in result["small_motion_tolerance_policy"]
+    assert result["target_frame"] == "base_link"
+    assert result["current_tcp_frame"] == "base_link"
+    assert result["moveit_end_effector_link"] == "tool0"
+    assert result["moveit_planning_frame"] == "base_link"
+    assert result["moveit_group_name"] == "ur_manipulator"
+
+
 def test_plan_blocks_relative_motion_above_hard_safety_limit_before_moveit(monkeypatch):
     current_position = [-0.153217, 0.315916, 1.046994]
     target_position = [-0.153217, 0.315916, 1.066994]
