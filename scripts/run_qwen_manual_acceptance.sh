@@ -12,6 +12,8 @@ Modes:
   --dry-run             Parse, preview, and record acceptance evidence without MoveIt execution.
   --plan-only-smoke     Request MoveIt planning only; ExecuteTrajectory remains disabled.
   --real-small-motion   Guarded future real acceptance path requiring manual confirmation.
+  --mock-current-tcp-pose
+                        Use the fixed dry-run-only mock TCP pose; rejected for real motion.
   --auto-start-qwen     Check/start the local Qwen parser server before running acceptance.
   --no-auto-start-qwen  Preserve existing behavior and do not start Qwen automatically.
 
@@ -22,6 +24,7 @@ Initial future real acceptance commands:
 
 Examples:
   bash scripts/run_qwen_manual_acceptance.sh --cmd "raise the tcp by 2 millimeters" --dry-run
+  bash scripts/run_qwen_manual_acceptance.sh --cmd "raise the tcp by 2 millimeters" --dry-run --auto-start-qwen --mock-current-tcp-pose
   bash scripts/run_qwen_manual_acceptance.sh --cmd "raise the tcp by 2 millimeters" --dry-run --auto-start-qwen
   bash scripts/run_qwen_manual_acceptance.sh --cmd "raise the tcp by 2 millimeters" --plan-only-smoke
   bash scripts/run_qwen_manual_acceptance.sh --cmd "raise the tcp by 2 millimeters" --real-small-motion

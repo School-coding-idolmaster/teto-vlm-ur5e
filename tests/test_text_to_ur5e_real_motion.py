@@ -457,6 +457,61 @@ def test_acceptance_dry_run_two_mm_up_has_workflow_evidence(monkeypatch, capsys)
     assert workflow["real_robot_motion_executed"] is False
 
 
+def test_acceptance_dry_run_with_mock_current_tcp_pose_passes_without_real_state(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: pytest.fail("mock pose should avoid real pose lookup"))
+    monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_two_mm_up_success)
+
+    exit_code = cli.main(
+        [
+            "--acceptance",
+            "--dry-run",
+            "--mock-current-tcp-pose",
+            "--cmd",
+            "raise the tcp by 2 millimeters",
+        ]
+    )
+
+    evidence = _final_evidence(capsys.readouterr().out)
+    workflow = evidence["acceptance_workflow"]
+    current_pose = evidence["current_tcp_pose"]
+    assert exit_code == 0
+    assert evidence["final_status"] == "PASS"
+    assert workflow["status"] == "PASS"
+    assert workflow["mode"] == "dry_run"
+    assert evidence["execution_preview"]["preview_status"] == "PASS"
+    assert evidence["execution_preview"]["axis"] == "z"
+    assert evidence["execution_preview"]["direction"] == "+"
+    assert evidence["execution_preview"]["distance_m"] == 0.002
+    assert evidence["execution_preview"]["delta_m"] == [0.0, 0.0, 0.002]
+    assert evidence["execution_preview"]["within_safety_limit"] is True
+    assert current_pose["available"] is True
+    assert current_pose["source"] == "mock_current_tcp_pose_for_dry_run_only"
+    assert current_pose["allowed_for_real_execution"] is False
+    assert evidence["target_pose"]["position_m"] == [-0.154964, 0.312309, 1.048042]
+    assert evidence["trajectory_sent"] is False
+    assert evidence["execute_trajectory_called"] is False
+    assert evidence["controller_command_sent"] is False
+    assert evidence["real_robot_motion_executed"] is False
+    assert "E_CURRENT_TCP_POSE_MISSING" not in evidence["blocking_reasons"]
+
+
+def test_acceptance_dry_run_without_current_tcp_pose_remains_blocked(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: None)
+    monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_two_mm_up_success)
+
+    exit_code = cli.main(["--acceptance", "--dry-run", "--cmd", "raise the tcp by 2 millimeters"])
+
+    evidence = _final_evidence(capsys.readouterr().out)
+    assert exit_code == 2
+    assert evidence["final_status"] == "BLOCKED"
+    assert evidence["current_tcp_pose"]["available"] is False
+    assert evidence["current_tcp_pose"]["source"] == "current_tcp_pose_not_provided_or_available"
+    assert "E_CURRENT_TCP_POSE_MISSING" in evidence["blocking_reasons"]
+    assert evidence["trajectory_sent"] is False
+    assert evidence["controller_command_sent"] is False
+    assert evidence["real_robot_motion_executed"] is False
+
+
 def test_acceptance_dry_run_two_mm_down_has_workflow_evidence(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
     monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_down_success)
@@ -508,6 +563,46 @@ def test_real_small_motion_acceptance_without_confirmation_blocks(monkeypatch, c
     assert workflow["manual_confirmation_received"] is False
     assert workflow["real_robot_motion_executed"] is False
     assert "E_CONFIRMATION_MISMATCH" in workflow["blocking_reasons"]
+
+
+def test_real_small_motion_rejects_mock_current_tcp_pose(capsys):
+    exit_code = cli.main(
+        [
+            "--real-small-motion",
+            "--mock-current-tcp-pose",
+            "--cmd",
+            "raise the tcp by 2 millimeters",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    evidence = json.loads(output)
+    assert exit_code == 2
+    assert evidence["final_status"] == "BLOCKED"
+    assert "E_MOCK_CURRENT_TCP_POSE_NOT_ALLOWED_FOR_REAL_EXECUTION" in evidence["blocking_reasons"]
+    assert evidence["current_tcp_pose"]["available"] is False
+    assert evidence["current_tcp_pose"]["source"] == "real_robot_state_required"
+    assert evidence["trajectory_sent"] is False
+    assert evidence["controller_command_sent"] is False
+    assert evidence["real_robot_motion_executed"] is False
+
+
+def test_real_small_motion_without_real_current_tcp_pose_blocks(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: None)
+    monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_two_mm_up_success)
+    monkeypatch.setattr(cli, "_execution_prereq_blockers", lambda timeout_s: pytest.fail("prereq should not run without pose"))
+
+    exit_code = cli.main(["--real-small-motion", "--cmd", "raise the tcp by 2 millimeters"])
+
+    evidence = _final_evidence(capsys.readouterr().out)
+    assert exit_code == 2
+    assert evidence["final_status"] == "BLOCKED"
+    assert evidence["current_tcp_pose"]["available"] is False
+    assert evidence["current_tcp_pose"]["source"] == "real_robot_state_required"
+    assert "E_CURRENT_TCP_POSE_MISSING" in evidence["blocking_reasons"]
+    assert evidence["trajectory_sent"] is False
+    assert evidence["controller_command_sent"] is False
+    assert evidence["real_robot_motion_executed"] is False
 
 
 def test_acceptance_real_requires_real_small_motion(capsys):

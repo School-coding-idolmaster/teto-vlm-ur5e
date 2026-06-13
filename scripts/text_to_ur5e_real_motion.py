@@ -38,6 +38,14 @@ REAL_SMALL_MOTION_ALLOWED_COMMANDS = {
     "move up 5 mm",
 }
 REAL_SMALL_MOTION_ALLOWED_DISTANCES_M = {0.002, 0.005}
+MOCK_CURRENT_TCP_POSE_FOR_DRY_RUN_ONLY = {
+    "available": True,
+    "frame": "base_link",
+    "position_m": [-0.154964, 0.312309, 1.046042],
+    "orientation_xyzw": [-0.707084555167031, 0.0060696987353325745, 0.005069564207997603, 0.7070847828374228],
+    "source": "mock_current_tcp_pose_for_dry_run_only",
+    "allowed_for_real_execution": False,
+}
 
 STATUS_PASS = "PASS"
 STATUS_BLOCKED = "BLOCKED"
@@ -180,6 +188,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--plan-only-smoke", action="store_true", help="Request MoveIt planning only; ExecuteTrajectory remains disabled.")
     parser.add_argument("--acceptance", action="store_true", help="Emit v3.0.2 unified Qwen manual acceptance workflow evidence.")
     parser.add_argument("--real-small-motion", action="store_true", help="Guarded future real small-motion acceptance path; requires manual confirmation.")
+    parser.add_argument("--mock-current-tcp-pose", action="store_true", help="Use the fixed dry-run-only mock TCP pose; rejected for real motion.")
+    parser.add_argument("--current-tcp-pose-json", help="Explicit current TCP pose JSON for dry-run/simulation only; rejected for real motion.")
     parser.add_argument("--cmd", help='One-shot command, for example: --cmd "move up 5 mm".')
     parser.add_argument("--yes", action="store_true", help="Skip real-mode confirmation; only allowed together with --real --cmd.")
     parser.add_argument("--parser", choices=["rule", "qwen", "auto"], default="qwen", help="Text parser mode. Default: qwen.")
@@ -205,6 +215,21 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.acceptance and args.real and not args.real_small_motion:
         print(_json({"final_status": STATUS_BLOCKED, "blocking_reasons": ["E_ACCEPTANCE_REAL_REQUIRES_REAL_SMALL_MOTION"], "real_robot_motion_executed": False}))
+        return 2
+    if real_requested and (args.mock_current_tcp_pose or args.current_tcp_pose_json):
+        print(
+            _json(
+                {
+                    "final_status": STATUS_BLOCKED,
+                    "blocking_reasons": ["E_MOCK_CURRENT_TCP_POSE_NOT_ALLOWED_FOR_REAL_EXECUTION"],
+                    "current_tcp_pose": _current_tcp_pose_unavailable(real_required=True),
+                    "trajectory_sent": False,
+                    "execute_trajectory_called": False,
+                    "controller_command_sent": False,
+                    "real_robot_motion_executed": False,
+                }
+            )
+        )
         return 2
     if real_requested and args.yes and args.cmd is None:
         print(_json({"final_status": STATUS_BLOCKED, "blocking_reasons": ["E_YES_REQUIRES_CMD"], "real_robot_motion_executed": False}))
@@ -300,13 +325,25 @@ def main(argv: list[str] | None = None) -> int:
     print("Parsed TETO task contract:")
     print(_json(printed_contract))
 
-    current_pose = _lookup_current_tcp_pose(timeout_s=3.0)
+    current_pose, current_pose_evidence, current_pose_blocker = _resolve_current_tcp_pose(args, real_requested=real_requested)
+    if current_pose_blocker:
+        result = _blocked_result(
+            current_pose_blocker,
+            printed_contract,
+            parser_metadata,
+            acceptance_mode=acceptance_mode,
+            current_tcp_pose=current_pose_evidence,
+        )
+        print("Final execution evidence:")
+        print(_json(result))
+        return 2
     if current_pose is None:
         result = _blocked_result(
             "E_CURRENT_TCP_POSE_MISSING",
             printed_contract,
             parser_metadata,
             acceptance_mode=acceptance_mode,
+            current_tcp_pose=current_pose_evidence,
         )
         print("Final execution evidence:")
         print(_json(result))
@@ -344,6 +381,7 @@ def main(argv: list[str] | None = None) -> int:
             parser_metadata=parser_metadata,
             planner_acceptance=planner_acceptance,
             acceptance_mode=acceptance_mode,
+            current_tcp_pose=current_pose_evidence,
             blocking_reasons=motion.get("blocking_reasons", []),
         )
         print("Final execution evidence:")
@@ -381,6 +419,7 @@ def main(argv: list[str] | None = None) -> int:
             parser_metadata=parser_metadata,
             planner_acceptance=planner_acceptance,
             acceptance_mode=acceptance_mode,
+            current_tcp_pose=current_pose_evidence,
             blocking_reasons=planner_acceptance.get("blocking_reasons", []),
         )
         print("Final execution evidence:")
@@ -396,6 +435,7 @@ def main(argv: list[str] | None = None) -> int:
             parser_metadata=parser_metadata,
             planner_acceptance=planner_acceptance,
             acceptance_mode=acceptance_mode,
+            current_tcp_pose=current_pose_evidence,
         )
         print("Final execution evidence:")
         print(_json(result))
@@ -420,6 +460,7 @@ def main(argv: list[str] | None = None) -> int:
             parser_metadata=parser_metadata,
             planner_acceptance=planner_acceptance,
             acceptance_mode=acceptance_mode,
+            current_tcp_pose=current_pose_evidence,
             blocking_reasons=real_small_blockers,
         )
         print("Final execution evidence:")
@@ -440,6 +481,7 @@ def main(argv: list[str] | None = None) -> int:
                 parser_metadata=parser_metadata,
                 planner_acceptance=planner_acceptance,
                 acceptance_mode=acceptance_mode,
+                current_tcp_pose=current_pose_evidence,
                 manual_confirmation_received=False,
                 blocking_reasons=["E_CONFIRMATION_MISMATCH"],
             )
@@ -457,6 +499,7 @@ def main(argv: list[str] | None = None) -> int:
             parser_metadata=parser_metadata,
             planner_acceptance=planner_acceptance,
             acceptance_mode=acceptance_mode,
+            current_tcp_pose=current_pose_evidence,
             manual_confirmation_received=bool(args.yes),
             blocking_reasons=prereq_blockers,
         )
@@ -496,6 +539,7 @@ def main(argv: list[str] | None = None) -> int:
         parser_metadata=parser_metadata,
         planner_acceptance=planner_acceptance,
         acceptance_mode=acceptance_mode,
+        current_tcp_pose=current_pose_evidence,
         manual_confirmation_received=True,
     )
     print("Final execution evidence:")
@@ -785,6 +829,71 @@ def _lookup_current_tcp_pose(*, timeout_s: float) -> dict[str, Any] | None:
                 rclpy.shutdown()
             except Exception:
                 pass
+
+
+def _resolve_current_tcp_pose(args: argparse.Namespace, *, real_requested: bool) -> tuple[dict[str, Any] | None, dict[str, Any], str | None]:
+    if args.mock_current_tcp_pose:
+        pose = dict(MOCK_CURRENT_TCP_POSE_FOR_DRY_RUN_ONLY)
+        return _pose_for_gateway(pose), pose, None
+
+    if args.current_tcp_pose_json:
+        try:
+            raw_pose = json.loads(args.current_tcp_pose_json)
+        except json.JSONDecodeError:
+            return None, _current_tcp_pose_unavailable(real_required=real_requested), "E_INVALID_CURRENT_TCP_POSE_JSON"
+        pose = _current_tcp_pose_evidence(raw_pose, source="provided_current_tcp_pose_for_dry_run_only", allowed_for_real_execution=False)
+        if pose is None:
+            return None, _current_tcp_pose_unavailable(real_required=real_requested), "E_INVALID_CURRENT_TCP_POSE"
+        return _pose_for_gateway(pose), pose, None
+
+    pose = _lookup_current_tcp_pose(timeout_s=3.0)
+    if pose is None:
+        return None, _current_tcp_pose_unavailable(real_required=real_requested), None
+    evidence = _current_tcp_pose_evidence(pose, source=pose.get("source") or "real_robot_state", allowed_for_real_execution=True)
+    if evidence is None:
+        return None, _current_tcp_pose_unavailable(real_required=real_requested), "E_INVALID_CURRENT_TCP_POSE"
+    return _pose_for_gateway(evidence), evidence, None
+
+
+def _pose_for_gateway(pose: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "frame": pose.get("frame") or "base_link",
+        "position_m": list(pose.get("position_m") or []),
+        "orientation_xyzw": list(pose.get("orientation_xyzw") or []),
+    }
+
+
+def _current_tcp_pose_evidence(
+    pose: dict[str, Any],
+    *,
+    source: str,
+    allowed_for_real_execution: bool,
+) -> dict[str, Any] | None:
+    if not isinstance(pose, dict):
+        return None
+    position = pose.get("position_m")
+    orientation = pose.get("orientation_xyzw")
+    if not _vector3(position) or not _quaternion(orientation):
+        return None
+    return {
+        "available": True,
+        "frame": pose.get("frame") or "base_link",
+        "position_m": [round(float(value), 12) for value in position],
+        "orientation_xyzw": [round(float(value), 15) for value in orientation],
+        "source": source,
+        "allowed_for_real_execution": allowed_for_real_execution,
+    }
+
+
+def _current_tcp_pose_unavailable(*, real_required: bool) -> dict[str, Any]:
+    return {
+        "available": False,
+        "frame": None,
+        "position_m": None,
+        "orientation_xyzw": None,
+        "source": "real_robot_state_required" if real_required else "current_tcp_pose_not_provided_or_available",
+        "allowed_for_real_execution": True if real_required else False,
+    }
 
 
 def _execution_prereq_blockers(*, timeout_s: float) -> list[str]:
@@ -1297,6 +1406,7 @@ def _evidence(
     parser_metadata: dict[str, Any],
     planner_acceptance: dict[str, Any] | None = None,
     acceptance_mode: str | None = None,
+    current_tcp_pose: dict[str, Any] | None = None,
     manual_confirmation_received: bool = False,
     blocking_reasons: list[str] | None = None,
 ) -> dict[str, Any]:
@@ -1315,6 +1425,7 @@ def _evidence(
         "parsed_contract": parsed_contract,
         "execution_preview": parsed_contract.get("execution_preview"),
         "planner_acceptance": planner_acceptance,
+        "current_tcp_pose": current_tcp_pose or _current_tcp_pose_unavailable(real_required=False),
         "acceptance_workflow": _acceptance_workflow(
             status=status,
             mode=acceptance_mode,
@@ -1336,6 +1447,7 @@ def _evidence(
         "moveit_execute_error_code": moveit.get("moveit_execute_error_code"),
         "moveit_execute_error_code_name": moveit.get("moveit_execute_error_code_name"),
         "trajectory_sent": trajectory_sent,
+        "execute_trajectory_called": execute_trajectory_called,
         "controller_command_sent": controller_command_sent,
         "real_robot_motion_executed": real_robot_motion_executed,
         "target_pose": motion.get("target_pose"),
@@ -1352,12 +1464,14 @@ def _blocked_result(
     parser_metadata: dict[str, Any],
     *,
     acceptance_mode: str | None = None,
+    current_tcp_pose: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         **parser_metadata,
         "parsed_contract": parsed_contract,
         "execution_preview": parsed_contract.get("execution_preview"),
         "planner_acceptance": None,
+        "current_tcp_pose": current_tcp_pose or _current_tcp_pose_unavailable(real_required=False),
         "acceptance_workflow": _acceptance_workflow(
             status=STATUS_BLOCKED,
             mode=acceptance_mode,
@@ -1376,6 +1490,7 @@ def _blocked_result(
         "moveit_execute_error_code": None,
         "moveit_execute_error_code_name": None,
         "trajectory_sent": False,
+        "execute_trajectory_called": False,
         "controller_command_sent": False,
         "real_robot_motion_executed": False,
         "blocking_reasons": [reason],
