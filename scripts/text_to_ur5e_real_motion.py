@@ -72,6 +72,43 @@ class ParsedMotionCommand:
             "dry_run": dry_run,
         }
 
+    def execution_preview(
+        self,
+        *,
+        input_mode: str,
+        parser_mode: str,
+        real_robot_motion_requested: bool,
+        dry_run: bool,
+        manual_confirmation_required: bool = True,
+    ) -> dict[str, Any]:
+        axis, sign = _axis_direction_from_delta(self.delta_m)
+        within_safety_limit = (
+            self.distance_m <= self.max_distance_m + EPS
+            and self.distance_m <= self.hard_safety_limit_m + EPS
+        )
+        return {
+            "original_command": self.command,
+            "input_mode": input_mode,
+            "parser_mode": parser_mode,
+            "parser_source": self.parser_source,
+            "llm_called": self.llm_called,
+            "model_name": self.model_name,
+            "endpoint": self.qwen_endpoint,
+            "intent": "relative_cartesian_motion",
+            "frame": self.frame,
+            "axis": axis,
+            "direction": sign,
+            "distance_m": self.distance_m,
+            "delta_m": [round(value, 6) for value in self.delta_m],
+            "max_distance_m": self.max_distance_m,
+            "hard_safety_limit_m": self.hard_safety_limit_m,
+            "within_safety_limit": within_safety_limit,
+            "dry_run": dry_run,
+            "real_robot_motion_requested": real_robot_motion_requested,
+            "manual_confirmation_required": manual_confirmation_required,
+            "preview_status": STATUS_PASS if within_safety_limit else STATUS_BLOCKED,
+        }
+
     def gateway_task(self) -> dict[str, Any]:
         dx, dy, dz = self.delta_m
         return {
@@ -209,8 +246,17 @@ def main(argv: list[str] | None = None) -> int:
         print(_json(result))
         return 2
 
+    execution_preview = parsed.execution_preview(
+        input_mode=input_mode,
+        parser_mode=args.parser,
+        real_robot_motion_requested=bool(args.real),
+        dry_run=dry_run,
+    )
     printed_contract = parsed.task_contract(real_robot_motion_requested=bool(args.real), dry_run=dry_run)
+    printed_contract["execution_preview"] = execution_preview
     parser_metadata["normalized_contract"] = printed_contract
+    print("Execution preview:")
+    print(_json(execution_preview))
     print("Normalized TETO task contract:")
     print(_json(printed_contract))
     print("Parsed TETO task contract:")
@@ -691,6 +737,7 @@ def _evidence(
     return {
         **parser_metadata,
         "parsed_contract": parsed_contract,
+        "execution_preview": parsed_contract.get("execution_preview"),
         "cartesian_motion_gateway_status": motion.get("cartesian_motion_gateway_status"),
         "cartesian_motion_execution_status": execution.get("cartesian_motion_execution_status"),
         "goal_accepted": moveit.get("goal_accepted", False),
@@ -712,6 +759,7 @@ def _blocked_result(reason: str, parsed_contract: dict[str, Any], parser_metadat
     return {
         **parser_metadata,
         "parsed_contract": parsed_contract,
+        "execution_preview": parsed_contract.get("execution_preview"),
         **_empty_motion_check(parsed_contract),
         "goal_accepted": False,
         "execute_accepted": False,
@@ -744,6 +792,15 @@ def _motion_check_fields(motion: dict[str, Any], moveit: dict[str, Any], parsed_
         "motion_check_hard_limit_m": moveit.get("motion_check_hard_limit_m", parsed_contract.get("hard_safety_limit_m")),
         "motion_check_eps": moveit.get("motion_check_eps", EPS),
     }
+
+
+def _axis_direction_from_delta(delta_m: list[float]) -> tuple[str | None, str | None]:
+    axes = ["x", "y", "z"]
+    active = [(axis, float(value)) for axis, value in zip(axes, delta_m) if abs(float(value)) > EPS]
+    if len(active) != 1:
+        return None, None
+    axis, value = active[0]
+    return axis, "+" if value > 0.0 else "-"
 
 
 def _empty_motion_check(parsed_contract: dict[str, Any] | None) -> dict[str, Any]:

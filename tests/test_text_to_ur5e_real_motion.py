@@ -126,6 +126,64 @@ def test_manual_qwen_path_reads_stdin_and_preserves_text(monkeypatch, capsys):
     assert '"parser_source": "qwen_llm"' in output
     assert '"llm_called": true' in output
     assert '"delta_m": [\n      0.0,\n      0.0,\n      0.005\n    ]' in output
+    evidence = _final_evidence(output)
+    assert evidence["execution_preview"] == {
+        "original_command": "raise the tcp by 5 millimeters",
+        "input_mode": "manual",
+        "parser_mode": "qwen",
+        "parser_source": "qwen_llm",
+        "llm_called": True,
+        "model_name": "qwen2.5vl:3b",
+        "endpoint": None,
+        "intent": "relative_cartesian_motion",
+        "frame": "base_link",
+        "axis": "z",
+        "direction": "+",
+        "distance_m": 0.005,
+        "delta_m": [0.0, 0.0, 0.005],
+        "max_distance_m": 0.005,
+        "hard_safety_limit_m": 0.01,
+        "within_safety_limit": True,
+        "dry_run": True,
+        "real_robot_motion_requested": False,
+        "manual_confirmation_required": True,
+        "preview_status": "PASS",
+    }
+
+
+def test_manual_qwen_down_command_prints_negative_z_preview(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
+    monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_down_success)
+    monkeypatch.setattr("builtins.input", lambda _prompt: "tcp down 2mm")
+
+    exit_code = cli.main(["--dry-run"])
+
+    evidence = _final_evidence(capsys.readouterr().out)
+    preview = evidence["execution_preview"]
+    assert exit_code == 0
+    assert preview["original_command"] == "tcp down 2mm"
+    assert preview["axis"] == "z"
+    assert preview["direction"] == "-"
+    assert preview["distance_m"] == 0.002
+    assert preview["delta_m"] == [0.0, 0.0, -0.002]
+    assert preview["within_safety_limit"] is True
+    assert preview["dry_run"] is True
+    assert preview["real_robot_motion_requested"] is False
+
+
+def test_unsafe_qwen_distance_blocks_before_execution_preview(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: pytest.fail("pose lookup should not run"))
+    monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_unsafe_distance)
+    monkeypatch.setattr("builtins.input", lambda _prompt: "raise the tcp by 20 millimeters")
+
+    exit_code = cli.main(["--dry-run"])
+
+    evidence = _final_evidence(capsys.readouterr().out)
+    assert exit_code == 2
+    assert evidence["final_status"] != "PASS"
+    assert evidence.get("execution_preview") is None
+    assert "E_EXCEEDS_HARD_SAFETY_LIMIT" in evidence["blocking_reasons"]
+    assert evidence["real_robot_motion_executed"] is False
 
 
 def test_dry_run_with_cmd_works(monkeypatch, capsys):
@@ -249,6 +307,66 @@ def _fake_qwen_success(request):
     }
 
 
+def _fake_qwen_down_success(request):
+    raw = json.dumps(
+        {
+            "intent": "relative_cartesian_motion",
+            "axis": "z",
+            "direction": "-",
+            "distance_m": 0.002,
+            "confidence": 0.96,
+            "reason": "small downward relative motion",
+        }
+    )
+    return {
+        "qwen_motion_parser_status": "PASS",
+        "parser_source": "qwen_llm",
+        "llm_called": True,
+        "model_name": request.model_name or "qwen2.5vl:3b",
+        "qwen_endpoint": request.endpoint,
+        "llm_latency_ms": 1.1,
+        "raw_llm_output": raw,
+        "normalized_contract": {
+            "intent": "relative_cartesian_motion",
+            "frame": "base_link",
+            "delta_m": [0.0, 0.0, -0.002],
+            "max_distance_m": request.max_distance_m,
+            "hard_safety_limit_m": request.hard_safety_limit_m,
+            "must_confirm": True,
+        },
+        "axis": "z",
+        "direction": "-",
+        "distance_m": 0.002,
+        "confidence": 0.96,
+        "delta_m": [0.0, 0.0, -0.002],
+        "parser_blocking_reasons": [],
+        "blocking_reasons": [],
+    }
+
+
+def _fake_qwen_unsafe_distance(request):
+    return {
+        "qwen_motion_parser_status": "BLOCKED",
+        "parser_source": "qwen_llm",
+        "llm_called": True,
+        "model_name": request.model_name or "qwen2.5vl:3b",
+        "qwen_endpoint": request.endpoint,
+        "llm_latency_ms": 1.0,
+        "raw_llm_output": json.dumps(
+            {
+                "intent": "relative_cartesian_motion",
+                "axis": "z",
+                "direction": "+",
+                "distance_m": 0.02,
+                "confidence": 0.95,
+            }
+        ),
+        "normalized_contract": None,
+        "parser_blocking_reasons": ["E_EXCEEDS_HARD_SAFETY_LIMIT"],
+        "blocking_reasons": ["E_EXCEEDS_HARD_SAFETY_LIMIT"],
+    }
+
+
 def _fake_success_execution(request):
     return {
         "cartesian_motion_execution_status": "PASS",
@@ -264,3 +382,9 @@ def _fake_success_execution(request):
             "moveit_execute_error_code_name": "SUCCESS",
         },
     }
+
+
+def _final_evidence(output: str):
+    marker = "Final execution evidence:\n"
+    assert marker in output
+    return json.loads(output.rsplit(marker, 1)[1])
