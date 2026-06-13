@@ -158,8 +158,41 @@ def test_manual_qwen_path_reads_stdin_and_preserves_text(monkeypatch, capsys):
     assert planner["trajectory_sent"] is False
     assert planner["execute_trajectory_called"] is False
     assert planner["planned_goal_frame"] == "base_link"
+    assert planner["metrics_source"] == "not_available"
+    assert planner["planned_waypoint_count"] is None
+    assert planner["max_joint_delta_rad"] is None
+    assert planner["total_joint_motion_rad"] is None
+    assert planner["estimated_cartesian_path_length_m"] is None
+    assert planner["orientation_change_rad"] is None
+    assert planner["trajectory_duration_s"] is None
     assert planner["reasonableness_check"] == "PASS"
     assert evidence["real_robot_motion_executed"] is False
+
+
+def test_mocked_normal_plan_only_metrics_are_reported(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
+    monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_success)
+    monkeypatch.setattr(cli, "evaluate_cartesian_motion_gateway", _gateway_with_plan_metrics(_normal_up_plan_metrics()))
+    monkeypatch.setattr("builtins.input", lambda _prompt: "raise the tcp by 5 millimeters")
+
+    exit_code = cli.main(["--dry-run"])
+
+    evidence = _final_evidence(capsys.readouterr().out)
+    planner = evidence["planner_acceptance"]
+    assert exit_code == 0
+    assert planner["status"] == "PASS"
+    assert planner["plan_only"] is True
+    assert planner["execution_allowed"] is False
+    assert planner["trajectory_sent"] is False
+    assert planner["execute_trajectory_called"] is False
+    assert planner["metrics_source"] == "mock_plan_only"
+    assert planner["planned_waypoint_count"] == 3
+    assert planner["max_joint_delta_rad"] == 0.03
+    assert planner["total_joint_motion_rad"] == 0.06
+    assert planner["estimated_cartesian_path_length_m"] == 0.005
+    assert planner["orientation_change_rad"] == 0.0
+    assert planner["trajectory_duration_s"] == 1.2
+    assert planner["reasonableness_check"] == "PASS"
 
 
 def test_manual_qwen_down_command_prints_negative_z_preview(monkeypatch, capsys):
@@ -190,25 +223,34 @@ def test_manual_qwen_down_command_prints_negative_z_preview(monkeypatch, capsys)
     assert planner["execute_trajectory_called"] is False
 
 
+def test_mocked_downward_plan_only_metrics_are_reported(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
+    monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_down_success)
+    monkeypatch.setattr(cli, "evaluate_cartesian_motion_gateway", _gateway_with_plan_metrics(_normal_down_plan_metrics()))
+    monkeypatch.setattr("builtins.input", lambda _prompt: "tcp down 2mm")
+
+    exit_code = cli.main(["--dry-run"])
+
+    evidence = _final_evidence(capsys.readouterr().out)
+    planner = evidence["planner_acceptance"]
+    assert exit_code == 0
+    assert planner["requested_delta_m"] == [0.0, 0.0, -0.002]
+    assert planner["requested_distance_m"] == 0.002
+    assert planner["metrics_source"] == "mock_plan_only"
+    assert planner["planned_waypoint_count"] == 2
+    assert planner["max_joint_delta_rad"] == 0.01
+    assert planner["total_joint_motion_rad"] == 0.015
+    assert planner["estimated_cartesian_path_length_m"] == 0.002
+    assert planner["trajectory_duration_s"] == 0.4
+    assert planner["execution_allowed"] is False
+    assert planner["trajectory_sent"] is False
+    assert planner["execute_trajectory_called"] is False
+
+
 def test_suspicious_mocked_joint_trajectory_is_exposed_in_planner_acceptance(monkeypatch, capsys):
-    real_gateway = cli.evaluate_cartesian_motion_gateway
-
-    def fake_gateway(request):
-        result = real_gateway(request)
-        result["moveit_pose_executor_result"] = {
-            "trajectory_point_count": 2,
-            "joint_trajectory_points": [
-                {"positions": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]},
-                {"positions": [0.0, 1.25, 0.0, 0.0, 0.0, 0.0]},
-            ],
-            "trajectory_sent": False,
-            "moveit_execute_called": False,
-        }
-        return result
-
     monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
     monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_success)
-    monkeypatch.setattr(cli, "evaluate_cartesian_motion_gateway", fake_gateway)
+    monkeypatch.setattr(cli, "evaluate_cartesian_motion_gateway", _gateway_with_plan_metrics(_suspicious_plan_metrics()))
     monkeypatch.setattr("builtins.input", lambda _prompt: "raise the tcp by 5 millimeters")
 
     exit_code = cli.main(["--dry-run"])
@@ -220,11 +262,50 @@ def test_suspicious_mocked_joint_trajectory_is_exposed_in_planner_acceptance(mon
     assert planner["reasonableness_check"] == "WARNING"
     assert planner["planned_waypoint_count"] == 2
     assert planner["max_joint_delta_rad"] == 1.25
+    assert planner["total_joint_motion_rad"] == 1.25
     assert "W_SUSPICIOUS_JOINT_DELTA_FOR_TINY_CARTESIAN_MOTION" in planner["warnings"]
     assert planner["execution_allowed"] is False
     assert planner["trajectory_sent"] is False
     assert planner["execute_trajectory_called"] is False
     assert evidence["real_robot_motion_executed"] is False
+
+
+def test_moveit_plan_only_trajectory_object_metrics_are_reported():
+    trajectory = _trajectory_object(
+        [
+            ([0.0, 0.0, 0.0, 0.0, 0.0, 0.0], {"sec": 0, "nanosec": 0}),
+            ([0.0, 0.04, 0.02, 0.0, 0.0, 0.0], {"sec": 0, "nanosec": 700000000}),
+        ]
+    )
+
+    planner = cli._planner_acceptance(
+        execution_preview={
+            "delta_m": [0.0, 0.0, 0.005],
+            "distance_m": 0.005,
+            "hard_safety_limit_m": 0.01,
+            "frame": "base_link",
+        },
+        motion={"cartesian_motion_gateway_status": "PASS", "translation_distance_m": 0.005, "frame": "base_link"},
+        execution={
+            "moveit_pose_executor_result": {
+                "planned_trajectory": trajectory,
+                "moveit_plan_called": True,
+                "trajectory_sent": False,
+                "moveit_execute_called": False,
+            }
+        },
+        dry_run=True,
+    )
+
+    assert planner["status"] == "PASS"
+    assert planner["metrics_source"] == "moveit_plan_only"
+    assert planner["planned_waypoint_count"] == 2
+    assert planner["max_joint_delta_rad"] == 0.04
+    assert planner["total_joint_motion_rad"] == 0.06
+    assert planner["trajectory_duration_s"] == 0.7
+    assert planner["execution_allowed"] is False
+    assert planner["trajectory_sent"] is False
+    assert planner["execute_trajectory_called"] is False
 
 
 def test_unsafe_qwen_distance_blocks_before_execution_preview(monkeypatch, capsys):
@@ -325,6 +406,82 @@ def _pose():
         "position_m": [0.4, 0.0, 0.3],
         "orientation_xyzw": [0.0, 0.0, 0.0, 1.0],
     }
+
+
+def _gateway_with_plan_metrics(metrics):
+    real_gateway = cli.evaluate_cartesian_motion_gateway
+
+    def fake_gateway(request):
+        result = real_gateway(request)
+        result["moveit_pose_executor_result"] = {
+            **metrics,
+            "trajectory_sent": False,
+            "moveit_execute_called": False,
+        }
+        return result
+
+    return fake_gateway
+
+
+def _normal_up_plan_metrics():
+    return {
+        "trajectory_point_count": 3,
+        "joint_trajectory_points": [
+            {"positions": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "time_from_start": {"sec": 0, "nanosec": 0}},
+            {"positions": [0.0, 0.02, 0.0, 0.0, 0.0, 0.0], "time_from_start": {"sec": 0, "nanosec": 500000000}},
+            {"positions": [0.0, 0.05, 0.01, 0.0, 0.0, 0.0], "time_from_start": {"sec": 1, "nanosec": 200000000}},
+        ],
+        "cartesian_waypoints": [
+            {"position_m": [0.4, 0.0, 0.3], "orientation_xyzw": [0.0, 0.0, 0.0, 1.0]},
+            {"position_m": [0.4, 0.0, 0.305], "orientation_xyzw": [0.0, 0.0, 0.0, 1.0]},
+        ],
+    }
+
+
+def _normal_down_plan_metrics():
+    return {
+        "trajectory_point_count": 2,
+        "joint_trajectory_points": [
+            {"positions": [0.0, 0.02, 0.0, 0.0, 0.0, 0.0], "time_from_start": {"sec": 0, "nanosec": 0}},
+            {"positions": [0.0, 0.01, -0.005, 0.0, 0.0, 0.0], "time_from_start": {"sec": 0, "nanosec": 400000000}},
+        ],
+        "cartesian_waypoints": [
+            {"position_m": [0.4, 0.0, 0.3], "orientation_xyzw": [0.0, 0.0, 0.0, 1.0]},
+            {"position_m": [0.4, 0.0, 0.298], "orientation_xyzw": [0.0, 0.0, 0.0, 1.0]},
+        ],
+    }
+
+
+def _suspicious_plan_metrics():
+    return {
+        "trajectory_point_count": 2,
+        "joint_trajectory_points": [
+            {"positions": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]},
+            {"positions": [0.0, 1.25, 0.0, 0.0, 0.0, 0.0]},
+        ],
+    }
+
+
+def _trajectory_object(points):
+    class Duration:
+        def __init__(self, sec, nanosec):
+            self.sec = sec
+            self.nanosec = nanosec
+
+    class Point:
+        def __init__(self, positions, time_from_start):
+            self.positions = positions
+            self.time_from_start = Duration(time_from_start["sec"], time_from_start["nanosec"])
+
+    class JointTrajectory:
+        def __init__(self, raw_points):
+            self.points = [Point(positions, time_from_start) for positions, time_from_start in raw_points]
+
+    class Trajectory:
+        def __init__(self, raw_points):
+            self.joint_trajectory = JointTrajectory(raw_points)
+
+    return Trajectory(points)
 
 
 def _fake_qwen_success(request):

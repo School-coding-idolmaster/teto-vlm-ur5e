@@ -39,6 +39,7 @@ STATUS_FAILED = "FAILED"
 STATUS_WARNING = "WARNING"
 
 SUSPICIOUS_TINY_MOTION_JOINT_DELTA_RAD = 1.0
+SUSPICIOUS_TINY_MOTION_ORIENTATION_CHANGE_RAD = 0.25
 
 
 class MotionParseError(ValueError):
@@ -817,6 +818,14 @@ def _planner_acceptance(
         and max_joint_delta > SUSPICIOUS_TINY_MOTION_JOINT_DELTA_RAD
     ):
         warnings.append("W_SUSPICIOUS_JOINT_DELTA_FOR_TINY_CARTESIAN_MOTION")
+    orientation_change = trajectory_metrics["orientation_change_rad"]
+    if (
+        orientation_change is not None
+        and requested_distance is not None
+        and requested_distance <= HARD_SAFETY_LIMIT_M + EPS
+        and orientation_change > SUSPICIOUS_TINY_MOTION_ORIENTATION_CHANGE_RAD
+    ):
+        warnings.append("W_SUSPICIOUS_ORIENTATION_CHANGE_FOR_TINY_CARTESIAN_MOTION")
 
     blocking_reasons = _unique(blocking_reasons)
     warnings = _unique(warnings)
@@ -831,10 +840,13 @@ def _planner_acceptance(
         "requested_delta_m": requested_delta if _vector3(requested_delta) else None,
         "requested_distance_m": requested_distance,
         "planned_goal_frame": motion.get("frame") or execution_preview.get("frame"),
+        "metrics_source": trajectory_metrics["metrics_source"],
         "planned_waypoint_count": trajectory_metrics["planned_waypoint_count"],
         "estimated_cartesian_path_length_m": trajectory_metrics["estimated_cartesian_path_length_m"],
         "max_joint_delta_rad": max_joint_delta,
+        "total_joint_motion_rad": trajectory_metrics["total_joint_motion_rad"],
         "orientation_change_rad": trajectory_metrics["orientation_change_rad"],
+        "trajectory_duration_s": trajectory_metrics["trajectory_duration_s"],
         "reasonableness_check": reasonableness_check,
         "blocking_reasons": blocking_reasons,
         "warnings": warnings,
@@ -854,23 +866,47 @@ def _trajectory_metrics(moveit_result: dict[str, Any]) -> dict[str, Any]:
     waypoint_count = int(waypoint_count) if isinstance(waypoint_count, int) and not isinstance(waypoint_count, bool) else None
     joint_points = _joint_trajectory_points(moveit_result)
     max_joint_delta = _max_joint_delta(joint_points)
+    total_joint_motion = _total_joint_motion(joint_points)
     if waypoint_count is None and joint_points:
         waypoint_count = len(joint_points)
+    cartesian_waypoints = _cartesian_waypoints(moveit_result)
     return {
+        "metrics_source": _metrics_source(moveit_result, joint_points, cartesian_waypoints),
         "planned_waypoint_count": waypoint_count,
-        "estimated_cartesian_path_length_m": _optional_number(moveit_result.get("estimated_cartesian_path_length_m")),
+        "estimated_cartesian_path_length_m": _first_not_none(
+            _optional_number(moveit_result.get("estimated_cartesian_path_length_m")),
+            _cartesian_path_length(cartesian_waypoints),
+        ),
         "max_joint_delta_rad": max_joint_delta,
-        "orientation_change_rad": _optional_number(moveit_result.get("orientation_change_rad")),
+        "total_joint_motion_rad": total_joint_motion,
+        "orientation_change_rad": _first_not_none(
+            _optional_number(moveit_result.get("orientation_change_rad")),
+            _orientation_change_from_waypoints(cartesian_waypoints),
+        ),
+        "trajectory_duration_s": _trajectory_duration(moveit_result),
     }
+
+
+def _metrics_source(moveit_result: dict[str, Any], joint_points: list[list[float]], cartesian_waypoints: list[dict[str, Any]]) -> str:
+    if not moveit_result:
+        return "not_available"
+    if moveit_result.get("planned_trajectory") is not None or moveit_result.get("moveit_plan_called") is True:
+        return "moveit_plan_only"
+    if joint_points or cartesian_waypoints or moveit_result.get("trajectory_point_count") is not None:
+        return "mock_plan_only"
+    return "not_available"
 
 
 def _joint_trajectory_points(moveit_result: dict[str, Any]) -> list[list[float]]:
     raw_points = moveit_result.get("joint_trajectory_points") or moveit_result.get("planned_joint_positions")
+    trajectory = moveit_result.get("planned_trajectory")
+    if raw_points is None:
+        raw_points = _raw_joint_points_from_trajectory(trajectory)
     if not isinstance(raw_points, list):
         return []
     points: list[list[float]] = []
     for raw in raw_points:
-        positions = raw.get("positions") if isinstance(raw, dict) else raw
+        positions = raw.get("positions") if isinstance(raw, dict) else getattr(raw, "positions", raw)
         if not isinstance(positions, list) or not positions:
             continue
         values = [_optional_number(value) for value in positions]
@@ -878,6 +914,16 @@ def _joint_trajectory_points(moveit_result: dict[str, Any]) -> list[list[float]]
             continue
         points.append([float(value) for value in values if value is not None])
     return points
+
+
+def _raw_joint_points_from_trajectory(trajectory: Any) -> list[Any]:
+    if isinstance(trajectory, dict):
+        joint_trajectory = trajectory.get("joint_trajectory")
+        if isinstance(joint_trajectory, dict):
+            return joint_trajectory.get("points") if isinstance(joint_trajectory.get("points"), list) else []
+    joint_trajectory = getattr(trajectory, "joint_trajectory", None)
+    raw_points = getattr(joint_trajectory, "points", None)
+    return list(raw_points) if raw_points is not None else []
 
 
 def _max_joint_delta(points: list[list[float]]) -> float | None:
@@ -889,6 +935,158 @@ def _max_joint_delta(points: list[list[float]]) -> float | None:
             continue
         max_delta = max(max_delta, max(abs(float(b) - float(a)) for a, b in zip(left, right)))
     return round(max_delta, 6)
+
+
+def _total_joint_motion(points: list[list[float]]) -> float | None:
+    if len(points) < 2:
+        return None
+    total = 0.0
+    for left, right in zip(points, points[1:]):
+        if len(left) != len(right):
+            continue
+        total += sum(abs(float(b) - float(a)) for a, b in zip(left, right))
+    return round(total, 6)
+
+
+def _trajectory_duration(moveit_result: dict[str, Any]) -> float | None:
+    explicit = _optional_number(moveit_result.get("trajectory_duration_s"))
+    if explicit is not None:
+        return explicit
+    raw_points = _raw_joint_points_from_trajectory(moveit_result.get("planned_trajectory"))
+    if not raw_points:
+        raw_points = moveit_result.get("joint_trajectory_points") if isinstance(moveit_result.get("joint_trajectory_points"), list) else []
+    if not raw_points:
+        return None
+    last = raw_points[-1]
+    duration = last.get("time_from_start") if isinstance(last, dict) else getattr(last, "time_from_start", None)
+    return _duration_seconds(duration)
+
+
+def _duration_seconds(duration: Any) -> float | None:
+    if duration is None:
+        return None
+    number = _optional_number(duration)
+    if number is not None:
+        return number
+    if isinstance(duration, dict):
+        sec = _optional_number(duration.get("sec", duration.get("secs")))
+        nanosec = _optional_number(duration.get("nanosec", duration.get("nsecs")))
+        if sec is None:
+            return None
+        return round(sec + (nanosec or 0.0) / 1_000_000_000.0, 6)
+    if hasattr(duration, "to_msg"):
+        try:
+            duration = duration.to_msg()
+        except Exception:
+            return None
+    sec = _optional_number(getattr(duration, "sec", None))
+    nanosec = _optional_number(getattr(duration, "nanosec", None))
+    if sec is None:
+        sec = _optional_number(getattr(duration, "secs", None))
+    if nanosec is None:
+        nanosec = _optional_number(getattr(duration, "nsecs", None))
+    if sec is None:
+        return None
+    return round(sec + (nanosec or 0.0) / 1_000_000_000.0, 6)
+
+
+def _cartesian_waypoints(moveit_result: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_points = (
+        moveit_result.get("cartesian_waypoints")
+        or moveit_result.get("tcp_waypoints_m")
+        or moveit_result.get("pose_waypoints")
+    )
+    if isinstance(raw_points, list):
+        return [_normalize_cartesian_waypoint(point) for point in raw_points if _normalize_cartesian_waypoint(point)]
+    return _multi_dof_waypoints_from_trajectory(moveit_result.get("planned_trajectory"))
+
+
+def _normalize_cartesian_waypoint(point: Any) -> dict[str, Any] | None:
+    if isinstance(point, dict):
+        position = point.get("position_m") or point.get("position") or point.get("xyz")
+        orientation = point.get("orientation_xyzw") or point.get("orientation") or point.get("quat_xyzw")
+        if _vector3(position):
+            return {
+                "position_m": [float(value) for value in position],
+                "orientation_xyzw": list(orientation) if _quaternion(orientation) else None,
+            }
+    if isinstance(point, list) and len(point) in {3, 7} and _vector3(point[:3]):
+        return {
+            "position_m": [float(value) for value in point[:3]],
+            "orientation_xyzw": list(point[3:7]) if len(point) == 7 and _quaternion(point[3:7]) else None,
+        }
+    return None
+
+
+def _multi_dof_waypoints_from_trajectory(trajectory: Any) -> list[dict[str, Any]]:
+    if trajectory is None:
+        return []
+    multi_dof = getattr(trajectory, "multi_dof_joint_trajectory", None)
+    raw_points = getattr(multi_dof, "points", None)
+    if raw_points is None and isinstance(trajectory, dict):
+        raw_multi = trajectory.get("multi_dof_joint_trajectory")
+        raw_points = raw_multi.get("points") if isinstance(raw_multi, dict) else None
+    waypoints = []
+    for point in list(raw_points or []):
+        transforms = point.get("transforms") if isinstance(point, dict) else getattr(point, "transforms", None)
+        if not transforms:
+            continue
+        transform = transforms[0]
+        translation = transform.get("translation") if isinstance(transform, dict) else getattr(transform, "translation", None)
+        rotation = transform.get("rotation") if isinstance(transform, dict) else getattr(transform, "rotation", None)
+        position = _xyz_from_object(translation)
+        orientation = _xyzw_from_object(rotation)
+        if _vector3(position):
+            waypoints.append({"position_m": position, "orientation_xyzw": orientation if _quaternion(orientation) else None})
+    return waypoints
+
+
+def _cartesian_path_length(waypoints: list[dict[str, Any]]) -> float | None:
+    if len(waypoints) < 2:
+        return None
+    total = 0.0
+    for left, right in zip(waypoints, waypoints[1:]):
+        left_position = left.get("position_m")
+        right_position = right.get("position_m")
+        if not _vector3(left_position) or not _vector3(right_position):
+            continue
+        total += math.sqrt(sum((float(b) - float(a)) ** 2 for a, b in zip(left_position, right_position)))
+    return round(total, 6)
+
+
+def _orientation_change_from_waypoints(waypoints: list[dict[str, Any]]) -> float | None:
+    orientations = [point.get("orientation_xyzw") for point in waypoints if _quaternion(point.get("orientation_xyzw"))]
+    if len(orientations) < 2:
+        return None
+    return _quaternion_angle(orientations[0], orientations[-1])
+
+
+def _quaternion_angle(left: list[float], right: list[float]) -> float:
+    dot = abs(sum(float(a) * float(b) for a, b in zip(left, right)))
+    dot = max(0.0, min(1.0, dot))
+    return round(2.0 * math.acos(dot), 6)
+
+
+def _xyz_from_object(value: Any) -> list[float] | None:
+    if isinstance(value, dict):
+        result = [value.get(axis) for axis in ("x", "y", "z")]
+    else:
+        result = [getattr(value, axis, None) for axis in ("x", "y", "z")]
+    numbers = [_optional_number(item) for item in result]
+    if any(item is None for item in numbers):
+        return None
+    return [float(item) for item in numbers if item is not None]
+
+
+def _xyzw_from_object(value: Any) -> list[float] | None:
+    if isinstance(value, dict):
+        result = [value.get(axis) for axis in ("x", "y", "z", "w")]
+    else:
+        result = [getattr(value, axis, None) for axis in ("x", "y", "z", "w")]
+    numbers = [_optional_number(item) for item in result]
+    if any(item is None for item in numbers):
+        return None
+    return [float(item) for item in numbers if item is not None]
 
 
 def _evidence(
@@ -995,6 +1193,14 @@ def _vector3(value: Any) -> bool:
     )
 
 
+def _quaternion(value: Any) -> bool:
+    return (
+        isinstance(value, list)
+        and len(value) == 4
+        and all(isinstance(item, (int, float)) and not isinstance(item, bool) and math.isfinite(float(item)) for item in value)
+    )
+
+
 def _env_float(name: str) -> float | None:
     value = os.environ.get(name)
     if not value:
@@ -1011,6 +1217,13 @@ def _optional_number(value: Any) -> float | None:
         return None
     number = float(value)
     return number if math.isfinite(number) else None
+
+
+def _first_not_none(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
 
 
 def _string_list(value: Any) -> list[str]:
