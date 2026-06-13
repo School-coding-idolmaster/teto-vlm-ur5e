@@ -19,10 +19,9 @@ DEFAULT_MOVE_GROUP_ACTION = "/move_action"
 DEFAULT_EXECUTE_TRAJECTORY_ACTION = "/execute_trajectory"
 DEFAULT_MAX_TRANSLATION_M = 0.20
 DEFAULT_HARD_SAFETY_LIMIT_M = DEFAULT_MAX_TRANSLATION_M
-DEFAULT_POSITION_TOLERANCE_M = 0.005
-DEFAULT_ORIENTATION_TOLERANCE_RAD = 0.05
-SMALL_MOTION_MAX_POSITION_TOLERANCE_M = 0.0005
-SMALL_MOTION_MAX_ORIENTATION_TOLERANCE_RAD = 0.005
+DEFAULT_POSITION_TOLERANCE_M = 0.002
+DEFAULT_ORIENTATION_TOLERANCE_RAD = 0.01
+REAL_MOTION_TOLERANCE_DISTANCE_RATIO = 0.10
 MOTION_LIMIT_EPS = 1e-9
 DEFAULT_WORKSPACE_BOUNDS = {
     "x": [-1.0, 1.0],
@@ -232,6 +231,7 @@ def _validate_request(
     workspace_bounds = _workspace_bounds(config)
     max_translation_m = _optional_float(config.get("max_translation_m")) or DEFAULT_MAX_TRANSLATION_M
     hard_safety_limit_m = _optional_float(config.get("hard_safety_limit_m")) or DEFAULT_HARD_SAFETY_LIMIT_M
+    configured_max_distance_m = _optional_float(config.get("configured_max_distance_m")) or max_translation_m
 
     if not target_pose:
         blocking_reasons.append(E_TARGET_POSE_MISSING)
@@ -290,6 +290,7 @@ def _validate_request(
         "warnings": _unique(warnings),
         "workspace_bounds": workspace_bounds,
         "max_translation_m": max_translation_m,
+        "configured_max_distance_m": configured_max_distance_m,
         "hard_safety_limit_m": hard_safety_limit_m,
         "translation_distance_m": round(float(translation_distance_m), 6) if translation_distance_m is not None else None,
         "motion_check_source": "moveit_pose_executor",
@@ -300,6 +301,12 @@ def _validate_request(
         "motion_check_max_distance_m": max_translation_m,
         "motion_check_hard_limit_m": hard_safety_limit_m,
         "motion_check_eps": MOTION_LIMIT_EPS,
+        "requested_distance_within_configured_limit": (
+            translation_distance_m is not None
+            and translation_distance_m <= configured_max_distance_m + MOTION_LIMIT_EPS
+        ),
+        "safety_policy_source": _string(config.get("safety_policy_source")),
+        "safety_policy_name": _string(config.get("safety_policy_name")),
         "workspace_check_passed": bool(target_pose and _point_in_workspace(target_pose["position_m"], workspace_bounds)),
         **tolerance,
     }
@@ -555,6 +562,11 @@ def _common_result(*, config: Dict[str, Any], target_pose: Dict[str, Any] | None
         "planning_frame": target_pose.get("frame") if target_pose else _string(config.get("planning_frame")) or DEFAULT_FRAME,
         "end_effector_link": _string(config.get("end_effector_link")) or _string(config.get("end_effector_frame")) or DEFAULT_END_EFFECTOR_LINK,
         "requested_distance_m": validation.get("requested_distance_m"),
+        "configured_max_distance_m": validation.get("configured_max_distance_m"),
+        "hard_safety_limit_m": validation.get("hard_safety_limit_m"),
+        "requested_distance_within_configured_limit": validation.get("requested_distance_within_configured_limit"),
+        "safety_policy_source": validation.get("safety_policy_source"),
+        "safety_policy_name": validation.get("safety_policy_name"),
         "moveit_position_tolerance_m": validation.get("moveit_position_tolerance_m"),
         "moveit_orientation_tolerance_rad": validation.get("moveit_orientation_tolerance_rad"),
         "tolerance_to_requested_distance_ratio": validation.get("tolerance_to_requested_distance_ratio"),
@@ -567,7 +579,6 @@ def _common_result(*, config: Dict[str, Any], target_pose: Dict[str, Any] | None
         "target_pose": target_pose,
         "translation_distance_m": validation.get("translation_distance_m"),
         "max_translation_m": validation.get("max_translation_m"),
-        "hard_safety_limit_m": validation.get("hard_safety_limit_m"),
         "motion_check_source": validation.get("motion_check_source"),
         "motion_check_current_position_m": validation.get("motion_check_current_position_m"),
         "motion_check_target_position_m": validation.get("motion_check_target_position_m"),
@@ -826,18 +837,21 @@ def _resolved_tolerance_policy(config: Dict[str, Any], fallback_distance_m: floa
     orientation_tolerance = float(_optional_float(config.get("orientation_tolerance_rad")) or DEFAULT_ORIENTATION_TOLERANCE_RAD)
     configured_policy = _string(config.get("small_motion_tolerance_policy")) or ""
     policy_enabled = configured_policy.startswith(
-        ("real_small_motion_strict_v3.0.3", "tiny_relative_cartesian_strict_v3.0.3")
+        (
+            "real_motion_safety_policy_v1",
+            "real_small_motion_strict_v3.0.3",
+            "tiny_relative_cartesian_strict_v3.0.3",
+        )
     )
     policy_limit = None
     policy = "default_moveit_pose_tolerance"
     if policy_enabled and requested_distance is not None and requested_distance > 0.0:
-        policy_limit = min(SMALL_MOTION_MAX_POSITION_TOLERANCE_M, float(requested_distance) * 0.25)
+        policy_limit = float(requested_distance) * REAL_MOTION_TOLERANCE_DISTANCE_RATIO
         position_tolerance = min(position_tolerance, policy_limit)
-        orientation_tolerance = min(orientation_tolerance, SMALL_MOTION_MAX_ORIENTATION_TOLERANCE_RAD)
         policy = (
-            "real_small_motion_strict_v3.0.3:"
-            "position_tolerance_m=min(configured_or_default,0.0005,requested_distance_m*0.25);"
-            "orientation_tolerance_rad<=0.005"
+            "real_motion_safety_policy_v1:"
+            "position_tolerance_m=min(configured_position_tolerance_m,requested_distance_m*0.10);"
+            "orientation_tolerance_rad=configured"
         )
     ratio = None
     if requested_distance is not None and requested_distance > 0.0:

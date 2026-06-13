@@ -50,7 +50,7 @@ def test_rejects_vision_and_direct_robot_control_commands(command):
 
 def test_rejects_motion_over_hard_safety_limit():
     with pytest.raises(MotionParseError) as exc:
-        parse_motion_command("move up 20 mm", max_step_m=0.01)
+        parse_motion_command("move up 20 mm", max_distance_m=0.01, hard_safety_limit_m=0.01)
 
     assert str(exc.value) == "E_EXCEEDS_HARD_SAFETY_LIMIT"
 
@@ -79,14 +79,22 @@ def test_floating_point_tolerance_allows_limit_equivalent(monkeypatch):
 
 def test_greater_than_hard_safety_limit_is_blocked():
     with pytest.raises(MotionParseError) as exc:
-        parse_motion_command("move up 10.001 mm", max_step_m=0.01)
+        parse_motion_command("move up 10.001 mm", max_distance_m=0.01, hard_safety_limit_m=0.01)
 
     assert str(exc.value) == "E_EXCEEDS_HARD_SAFETY_LIMIT"
 
 
-def test_rejects_motion_over_default_step_limit():
+def test_default_lab_policy_allows_five_centimeters():
+    parsed = parse_motion_command("move up 50 mm")
+
+    assert parsed.distance_m == 0.05
+    assert parsed.max_distance_m == 0.05
+    assert parsed.hard_safety_limit_m == 0.05
+
+
+def test_rejects_motion_over_default_distance_limit():
     with pytest.raises(MotionParseError) as exc:
-        parse_motion_command("move up 6 mm")
+        parse_motion_command("move up 51 mm", hard_safety_limit_m=0.1)
 
     assert str(exc.value) == "E_EXCEEDS_MAX_STEP"
 
@@ -141,8 +149,8 @@ def test_manual_qwen_path_reads_stdin_and_preserves_text(monkeypatch, capsys):
         "direction": "+",
         "distance_m": 0.005,
         "delta_m": [0.0, 0.0, 0.005],
-        "max_distance_m": 0.005,
-        "hard_safety_limit_m": 0.01,
+        "max_distance_m": 0.05,
+        "hard_safety_limit_m": 0.05,
         "within_safety_limit": True,
         "dry_run": True,
         "real_robot_motion_requested": False,
@@ -152,6 +160,11 @@ def test_manual_qwen_path_reads_stdin_and_preserves_text(monkeypatch, capsys):
     planner = evidence["planner_acceptance"]
     assert planner["status"] == "PASS"
     assert planner["requested_distance_m"] == 0.005
+    assert planner["configured_max_distance_m"] == 0.05
+    assert planner["hard_safety_limit_m"] == 0.05
+    assert planner["requested_distance_within_configured_limit"] is True
+    assert planner["safety_policy_name"] == "lab_bringup_relative_motion_v1"
+    assert planner["safety_policy_source"] == "cli_defaults"
     assert planner["requested_delta_m"] == [0.0, 0.0, 0.005]
     assert planner["plan_only"] is True
     assert planner["execution_allowed"] is False
@@ -603,23 +616,49 @@ def test_real_small_motion_lower_two_mm_allowed_until_confirmation(monkeypatch, 
     assert evidence["real_robot_motion_executed"] is False
 
 
-def test_real_small_motion_lower_five_mm_remains_blocked_by_normalized_gate(monkeypatch, capsys):
+def test_real_small_motion_lower_five_cm_allowed_until_confirmation(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
-    monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_down_five_mm_success)
+    monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_down_five_cm_success)
+    monkeypatch.setattr(cli, "_execution_prereq_blockers", lambda timeout_s: pytest.fail("execution prereq should not run without confirmation"))
+    monkeypatch.setattr("builtins.input", lambda _prompt: (_ for _ in ()).throw(EOFError))
+
+    exit_code = cli.main(["--real-small-motion", "--cmd", "lower the tcp by 5 centimeters"])
+
+    evidence = _final_evidence(capsys.readouterr().out)
+    assert exit_code == 2
+    assert evidence["final_status"] == "BLOCKED"
+    assert "E_REAL_SMALL_MOTION_COMMAND_NOT_ALLOWED" not in evidence["blocking_reasons"]
+    assert "E_CONFIRMATION_MISMATCH" in evidence["blocking_reasons"]
+    assert evidence["real_small_motion_command_allowed"] is True
+    assert evidence["real_small_motion_gate_basis"] == "normalized_contract"
+    assert evidence["real_small_motion_gate"]["normalized_distance_m"] == 0.05
+    assert evidence["allowed_distance_m"] == 0.05
+    assert evidence["configured_max_distance_m"] == 0.05
+    assert evidence["requested_distance_within_configured_limit"] is True
+    assert evidence["moveit_position_tolerance_m"] == 0.002
+    assert evidence["tolerance_to_requested_distance_ratio"] == 0.04
+    assert evidence["trajectory_sent"] is False
+    assert evidence["execute_trajectory_called"] is False
+    assert evidence["controller_command_sent"] is False
+    assert evidence["real_robot_motion_executed"] is False
+
+
+def test_real_small_motion_over_configured_distance_blocks_before_confirmation(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
+    monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_down_six_cm_success)
     monkeypatch.setattr(cli, "_execution_prereq_blockers", lambda timeout_s: pytest.fail("execution prereq should not run for blocked gate"))
     monkeypatch.setattr("builtins.input", lambda _prompt: pytest.fail("confirmation prompt should not be reached"))
 
-    exit_code = cli.main(["--real-small-motion", "--cmd", "lower the tcp by 5 millimeters"])
+    exit_code = cli.main(["--real-small-motion", "--cmd", "lower the tcp by 6 centimeters"])
 
     evidence = _final_evidence(capsys.readouterr().out)
     assert exit_code == 2
     assert evidence["final_status"] == "BLOCKED"
     assert "E_REAL_SMALL_MOTION_DISTANCE_NOT_ALLOWED" in evidence["blocking_reasons"]
-    assert "E_REAL_SMALL_MOTION_COMMAND_NOT_ALLOWED" not in evidence["blocking_reasons"]
     assert evidence["real_small_motion_command_allowed"] is False
-    assert evidence["real_small_motion_gate_basis"] == "normalized_contract"
-    assert evidence["real_small_motion_gate"]["normalized_distance_m"] == 0.005
-    assert evidence["allowed_distance_m"] is None
+    assert evidence["real_small_motion_gate"]["normalized_distance_m"] == 0.06
+    assert evidence["real_small_motion_gate"]["configured_max_distance_m"] == 0.05
+    assert evidence["real_small_motion_gate"]["requested_distance_within_configured_limit"] is False
     assert evidence["trajectory_sent"] is False
     assert evidence["execute_trajectory_called"] is False
     assert evidence["controller_command_sent"] is False
@@ -892,7 +931,7 @@ def test_recorded_lower_two_mm_evidence_passes_with_cross_axis_drift():
     assert result["orientation_change_rad"] == 0.004519
     assert result["orientation_check_passed"] is True
     assert result["post_motion_distance_tolerance_m"] == 0.005
-    assert result["post_motion_orientation_tolerance_rad"] == 0.005
+    assert result["post_motion_orientation_tolerance_rad"] == 0.01
 
 
 def test_confirmation_mismatch_aborts(monkeypatch, capsys):
@@ -957,9 +996,11 @@ def _assert_real_small_two_mm_gate_allowed(evidence, *, direction):
     assert evidence["requested_distance_m"] == 0.002
     assert evidence["moveit_position_tolerance_m"] <= 0.0005
     assert evidence["moveit_position_tolerance_m"] < evidence["requested_distance_m"]
-    assert evidence["moveit_orientation_tolerance_rad"] == 0.005
-    assert evidence["tolerance_to_requested_distance_ratio"] == 0.25
-    assert "real_small_motion_strict_v3.0.3" in evidence["small_motion_tolerance_policy"]
+    assert evidence["moveit_orientation_tolerance_rad"] == 0.01
+    assert evidence["tolerance_to_requested_distance_ratio"] == 0.1
+    assert "real_motion_safety_policy_v1" in evidence["small_motion_tolerance_policy"]
+    assert evidence["configured_max_distance_m"] == 0.05
+    assert evidence["requested_distance_within_configured_limit"] is True
     assert evidence["real_small_motion_gate_policy"].startswith("real_small_motion_normalized_contract_v3.0.3")
     assert evidence["real_small_motion_gate_basis"] == "normalized_contract"
     assert evidence["allowed_axis"] == "z"
@@ -1159,13 +1200,13 @@ def _fake_qwen_down_success(request):
     }
 
 
-def _fake_qwen_down_five_mm_success(request):
+def _fake_qwen_down_five_cm_success(request):
     raw = json.dumps(
         {
             "intent": "relative_cartesian_motion",
             "axis": "z",
             "direction": "-",
-            "distance_m": 0.005,
+            "distance_m": 0.05,
             "confidence": 0.96,
             "reason": "larger downward relative motion",
         }
@@ -1181,16 +1222,53 @@ def _fake_qwen_down_five_mm_success(request):
         "normalized_contract": {
             "intent": "relative_cartesian_motion",
             "frame": "base_link",
-            "delta_m": [0.0, 0.0, -0.005],
+            "delta_m": [0.0, 0.0, -0.05],
             "max_distance_m": request.max_distance_m,
             "hard_safety_limit_m": request.hard_safety_limit_m,
             "must_confirm": True,
         },
         "axis": "z",
         "direction": "-",
-        "distance_m": 0.005,
+        "distance_m": 0.05,
         "confidence": 0.96,
-        "delta_m": [0.0, 0.0, -0.005],
+        "delta_m": [0.0, 0.0, -0.05],
+        "parser_blocking_reasons": [],
+        "blocking_reasons": [],
+    }
+
+
+def _fake_qwen_down_six_cm_success(request):
+    raw = json.dumps(
+        {
+            "intent": "relative_cartesian_motion",
+            "axis": "z",
+            "direction": "-",
+            "distance_m": 0.06,
+            "confidence": 0.96,
+            "reason": "over configured downward relative motion",
+        }
+    )
+    return {
+        "qwen_motion_parser_status": "PASS",
+        "parser_source": "qwen_llm",
+        "llm_called": True,
+        "model_name": request.model_name or "qwen2.5vl:3b",
+        "qwen_endpoint": request.endpoint,
+        "llm_latency_ms": 1.1,
+        "raw_llm_output": raw,
+        "normalized_contract": {
+            "intent": "relative_cartesian_motion",
+            "frame": "base_link",
+            "delta_m": [0.0, 0.0, -0.06],
+            "max_distance_m": request.max_distance_m,
+            "hard_safety_limit_m": request.hard_safety_limit_m,
+            "must_confirm": True,
+        },
+        "axis": "z",
+        "direction": "-",
+        "distance_m": 0.06,
+        "confidence": 0.96,
+        "delta_m": [0.0, 0.0, -0.06],
         "parser_blocking_reasons": [],
         "blocking_reasons": [],
     }
@@ -1225,7 +1303,7 @@ def _fake_plan_only_execution(request):
     assert request.config["requested_distance_m"] == 0.002
     assert request.config["position_tolerance_m"] <= 0.0005
     assert request.config["position_tolerance_m"] < request.config["requested_distance_m"]
-    assert request.config["orientation_tolerance_rad"] == 0.005
+    assert request.config["orientation_tolerance_rad"] == 0.01
     return {
         "cartesian_motion_execution_status": "PASS",
         "moveit_plan_requested": True,

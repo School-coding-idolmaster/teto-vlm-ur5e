@@ -39,6 +39,7 @@ STATUS_NOT_REQUESTED = "NOT_REQUESTED"
 
 DEFAULT_FRAME = "base_link"
 DEFAULT_MAX_TRANSLATION_M = 0.20
+DEFAULT_HARD_SAFETY_LIMIT_M = DEFAULT_MAX_TRANSLATION_M
 MOTION_LIMIT_EPS = 1e-9
 DEFAULT_CONFIRMATION_TOKEN = "CONFIRM_REAL_UR5_CARTESIAN"
 DEFAULT_UNDERSTANDING_PHRASE = "I understand this will move the real UR5"
@@ -132,8 +133,14 @@ def evaluate_cartesian_motion_gateway(request: CartesianMotionGatewayRequest | N
     frame = _string(contract.get("frame")) or DEFAULT_FRAME
     offset = _offset_from_contract(contract)
     max_translation_m = _optional_float(config.get("max_translation_m")) or DEFAULT_MAX_TRANSLATION_M
+    hard_safety_limit_m = _optional_float(config.get("hard_safety_limit_m")) or DEFAULT_HARD_SAFETY_LIMIT_M
     workspace_bounds = _workspace_bounds(config)
     allowed_frames = _allowed_frames(config)
+    translation_distance_m = round(_distance(offset), 6) if offset else None
+    requested_distance_within_configured_limit = (
+        translation_distance_m is not None
+        and translation_distance_m <= max_translation_m + MOTION_LIMIT_EPS
+    )
 
     blocking_reasons: list[str] = []
     warnings = _string_list(config.get("warnings")) + _string_list(task.get("warnings"))
@@ -148,6 +155,8 @@ def evaluate_cartesian_motion_gateway(request: CartesianMotionGatewayRequest | N
         blocking_reasons.append(E_OFFSET_MISSING)
     elif not _valid_vector3(offset) or not any(abs(value) > 0.0 for value in offset):
         blocking_reasons.append(E_INVALID_OFFSET)
+    elif _distance(offset) > hard_safety_limit_m + MOTION_LIMIT_EPS:
+        blocking_reasons.append(E_EXCESSIVE_CARTESIAN_MOTION)
     elif _distance(offset) > max_translation_m + MOTION_LIMIT_EPS:
         blocking_reasons.append(E_EXCESSIVE_CARTESIAN_MOTION)
     if current_pose is None:
@@ -184,8 +193,13 @@ def evaluate_cartesian_motion_gateway(request: CartesianMotionGatewayRequest | N
         "intent": contract.get("intent"),
         "frame": frame,
         "cartesian_offset_m": _round_vector(offset),
-        "translation_distance_m": round(_distance(offset), 6) if offset else None,
+        "translation_distance_m": translation_distance_m,
         "max_translation_m": max_translation_m,
+        "configured_max_distance_m": _optional_float(config.get("configured_max_distance_m")) or max_translation_m,
+        "hard_safety_limit_m": hard_safety_limit_m,
+        "requested_distance_within_configured_limit": requested_distance_within_configured_limit,
+        "safety_policy_source": _string(config.get("safety_policy_source")),
+        "safety_policy_name": _string(config.get("safety_policy_name")),
         "current_tcp_pose": current_pose,
         "target_pose": target_pose,
         "target_position_m": target_pose.get("position_m") if target_pose else None,
@@ -533,6 +547,12 @@ def _moveit_plan_request(task_id: str, frame: str, target_pose: Dict[str, Any] |
         "end_effector_frame": _string(config.get("end_effector_frame")) or "tool0",
         "target_pose": target_pose,
         "requested_distance_m": _optional_float(config.get("requested_distance_m")),
+        "configured_max_distance_m": _optional_float(config.get("configured_max_distance_m"))
+        or _optional_float(config.get("max_translation_m")),
+        "hard_safety_limit_m": _optional_float(config.get("hard_safety_limit_m")),
+        "requested_distance_within_configured_limit": _requested_distance_within_configured_limit(config),
+        "safety_policy_source": _string(config.get("safety_policy_source")),
+        "safety_policy_name": _string(config.get("safety_policy_name")),
         "moveit_position_tolerance_m": _optional_float(config.get("position_tolerance_m")),
         "moveit_orientation_tolerance_rad": _optional_float(config.get("orientation_tolerance_rad")),
         "tolerance_to_requested_distance_ratio": _tolerance_ratio(config),
@@ -551,6 +571,14 @@ def _tolerance_ratio(config: Dict[str, Any]) -> float | None:
     if requested_distance is None or requested_distance <= 0.0 or position_tolerance is None:
         return None
     return round(position_tolerance / requested_distance, 6)
+
+
+def _requested_distance_within_configured_limit(config: Dict[str, Any]) -> bool | None:
+    requested_distance = _optional_float(config.get("requested_distance_m"))
+    configured_max = _optional_float(config.get("configured_max_distance_m")) or _optional_float(config.get("max_translation_m"))
+    if requested_distance is None or configured_max is None:
+        return None
+    return requested_distance <= configured_max + MOTION_LIMIT_EPS
 
 
 def _normalize_pose(value: Any) -> Dict[str, Any] | None:

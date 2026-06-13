@@ -29,17 +29,21 @@ from src.qwen_motion_parser import (  # noqa: E402
 )
 
 
-DEFAULT_MAX_STEP_M = 0.005
-HARD_SAFETY_LIMIT_M = 0.01
+DEFAULT_REAL_MAX_DISTANCE_M = 0.05
+DEFAULT_REAL_HARD_SAFETY_LIMIT_M = 0.05
+DEFAULT_REAL_POSITION_TOLERANCE_M = 0.002
+DEFAULT_REAL_ORIENTATION_TOLERANCE_RAD = 0.01
+REAL_MOTION_TOLERANCE_DISTANCE_RATIO = 0.10
+DEFAULT_SAFETY_POLICY_NAME = "lab_bringup_relative_motion_v1"
+DEFAULT_SAFETY_POLICY_SOURCE = "cli_defaults"
 EPS = 1e-9
 CONFIRMATION_REPLY = "y"
 REAL_SMALL_MOTION_ALLOWED_AXES = {"z"}
 REAL_SMALL_MOTION_ALLOWED_DIRECTIONS = {"+", "-"}
-REAL_SMALL_MOTION_ALLOWED_DISTANCE_M = 0.002
 REAL_SMALL_MOTION_GATE_POLICY = (
     "real_small_motion_normalized_contract_v3.0.3:"
     "intent=relative_cartesian_motion;frame=base_link;axis=z;direction=+|-;"
-    "distance_m=0.002;must_confirm=true"
+    "distance_m<=configured_max_distance_m;must_confirm=true"
 )
 MOCK_CURRENT_TCP_POSE_FOR_DRY_RUN_ONLY = {
     "available": True,
@@ -57,8 +61,6 @@ STATUS_WARNING = "WARNING"
 
 SUSPICIOUS_TINY_MOTION_JOINT_DELTA_RAD = 1.0
 SUSPICIOUS_TINY_MOTION_ORIENTATION_CHANGE_RAD = 0.25
-SMALL_MOTION_MAX_POSITION_TOLERANCE_M = 0.0005
-SMALL_MOTION_ORIENTATION_TOLERANCE_RAD = 0.005
 POST_EXECUTE_TCP_SETTLE_S = 0.25
 POST_EXECUTE_TCP_SAMPLE_ATTEMPTS = 3
 TCP_POSE_STALE_AFTER_S = 1.0
@@ -158,19 +160,36 @@ class ParsedMotionCommand:
         }
 
 
-def parse_motion_command(command: str, *, max_step_m: float = DEFAULT_MAX_STEP_M) -> ParsedMotionCommand:
+def parse_motion_command(
+    command: str,
+    *,
+    max_step_m: float | None = None,
+    max_distance_m: float | None = None,
+    hard_safety_limit_m: float = DEFAULT_REAL_HARD_SAFETY_LIMIT_M,
+) -> ParsedMotionCommand:
+    configured_max_distance_m = (
+        float(max_distance_m)
+        if max_distance_m is not None
+        else float(max_step_m)
+        if max_step_m is not None
+        else DEFAULT_REAL_MAX_DISTANCE_M
+    )
     if not isinstance(command, str) or not command.strip():
         raise MotionParseError("E_EMPTY_COMMAND")
-    if max_step_m <= 0.0 or max_step_m > HARD_SAFETY_LIMIT_M + EPS:
-        raise MotionParseError("E_INVALID_MAX_STEP")
+    if (
+        configured_max_distance_m <= 0.0
+        or hard_safety_limit_m <= 0.0
+        or configured_max_distance_m > hard_safety_limit_m + EPS
+    ):
+        raise MotionParseError("E_INVALID_MAX_DISTANCE")
 
     normalized = _normalize(command)
     _reject_forbidden(normalized)
 
     distance_m, unit = _extract_distance_m(normalized)
-    if distance_m > HARD_SAFETY_LIMIT_M + EPS:
+    if distance_m > hard_safety_limit_m + EPS:
         raise MotionParseError("E_EXCEEDS_HARD_SAFETY_LIMIT")
-    if distance_m > max_step_m + EPS:
+    if distance_m > configured_max_distance_m + EPS:
         raise MotionParseError("E_EXCEEDS_MAX_STEP")
 
     direction, delta = _extract_direction_delta(normalized, distance_m)
@@ -182,8 +201,8 @@ def parse_motion_command(command: str, *, max_step_m: float = DEFAULT_MAX_STEP_M
         frame="base_link",
         delta_m=[round(value, 6) for value in delta],
         distance_m=round(distance_m, 6),
-        max_distance_m=max_step_m,
-        hard_safety_limit_m=HARD_SAFETY_LIMIT_M,
+        max_distance_m=configured_max_distance_m,
+        hard_safety_limit_m=hard_safety_limit_m,
         direction=direction,
         unit=unit,
     )
@@ -204,10 +223,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--qwen-model", default=os.environ.get("TETO_QWEN_MODEL"), help="Qwen/Ollama model name.")
     parser.add_argument("--qwen-endpoint", default=os.environ.get("TETO_QWEN_ENDPOINT"), help="Optional Ollama-compatible endpoint.")
     parser.add_argument("--qwen-timeout-s", type=float, default=_env_float("TETO_QWEN_TIMEOUT_S"))
-    parser.add_argument("--max-step-m", type=float, default=DEFAULT_MAX_STEP_M)
+    parser.add_argument(
+        "--max-distance-m",
+        "--max-step-m",
+        dest="max_distance_m",
+        type=float,
+        default=DEFAULT_REAL_MAX_DISTANCE_M,
+        help="Configured maximum relative TCP translation in meters.",
+    )
+    parser.add_argument("--hard-safety-limit-m", type=float, default=DEFAULT_REAL_HARD_SAFETY_LIMIT_M)
+    parser.add_argument("--position-tolerance-m", type=float, default=DEFAULT_REAL_POSITION_TOLERANCE_M)
+    parser.add_argument("--orientation-tolerance-rad", type=float, default=DEFAULT_REAL_ORIENTATION_TOLERANCE_RAD)
+    parser.add_argument("--safety-policy-name", default=DEFAULT_SAFETY_POLICY_NAME)
     parser.add_argument("--speed-scale", type=float, default=0.10)
     parser.add_argument("--acc-scale", type=float, default=0.10)
     args = parser.parse_args(argv)
+    safety_policy = _safety_policy_from_args(args)
 
     real_requested = bool(args.real or args.real_small_motion)
     acceptance_mode = _acceptance_mode(args)
@@ -274,7 +305,8 @@ def main(argv: list[str] | None = None) -> int:
         parser_mode=args.parser,
         real=real_requested,
         dry_run=dry_run,
-        max_step_m=float(args.max_step_m),
+        max_distance_m=safety_policy["configured_max_distance_m"],
+        hard_safety_limit_m=safety_policy["hard_safety_limit_m"],
         input_mode=input_mode,
         qwen_model=args.qwen_model,
         qwen_endpoint=args.qwen_endpoint,
@@ -370,13 +402,12 @@ def main(argv: list[str] | None = None) -> int:
 
     config = _build_gateway_config(
         current_pose=current_pose,
-        max_step_m=float(args.max_step_m),
+        safety_policy=safety_policy,
         speed_scale=float(args.speed_scale),
         acc_scale=float(args.acc_scale),
         real=real_requested,
         dry_run=dry_run,
         requested_distance_m=parsed.distance_m,
-        real_small_motion=args.real_small_motion,
     )
 
     motion = evaluate_cartesian_motion_gateway(
@@ -394,6 +425,16 @@ def main(argv: list[str] | None = None) -> int:
         dry_run=dry_run,
     )
     if motion.get("cartesian_motion_gateway_status") != STATUS_PASS:
+        real_small_gate = (
+            _real_small_motion_gate(
+                parsed=parsed,
+                execution_preview=execution_preview,
+                planner_acceptance=planner_acceptance,
+                parser_metadata=parser_metadata,
+            )
+            if args.real_small_motion
+            else None
+        )
         result = _evidence(
             status=STATUS_BLOCKED,
             motion=motion,
@@ -403,7 +444,15 @@ def main(argv: list[str] | None = None) -> int:
             planner_acceptance=planner_acceptance,
             acceptance_mode=acceptance_mode,
             current_tcp_pose=current_pose_evidence,
-            blocking_reasons=motion.get("blocking_reasons", []),
+            blocking_reasons=_unique(
+                _string_list(motion.get("blocking_reasons"))
+                + (
+                    _string_list(real_small_gate.get("blocking_reasons"))
+                    if isinstance(real_small_gate, dict)
+                    else []
+                )
+            ),
+            real_small_motion_gate=real_small_gate,
         )
         print("Final execution evidence:")
         print(_json(result))
@@ -412,7 +461,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.plan_only_smoke:
         plan_only_config = _build_plan_only_smoke_config(
             current_pose=current_pose,
-            max_step_m=float(args.max_step_m),
+            safety_policy=safety_policy,
             speed_scale=float(args.speed_scale),
             acc_scale=float(args.acc_scale),
             requested_distance_m=parsed.distance_m,
@@ -588,30 +637,46 @@ def _parse_command_for_mode(
     parser_mode: str,
     real: bool,
     dry_run: bool,
-    max_step_m: float,
+    max_distance_m: float,
+    hard_safety_limit_m: float,
     input_mode: str,
     qwen_model: str | None,
     qwen_endpoint: str | None,
     qwen_timeout_s: float | None,
 ) -> tuple[ParsedMotionCommand | None, dict[str, Any]]:
     if parser_mode == "rule":
-        return _parse_rule_result(command, max_step_m=max_step_m, input_mode=input_mode)
+        return _parse_rule_result(
+            command,
+            max_distance_m=max_distance_m,
+            hard_safety_limit_m=hard_safety_limit_m,
+            input_mode=input_mode,
+        )
 
     qwen_result = evaluate_qwen_motion_parser(
         QwenMotionParserRequest(
             user_text=command,
-            max_distance_m=max_step_m,
-            hard_safety_limit_m=HARD_SAFETY_LIMIT_M,
+            max_distance_m=max_distance_m,
+            hard_safety_limit_m=hard_safety_limit_m,
             model_name=qwen_model,
             endpoint=qwen_endpoint,
             timeout_s=qwen_timeout_s,
         )
     )
     if qwen_result.get("qwen_motion_parser_status") == STATUS_PASS:
-        return _parsed_from_qwen_result(command, qwen_result, max_step_m=max_step_m), qwen_result
+        return _parsed_from_qwen_result(
+            command,
+            qwen_result,
+            max_distance_m=max_distance_m,
+            hard_safety_limit_m=hard_safety_limit_m,
+        ), qwen_result
 
     if parser_mode == "auto" and dry_run and not real:
-        parsed, rule_result = _parse_rule_result(command, max_step_m=max_step_m, input_mode=input_mode)
+        parsed, rule_result = _parse_rule_result(
+            command,
+            max_distance_m=max_distance_m,
+            hard_safety_limit_m=hard_safety_limit_m,
+            input_mode=input_mode,
+        )
         if parsed is not None:
             rule_result["warnings"] = _unique(_string_list(rule_result.get("warnings")) + ["qwen_failed_dry_run_rule_fallback"])
             rule_result["raw_llm_output"] = qwen_result.get("raw_llm_output")
@@ -631,9 +696,19 @@ def _acceptance_mode(args: argparse.Namespace) -> str | None:
     return None
 
 
-def _parse_rule_result(command: str, *, max_step_m: float, input_mode: str) -> tuple[ParsedMotionCommand | None, dict[str, Any]]:
+def _parse_rule_result(
+    command: str,
+    *,
+    max_distance_m: float,
+    hard_safety_limit_m: float,
+    input_mode: str,
+) -> tuple[ParsedMotionCommand | None, dict[str, Any]]:
     try:
-        parsed = parse_motion_command(command, max_step_m=max_step_m)
+        parsed = parse_motion_command(
+            command,
+            max_distance_m=max_distance_m,
+            hard_safety_limit_m=hard_safety_limit_m,
+        )
     except MotionParseError as exc:
         reasons = [str(exc)]
         return None, {
@@ -662,7 +737,13 @@ def _parse_rule_result(command: str, *, max_step_m: float, input_mode: str) -> t
     }
 
 
-def _parsed_from_qwen_result(command: str, result: dict[str, Any], *, max_step_m: float) -> ParsedMotionCommand:
+def _parsed_from_qwen_result(
+    command: str,
+    result: dict[str, Any],
+    *,
+    max_distance_m: float,
+    hard_safety_limit_m: float,
+) -> ParsedMotionCommand:
     delta = result.get("delta_m")
     if not _vector3(delta):
         raise MotionParseError("E_INVALID_QWEN_DELTA")
@@ -672,8 +753,8 @@ def _parsed_from_qwen_result(command: str, result: dict[str, Any], *, max_step_m
         frame="base_link",
         delta_m=[round(float(value), 6) for value in delta],
         distance_m=round(distance_m, 6),
-        max_distance_m=max_step_m,
-        hard_safety_limit_m=HARD_SAFETY_LIMIT_M,
+        max_distance_m=max_distance_m,
+        hard_safety_limit_m=hard_safety_limit_m,
         direction=f"{result.get('axis')}{result.get('direction')}",
         unit="qwen_json",
         parser_source="qwen_llm",
@@ -996,6 +1077,29 @@ def _current_tcp_pose_unavailable(*, real_required: bool) -> dict[str, Any]:
     }
 
 
+def _safety_policy_from_args(args: argparse.Namespace) -> dict[str, Any]:
+    configured_max = _optional_number(getattr(args, "max_distance_m", None))
+    hard_limit = _optional_number(getattr(args, "hard_safety_limit_m", None))
+    configured_position_tolerance = _optional_number(getattr(args, "position_tolerance_m", None))
+    orientation_tolerance = _optional_number(getattr(args, "orientation_tolerance_rad", None))
+    return {
+        "safety_policy_name": str(getattr(args, "safety_policy_name", None) or DEFAULT_SAFETY_POLICY_NAME),
+        "safety_policy_source": DEFAULT_SAFETY_POLICY_SOURCE,
+        "configured_max_distance_m": configured_max if configured_max is not None else DEFAULT_REAL_MAX_DISTANCE_M,
+        "hard_safety_limit_m": hard_limit if hard_limit is not None else DEFAULT_REAL_HARD_SAFETY_LIMIT_M,
+        "configured_position_tolerance_m": (
+            configured_position_tolerance
+            if configured_position_tolerance is not None
+            else DEFAULT_REAL_POSITION_TOLERANCE_M
+        ),
+        "configured_orientation_tolerance_rad": (
+            orientation_tolerance
+            if orientation_tolerance is not None
+            else DEFAULT_REAL_ORIENTATION_TOLERANCE_RAD
+        ),
+    }
+
+
 def _execution_prereq_blockers(*, timeout_s: float) -> list[str]:
     try:
         import rclpy
@@ -1049,17 +1153,16 @@ def _execution_prereq_blockers(*, timeout_s: float) -> list[str]:
 def _build_gateway_config(
     *,
     current_pose: dict[str, Any],
-    max_step_m: float,
+    safety_policy: dict[str, Any],
     speed_scale: float,
     acc_scale: float,
     real: bool,
     dry_run: bool,
     requested_distance_m: float | None = None,
-    real_small_motion: bool = False,
 ) -> dict[str, Any]:
-    tolerance = _small_motion_tolerance_config(
+    tolerance = _motion_tolerance_config(
         requested_distance_m=requested_distance_m,
-        enabled=real_small_motion and real and not dry_run,
+        safety_policy=safety_policy,
     )
     return {
         "moveit_execution_mode": "real" if real and not dry_run else "shadow",
@@ -1077,8 +1180,11 @@ def _build_gateway_config(
         "pipeline_id": "move_group",
         "planner_id": "ur_manipulator[RRTConnectkConfigDefault]",
         "allowed_frames": ["base_link"],
-        "max_translation_m": max_step_m,
-        "hard_safety_limit_m": HARD_SAFETY_LIMIT_M,
+        "max_translation_m": safety_policy["configured_max_distance_m"],
+        "hard_safety_limit_m": safety_policy["hard_safety_limit_m"],
+        "configured_max_distance_m": safety_policy["configured_max_distance_m"],
+        "safety_policy_name": safety_policy["safety_policy_name"],
+        "safety_policy_source": safety_policy["safety_policy_source"],
         "workspace_bounds": {"x": [-1.0, 1.0], "y": [-1.0, 1.0], "z": [0.0, 2.0]},
         "requested_distance_m": tolerance["requested_distance_m"],
         "position_tolerance_m": tolerance["position_tolerance_m"],
@@ -1099,7 +1205,7 @@ def _build_gateway_config(
 def _build_plan_only_smoke_config(
     *,
     current_pose: dict[str, Any],
-    max_step_m: float,
+    safety_policy: dict[str, Any],
     speed_scale: float,
     acc_scale: float,
     requested_distance_m: float | None = None,
@@ -1107,13 +1213,12 @@ def _build_plan_only_smoke_config(
     return {
         **_build_gateway_config(
             current_pose=current_pose,
-            max_step_m=max_step_m,
+            safety_policy=safety_policy,
             speed_scale=speed_scale,
             acc_scale=acc_scale,
             real=True,
             dry_run=False,
             requested_distance_m=requested_distance_m,
-            real_small_motion=True,
         ),
         "moveit_execution_mode": "real",
         "enable_ros2_runtime": True,
@@ -1127,19 +1232,27 @@ def _build_plan_only_smoke_config(
     }
 
 
-def _small_motion_tolerance_config(*, requested_distance_m: float | None, enabled: bool) -> dict[str, Any]:
+def _motion_tolerance_config(*, requested_distance_m: float | None, safety_policy: dict[str, Any]) -> dict[str, Any]:
     requested = _optional_number(requested_distance_m)
-    position_tolerance = 0.005
-    orientation_tolerance = 0.05
-    policy = "default_moveit_pose_tolerance"
-    if enabled and requested is not None and requested > 0.0:
-        position_tolerance = min(SMALL_MOTION_MAX_POSITION_TOLERANCE_M, requested * 0.25)
-        orientation_tolerance = SMALL_MOTION_ORIENTATION_TOLERANCE_RAD
-        policy = (
-            "real_small_motion_strict_v3.0.3:"
-            "position_tolerance_m<=min(0.0005,requested_distance_m*0.25);"
-            "orientation_tolerance_rad=0.005"
+    configured_position_tolerance = (
+        _optional_number(safety_policy.get("configured_position_tolerance_m"))
+        or DEFAULT_REAL_POSITION_TOLERANCE_M
+    )
+    orientation_tolerance = (
+        _optional_number(safety_policy.get("configured_orientation_tolerance_rad"))
+        or DEFAULT_REAL_ORIENTATION_TOLERANCE_RAD
+    )
+    position_tolerance = configured_position_tolerance
+    if requested is not None and requested > 0.0:
+        position_tolerance = min(
+            configured_position_tolerance,
+            requested * REAL_MOTION_TOLERANCE_DISTANCE_RATIO,
         )
+    policy = (
+        "real_motion_safety_policy_v1:"
+        "position_tolerance_m=min(configured_position_tolerance_m,"
+        "requested_distance_m*0.10);orientation_tolerance_rad=configured"
+    )
     ratio = None
     if requested is not None and requested > 0.0:
         ratio = round(position_tolerance / requested, 6)
@@ -1164,6 +1277,12 @@ def _planner_acceptance(
     gateway_distance = _optional_number(motion.get("translation_distance_m"))
     moveit_result = _moveit_result_from(motion, execution)
     moveit_plan_request = motion.get("moveit_plan_request") if isinstance(motion.get("moveit_plan_request"), dict) else {}
+    hard_safety_limit = (
+        _optional_number(execution_preview.get("hard_safety_limit_m"))
+        or _optional_number(motion.get("hard_safety_limit_m"))
+        or _optional_number(moveit_result.get("hard_safety_limit_m"))
+        or DEFAULT_REAL_HARD_SAFETY_LIMIT_M
+    )
     trajectory_metrics = _trajectory_metrics(moveit_result)
     tolerance_evidence = _moveit_tolerance_evidence(
         requested_distance=requested_distance,
@@ -1203,7 +1322,7 @@ def _planner_acceptance(
     )
     within_safety_limit = (
         requested_distance is not None
-        and requested_distance <= float(execution_preview.get("hard_safety_limit_m", HARD_SAFETY_LIMIT_M)) + EPS
+        and requested_distance <= hard_safety_limit + EPS
     )
 
     blocking_reasons: list[str] = []
@@ -1231,7 +1350,7 @@ def _planner_acceptance(
     if (
         max_joint_delta is not None
         and requested_distance is not None
-        and requested_distance <= HARD_SAFETY_LIMIT_M + EPS
+        and requested_distance <= hard_safety_limit + EPS
         and max_joint_delta > SUSPICIOUS_TINY_MOTION_JOINT_DELTA_RAD
     ):
         warnings.append("W_SUSPICIOUS_JOINT_DELTA_FOR_TINY_CARTESIAN_MOTION")
@@ -1239,7 +1358,7 @@ def _planner_acceptance(
     if (
         orientation_change is not None
         and requested_distance is not None
-        and requested_distance <= HARD_SAFETY_LIMIT_M + EPS
+        and requested_distance <= hard_safety_limit + EPS
         and orientation_change > SUSPICIOUS_TINY_MOTION_ORIENTATION_CHANGE_RAD
     ):
         warnings.append("W_SUSPICIOUS_ORIENTATION_CHANGE_FOR_TINY_CARTESIAN_MOTION")
@@ -1261,6 +1380,25 @@ def _planner_acceptance(
         "real_robot_motion_executed": real_robot_motion_executed,
         "requested_delta_m": requested_delta if _vector3(requested_delta) else None,
         "requested_distance_m": requested_distance,
+        "configured_max_distance_m": _first_not_none(
+            _optional_number(execution_preview.get("max_distance_m")),
+            _optional_number(motion.get("configured_max_distance_m")),
+            _optional_number(moveit_result.get("configured_max_distance_m")),
+        ),
+        "hard_safety_limit_m": hard_safety_limit,
+        "requested_distance_within_configured_limit": _first_not_none(
+            motion.get("requested_distance_within_configured_limit"),
+            moveit_result.get("requested_distance_within_configured_limit"),
+            execution_preview.get("within_safety_limit"),
+        ),
+        "safety_policy_source": _first_not_none(
+            motion.get("safety_policy_source"),
+            moveit_result.get("safety_policy_source"),
+        ),
+        "safety_policy_name": _first_not_none(
+            motion.get("safety_policy_name"),
+            moveit_result.get("safety_policy_name"),
+        ),
         **tolerance_evidence,
         "planned_goal_frame": motion.get("frame") or execution_preview.get("frame"),
         "target_frame": _first_not_none(moveit_result.get("target_frame"), moveit_plan_request.get("planning_frame"), motion.get("frame"), execution_preview.get("frame")),
@@ -1329,7 +1467,11 @@ def _real_small_motion_gate(
 ) -> dict[str, Any]:
     blockers: list[str] = []
     axis, sign = _axis_direction_from_delta(parsed.delta_m)
-    distance_allowed = abs(parsed.distance_m - REAL_SMALL_MOTION_ALLOWED_DISTANCE_M) <= EPS
+    configured_max_distance = _optional_number(execution_preview.get("max_distance_m")) or DEFAULT_REAL_MAX_DISTANCE_M
+    hard_safety_limit = _optional_number(execution_preview.get("hard_safety_limit_m")) or DEFAULT_REAL_HARD_SAFETY_LIMIT_M
+    requested_distance_within_configured_limit = parsed.distance_m <= configured_max_distance + EPS
+    requested_distance_within_hard_limit = parsed.distance_m <= hard_safety_limit + EPS
+    distance_allowed = requested_distance_within_configured_limit and requested_distance_within_hard_limit
     intent_allowed = execution_preview.get("intent") == "relative_cartesian_motion"
     frame_allowed = parsed.frame == "base_link"
     axis_allowed = axis in REAL_SMALL_MOTION_ALLOWED_AXES
@@ -1364,7 +1506,10 @@ def _real_small_motion_gate(
         "real_small_motion_gate_basis": "normalized_contract",
         "allowed_axis": axis if axis_allowed else None,
         "allowed_direction": sign if direction_allowed else None,
-        "allowed_distance_m": REAL_SMALL_MOTION_ALLOWED_DISTANCE_M if distance_allowed else None,
+        "allowed_distance_m": parsed.distance_m if distance_allowed else None,
+        "configured_max_distance_m": configured_max_distance,
+        "hard_safety_limit_m": hard_safety_limit,
+        "requested_distance_within_configured_limit": requested_distance_within_configured_limit,
         "real_small_motion_command_allowed": not blockers,
         "normalized_intent": execution_preview.get("intent"),
         "normalized_frame": parsed.frame,
@@ -1683,6 +1828,11 @@ def _evidence(
         "real_robot_motion_executed": real_robot_motion_executed,
         **_real_small_motion_gate_fields(real_small_motion_gate),
         "requested_distance_m": planner_acceptance.get("requested_distance_m") if isinstance(planner_acceptance, dict) else None,
+        "configured_max_distance_m": planner_acceptance.get("configured_max_distance_m") if isinstance(planner_acceptance, dict) else None,
+        "hard_safety_limit_m": planner_acceptance.get("hard_safety_limit_m") if isinstance(planner_acceptance, dict) else None,
+        "requested_distance_within_configured_limit": planner_acceptance.get("requested_distance_within_configured_limit") if isinstance(planner_acceptance, dict) else None,
+        "safety_policy_source": planner_acceptance.get("safety_policy_source") if isinstance(planner_acceptance, dict) else None,
+        "safety_policy_name": planner_acceptance.get("safety_policy_name") if isinstance(planner_acceptance, dict) else None,
         "moveit_position_tolerance_m": planner_acceptance.get("moveit_position_tolerance_m") if isinstance(planner_acceptance, dict) else None,
         "moveit_orientation_tolerance_rad": planner_acceptance.get("moveit_orientation_tolerance_rad") if isinstance(planner_acceptance, dict) else None,
         "tolerance_to_requested_distance_ratio": planner_acceptance.get("tolerance_to_requested_distance_ratio") if isinstance(planner_acceptance, dict) else None,
@@ -1774,7 +1924,7 @@ def _post_motion_verification(
     intended_delta_m: list[float] | None,
     reason: str | None = None,
     distance_tolerance_m: float = 0.005,
-    orientation_tolerance_rad: float = SMALL_MOTION_ORIENTATION_TOLERANCE_RAD,
+    orientation_tolerance_rad: float = DEFAULT_REAL_ORIENTATION_TOLERANCE_RAD,
 ) -> dict[str, Any]:
     before = _tcp_pose_for_evidence(before_tcp_pose)
     target = _tcp_pose_for_evidence(target_tcp_pose)
