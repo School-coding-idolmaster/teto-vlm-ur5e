@@ -32,6 +32,12 @@ DEFAULT_MAX_STEP_M = 0.005
 HARD_SAFETY_LIMIT_M = 0.01
 EPS = 1e-9
 CONFIRMATION_REPLY = "y"
+REAL_SMALL_MOTION_ALLOWED_COMMANDS = {
+    "raise the tcp by 2 millimeters",
+    "tcp down 2mm",
+    "move up 5 mm",
+}
+REAL_SMALL_MOTION_ALLOWED_DISTANCES_M = {0.002, 0.005}
 
 STATUS_PASS = "PASS"
 STATUS_BLOCKED = "BLOCKED"
@@ -172,6 +178,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--real", action="store_true", help="Enable real MoveIt ExecuteTrajectory.")
     parser.add_argument("--dry-run", action="store_true", help="Parse and validate without executing.")
     parser.add_argument("--plan-only-smoke", action="store_true", help="Request MoveIt planning only; ExecuteTrajectory remains disabled.")
+    parser.add_argument("--acceptance", action="store_true", help="Emit v3.0.2 unified Qwen manual acceptance workflow evidence.")
+    parser.add_argument("--real-small-motion", action="store_true", help="Guarded future real small-motion acceptance path; requires manual confirmation.")
     parser.add_argument("--cmd", help='One-shot command, for example: --cmd "move up 5 mm".')
     parser.add_argument("--yes", action="store_true", help="Skip real-mode confirmation; only allowed together with --real --cmd.")
     parser.add_argument("--parser", choices=["rule", "qwen", "auto"], default="qwen", help="Text parser mode. Default: qwen.")
@@ -183,16 +191,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--acc-scale", type=float, default=0.10)
     args = parser.parse_args(argv)
 
-    if args.real and args.dry_run:
+    real_requested = bool(args.real or args.real_small_motion)
+    acceptance_mode = _acceptance_mode(args)
+
+    if real_requested and args.dry_run:
         print(_json({"final_status": STATUS_BLOCKED, "blocking_reasons": ["E_REAL_AND_DRY_RUN_CONFLICT"]}))
         return 2
-    if args.real and args.plan_only_smoke:
+    if real_requested and args.plan_only_smoke:
         print(_json({"final_status": STATUS_BLOCKED, "blocking_reasons": ["E_REAL_AND_PLAN_ONLY_SMOKE_CONFLICT"], "real_robot_motion_executed": False}))
         return 2
-    if args.real and args.yes and args.cmd is None:
+    if args.real_small_motion and args.yes:
+        print(_json({"final_status": STATUS_BLOCKED, "blocking_reasons": ["E_REAL_SMALL_MOTION_REQUIRES_MANUAL_CONFIRMATION"], "real_robot_motion_executed": False}))
+        return 2
+    if args.acceptance and args.real and not args.real_small_motion:
+        print(_json({"final_status": STATUS_BLOCKED, "blocking_reasons": ["E_ACCEPTANCE_REAL_REQUIRES_REAL_SMALL_MOTION"], "real_robot_motion_executed": False}))
+        return 2
+    if real_requested and args.yes and args.cmd is None:
         print(_json({"final_status": STATUS_BLOCKED, "blocking_reasons": ["E_YES_REQUIRES_CMD"], "real_robot_motion_executed": False}))
         return 2
-    dry_run = not args.real or args.dry_run
+    dry_run = not real_requested or args.dry_run
 
     if args.cmd is not None:
         command = args.cmd
@@ -221,7 +238,7 @@ def main(argv: list[str] | None = None) -> int:
     parsed, parser_result = _parse_command_for_mode(
         command,
         parser_mode=args.parser,
-        real=bool(args.real),
+        real=real_requested,
         dry_run=dry_run,
         max_step_m=float(args.max_step_m),
         input_mode=input_mode,
@@ -242,6 +259,18 @@ def main(argv: list[str] | None = None) -> int:
             **parser_metadata,
             "parsed_contract": None,
             "planner_acceptance": None,
+            "acceptance_workflow": _acceptance_workflow(
+                status=STATUS_BLOCKED,
+                mode=acceptance_mode,
+                parser_metadata=parser_metadata,
+                parsed_contract=None,
+                planner_acceptance=None,
+                trajectory_sent=False,
+                execute_trajectory_called=False,
+                controller_command_sent=False,
+                real_robot_motion_executed=False,
+                blocking_reasons=parser_metadata["parser_blocking_reasons"],
+            ),
             **_empty_motion_check(None),
             "blocking_reasons": parser_metadata["parser_blocking_reasons"],
             "goal_accepted": False,
@@ -258,10 +287,10 @@ def main(argv: list[str] | None = None) -> int:
     execution_preview = parsed.execution_preview(
         input_mode=input_mode,
         parser_mode=args.parser,
-        real_robot_motion_requested=bool(args.real),
+        real_robot_motion_requested=real_requested,
         dry_run=dry_run,
     )
-    printed_contract = parsed.task_contract(real_robot_motion_requested=bool(args.real), dry_run=dry_run)
+    printed_contract = parsed.task_contract(real_robot_motion_requested=real_requested, dry_run=dry_run)
     printed_contract["execution_preview"] = execution_preview
     parser_metadata["normalized_contract"] = printed_contract
     print("Execution preview:")
@@ -273,7 +302,12 @@ def main(argv: list[str] | None = None) -> int:
 
     current_pose = _lookup_current_tcp_pose(timeout_s=3.0)
     if current_pose is None:
-        result = _blocked_result("E_CURRENT_TCP_POSE_MISSING", printed_contract, parser_metadata)
+        result = _blocked_result(
+            "E_CURRENT_TCP_POSE_MISSING",
+            printed_contract,
+            parser_metadata,
+            acceptance_mode=acceptance_mode,
+        )
         print("Final execution evidence:")
         print(_json(result))
         return 2
@@ -283,7 +317,7 @@ def main(argv: list[str] | None = None) -> int:
         max_step_m=float(args.max_step_m),
         speed_scale=float(args.speed_scale),
         acc_scale=float(args.acc_scale),
-        real=bool(args.real),
+        real=real_requested,
         dry_run=dry_run,
     )
 
@@ -309,6 +343,7 @@ def main(argv: list[str] | None = None) -> int:
             parsed_contract=printed_contract,
             parser_metadata=parser_metadata,
             planner_acceptance=planner_acceptance,
+            acceptance_mode=acceptance_mode,
             blocking_reasons=motion.get("blocking_reasons", []),
         )
         print("Final execution evidence:")
@@ -345,6 +380,7 @@ def main(argv: list[str] | None = None) -> int:
             parsed_contract=printed_contract,
             parser_metadata=parser_metadata,
             planner_acceptance=planner_acceptance,
+            acceptance_mode=acceptance_mode,
             blocking_reasons=planner_acceptance.get("blocking_reasons", []),
         )
         print("Final execution evidence:")
@@ -359,13 +395,42 @@ def main(argv: list[str] | None = None) -> int:
             parsed_contract=printed_contract,
             parser_metadata=parser_metadata,
             planner_acceptance=planner_acceptance,
+            acceptance_mode=acceptance_mode,
         )
         print("Final execution evidence:")
         print(_json(result))
         return 0
 
+    real_small_blockers = (
+        _real_small_motion_blockers(
+            parsed=parsed,
+            execution_preview=execution_preview,
+            planner_acceptance=planner_acceptance,
+            parser_metadata=parser_metadata,
+        )
+        if args.real_small_motion
+        else []
+    )
+    if real_small_blockers:
+        result = _evidence(
+            status=STATUS_BLOCKED,
+            motion=motion,
+            execution={},
+            parsed_contract=printed_contract,
+            parser_metadata=parser_metadata,
+            planner_acceptance=planner_acceptance,
+            acceptance_mode=acceptance_mode,
+            blocking_reasons=real_small_blockers,
+        )
+        print("Final execution evidence:")
+        print(_json(result))
+        return 2
+
     if not args.yes:
-        confirmation = input(f"Execute on real UR5e? Type {CONFIRMATION_REPLY} to continue: ")
+        try:
+            confirmation = input(f"Execute on real UR5e? Type {CONFIRMATION_REPLY} to continue: ")
+        except EOFError:
+            confirmation = ""
         if confirmation != CONFIRMATION_REPLY:
             result = _evidence(
                 status=STATUS_BLOCKED,
@@ -374,6 +439,8 @@ def main(argv: list[str] | None = None) -> int:
                 parsed_contract=printed_contract,
                 parser_metadata=parser_metadata,
                 planner_acceptance=planner_acceptance,
+                acceptance_mode=acceptance_mode,
+                manual_confirmation_received=False,
                 blocking_reasons=["E_CONFIRMATION_MISMATCH"],
             )
             print("Final execution evidence:")
@@ -389,6 +456,8 @@ def main(argv: list[str] | None = None) -> int:
             parsed_contract=printed_contract,
             parser_metadata=parser_metadata,
             planner_acceptance=planner_acceptance,
+            acceptance_mode=acceptance_mode,
+            manual_confirmation_received=bool(args.yes),
             blocking_reasons=prereq_blockers,
         )
         print("Final execution evidence:")
@@ -426,6 +495,8 @@ def main(argv: list[str] | None = None) -> int:
         parsed_contract=printed_contract,
         parser_metadata=parser_metadata,
         planner_acceptance=planner_acceptance,
+        acceptance_mode=acceptance_mode,
+        manual_confirmation_received=True,
     )
     print("Final execution evidence:")
     print(_json(result))
@@ -469,6 +540,16 @@ def _parse_command_for_mode(
             return parsed, rule_result
 
     return None, qwen_result
+
+
+def _acceptance_mode(args: argparse.Namespace) -> str | None:
+    if args.real_small_motion:
+        return "real_small_motion"
+    if args.plan_only_smoke:
+        return "plan_only"
+    if args.acceptance:
+        return "dry_run" if args.dry_run or not args.real else "real_small_motion"
+    return None
 
 
 def _parse_rule_result(command: str, *, max_step_m: float, input_mode: str) -> tuple[ParsedMotionCommand | None, dict[str, Any]]:
@@ -939,6 +1020,38 @@ def _planner_acceptance(
     }
 
 
+def _real_small_motion_blockers(
+    *,
+    parsed: ParsedMotionCommand,
+    execution_preview: dict[str, Any],
+    planner_acceptance: dict[str, Any],
+    parser_metadata: dict[str, Any],
+) -> list[str]:
+    blockers: list[str] = []
+    axis, _sign = _axis_direction_from_delta(parsed.delta_m)
+    normalized_command = _normalize(parsed.command)
+
+    if parser_metadata.get("parser_source") != "qwen_llm":
+        blockers.append("E_REAL_SMALL_MOTION_QWEN_REQUIRED")
+    if normalized_command not in REAL_SMALL_MOTION_ALLOWED_COMMANDS:
+        blockers.append("E_REAL_SMALL_MOTION_COMMAND_NOT_ALLOWED")
+    if parsed.frame != "base_link":
+        blockers.append("E_REAL_SMALL_MOTION_FRAME_NOT_ALLOWED")
+    if axis != "z":
+        blockers.append("E_REAL_SMALL_MOTION_AXIS_NOT_ALLOWED")
+    if not any(abs(parsed.distance_m - allowed) <= EPS for allowed in REAL_SMALL_MOTION_ALLOWED_DISTANCES_M):
+        blockers.append("E_REAL_SMALL_MOTION_DISTANCE_NOT_ALLOWED")
+    if execution_preview.get("preview_status") != STATUS_PASS:
+        blockers.append("E_REAL_SMALL_MOTION_PREVIEW_NOT_PASS")
+    if planner_acceptance.get("status") != STATUS_PASS:
+        blockers.append("E_REAL_SMALL_MOTION_PLANNER_ACCEPTANCE_NOT_PASS")
+    if planner_acceptance.get("trajectory_sent") is True:
+        blockers.append("E_REAL_SMALL_MOTION_TRAJECTORY_ALREADY_SENT")
+    if planner_acceptance.get("execute_trajectory_called") is True:
+        blockers.append("E_REAL_SMALL_MOTION_EXECUTE_ALREADY_CALLED")
+    return _unique(blockers)
+
+
 def _moveit_result_from(motion: dict[str, Any], execution: dict[str, Any]) -> dict[str, Any]:
     if isinstance(execution.get("moveit_pose_executor_result"), dict):
         return execution["moveit_pose_executor_result"]
@@ -1183,38 +1296,80 @@ def _evidence(
     parsed_contract: dict[str, Any],
     parser_metadata: dict[str, Any],
     planner_acceptance: dict[str, Any] | None = None,
+    acceptance_mode: str | None = None,
+    manual_confirmation_received: bool = False,
     blocking_reasons: list[str] | None = None,
 ) -> dict[str, Any]:
     moveit = execution.get("moveit_pose_executor_result") if isinstance(execution.get("moveit_pose_executor_result"), dict) else {}
     motion_check = _motion_check_fields(motion, moveit, parsed_contract)
+    reasons = blocking_reasons if blocking_reasons is not None else execution.get("blocking_reasons", [])
+    trajectory_sent = execution.get("trajectory_sent", False)
+    controller_command_sent = execution.get("controller_command_sent", False)
+    real_robot_motion_executed = execution.get("real_robot_motion_executed", False)
+    execute_trajectory_called = (
+        execution.get("moveit_execute_called") is True
+        or (isinstance(planner_acceptance, dict) and planner_acceptance.get("execute_trajectory_called") is True)
+    )
     return {
         **parser_metadata,
         "parsed_contract": parsed_contract,
         "execution_preview": parsed_contract.get("execution_preview"),
         "planner_acceptance": planner_acceptance,
+        "acceptance_workflow": _acceptance_workflow(
+            status=status,
+            mode=acceptance_mode,
+            parser_metadata=parser_metadata,
+            parsed_contract=parsed_contract,
+            planner_acceptance=planner_acceptance,
+            manual_confirmation_received=manual_confirmation_received,
+            real_execution_allowed=execution.get("trajectory_send_allowed") is True,
+            trajectory_sent=trajectory_sent,
+            execute_trajectory_called=execute_trajectory_called,
+            controller_command_sent=controller_command_sent,
+            real_robot_motion_executed=real_robot_motion_executed,
+            blocking_reasons=reasons,
+        ),
         "cartesian_motion_gateway_status": motion.get("cartesian_motion_gateway_status"),
         "cartesian_motion_execution_status": execution.get("cartesian_motion_execution_status"),
         "goal_accepted": moveit.get("goal_accepted", False),
         "execute_accepted": moveit.get("execute_success", False),
         "moveit_execute_error_code": moveit.get("moveit_execute_error_code"),
         "moveit_execute_error_code_name": moveit.get("moveit_execute_error_code_name"),
-        "trajectory_sent": execution.get("trajectory_sent", False),
-        "controller_command_sent": execution.get("controller_command_sent", False),
-        "real_robot_motion_executed": execution.get("real_robot_motion_executed", False),
+        "trajectory_sent": trajectory_sent,
+        "controller_command_sent": controller_command_sent,
+        "real_robot_motion_executed": real_robot_motion_executed,
         "target_pose": motion.get("target_pose"),
         **motion_check,
-        "blocking_reasons": blocking_reasons if blocking_reasons is not None else execution.get("blocking_reasons", []),
+        "blocking_reasons": reasons,
         "warnings": execution.get("warnings", []),
         "final_status": status,
     }
 
 
-def _blocked_result(reason: str, parsed_contract: dict[str, Any], parser_metadata: dict[str, Any]) -> dict[str, Any]:
+def _blocked_result(
+    reason: str,
+    parsed_contract: dict[str, Any],
+    parser_metadata: dict[str, Any],
+    *,
+    acceptance_mode: str | None = None,
+) -> dict[str, Any]:
     return {
         **parser_metadata,
         "parsed_contract": parsed_contract,
         "execution_preview": parsed_contract.get("execution_preview"),
         "planner_acceptance": None,
+        "acceptance_workflow": _acceptance_workflow(
+            status=STATUS_BLOCKED,
+            mode=acceptance_mode,
+            parser_metadata=parser_metadata,
+            parsed_contract=parsed_contract,
+            planner_acceptance=None,
+            trajectory_sent=False,
+            execute_trajectory_called=False,
+            controller_command_sent=False,
+            real_robot_motion_executed=False,
+            blocking_reasons=[reason],
+        ),
         **_empty_motion_check(parsed_contract),
         "goal_accepted": False,
         "execute_accepted": False,
@@ -1225,6 +1380,44 @@ def _blocked_result(reason: str, parsed_contract: dict[str, Any], parser_metadat
         "real_robot_motion_executed": False,
         "blocking_reasons": [reason],
         "final_status": STATUS_BLOCKED,
+    }
+
+
+def _acceptance_workflow(
+    *,
+    status: str,
+    mode: str | None,
+    parser_metadata: dict[str, Any],
+    parsed_contract: dict[str, Any] | None,
+    planner_acceptance: dict[str, Any] | None,
+    trajectory_sent: bool,
+    execute_trajectory_called: bool,
+    controller_command_sent: bool,
+    real_robot_motion_executed: bool,
+    blocking_reasons: list[str] | None,
+    manual_confirmation_received: bool = False,
+    real_execution_allowed: bool = False,
+) -> dict[str, Any] | None:
+    if mode is None:
+        return None
+    parsed_contract = parsed_contract if isinstance(parsed_contract, dict) else {}
+    execution_preview = parsed_contract.get("execution_preview") if isinstance(parsed_contract.get("execution_preview"), dict) else {}
+    planner_acceptance = planner_acceptance if isinstance(planner_acceptance, dict) else {}
+    return {
+        "status": status,
+        "mode": mode,
+        "original_command": parser_metadata.get("original_user_text"),
+        "qwen_parser_used": parser_metadata.get("parser_source") == "qwen_llm",
+        "execution_preview_status": execution_preview.get("preview_status"),
+        "planner_acceptance_status": planner_acceptance.get("status"),
+        "manual_confirmation_required": True,
+        "manual_confirmation_received": manual_confirmation_received,
+        "real_execution_allowed": real_execution_allowed,
+        "trajectory_sent": trajectory_sent,
+        "execute_trajectory_called": execute_trajectory_called,
+        "controller_command_sent": controller_command_sent,
+        "real_robot_motion_executed": real_robot_motion_executed,
+        "blocking_reasons": list(blocking_reasons or []),
     }
 
 

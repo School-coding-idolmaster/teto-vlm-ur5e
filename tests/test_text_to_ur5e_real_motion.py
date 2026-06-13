@@ -437,6 +437,103 @@ def test_plan_only_smoke_rejects_real_flag(capsys):
     assert '"real_robot_motion_executed": false' in output
 
 
+def test_acceptance_dry_run_two_mm_up_has_workflow_evidence(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
+    monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_two_mm_up_success)
+
+    exit_code = cli.main(["--acceptance", "--dry-run", "--cmd", "raise the tcp by 2 millimeters"])
+
+    evidence = _final_evidence(capsys.readouterr().out)
+    workflow = evidence["acceptance_workflow"]
+    assert exit_code == 0
+    assert workflow["status"] == "PASS"
+    assert workflow["mode"] == "dry_run"
+    assert workflow["qwen_parser_used"] is True
+    assert workflow["execution_preview_status"] == "PASS"
+    assert workflow["planner_acceptance_status"] == "PASS"
+    assert evidence["execution_preview"]["delta_m"] == [0.0, 0.0, 0.002]
+    assert workflow["trajectory_sent"] is False
+    assert workflow["execute_trajectory_called"] is False
+    assert workflow["real_robot_motion_executed"] is False
+
+
+def test_acceptance_dry_run_two_mm_down_has_workflow_evidence(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
+    monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_down_success)
+
+    exit_code = cli.main(["--acceptance", "--dry-run", "--cmd", "tcp down 2mm"])
+
+    evidence = _final_evidence(capsys.readouterr().out)
+    workflow = evidence["acceptance_workflow"]
+    assert exit_code == 0
+    assert workflow["mode"] == "dry_run"
+    assert evidence["execution_preview"]["delta_m"] == [0.0, 0.0, -0.002]
+    assert evidence["execution_preview"]["preview_status"] == "PASS"
+    assert workflow["real_execution_allowed"] is False
+    assert workflow["real_robot_motion_executed"] is False
+
+
+def test_acceptance_plan_only_mode_has_workflow_evidence(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
+    monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_two_mm_up_success)
+    monkeypatch.setattr(cli, "evaluate_cartesian_motion_execution", _fake_plan_only_execution)
+
+    exit_code = cli.main(["--acceptance", "--plan-only-smoke", "--cmd", "raise the tcp by 2 millimeters"])
+
+    evidence = _final_evidence(capsys.readouterr().out)
+    workflow = evidence["acceptance_workflow"]
+    assert exit_code == 0
+    assert workflow["mode"] == "plan_only"
+    assert evidence["planner_acceptance"]["status"] == "PASS"
+    assert workflow["real_execution_allowed"] is False
+    assert workflow["trajectory_sent"] is False
+    assert workflow["execute_trajectory_called"] is False
+    assert workflow["real_robot_motion_executed"] is False
+
+
+def test_real_small_motion_acceptance_without_confirmation_blocks(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
+    monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_two_mm_up_success)
+    monkeypatch.setattr(cli, "_execution_prereq_blockers", lambda timeout_s: pytest.fail("execution prereq should not run without confirmation"))
+    monkeypatch.setattr("builtins.input", lambda _prompt: (_ for _ in ()).throw(EOFError))
+
+    exit_code = cli.main(["--real-small-motion", "--cmd", "raise the tcp by 2 millimeters"])
+
+    evidence = _final_evidence(capsys.readouterr().out)
+    workflow = evidence["acceptance_workflow"]
+    assert exit_code == 2
+    assert workflow["status"] == "BLOCKED"
+    assert workflow["mode"] == "real_small_motion"
+    assert workflow["manual_confirmation_required"] is True
+    assert workflow["manual_confirmation_received"] is False
+    assert workflow["real_robot_motion_executed"] is False
+    assert "E_CONFIRMATION_MISMATCH" in workflow["blocking_reasons"]
+
+
+def test_acceptance_real_requires_real_small_motion(capsys):
+    exit_code = cli.main(["--acceptance", "--real", "--cmd", "raise the tcp by 2 millimeters"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 2
+    assert "E_ACCEPTANCE_REAL_REQUIRES_REAL_SMALL_MOTION" in output
+    assert '"real_robot_motion_executed": false' in output
+
+
+def test_acceptance_unsafe_distance_remains_blocked(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: pytest.fail("pose lookup should not run"))
+    monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_unsafe_distance)
+
+    exit_code = cli.main(["--acceptance", "--dry-run", "--cmd", "raise the tcp by 20 millimeters"])
+
+    evidence = _final_evidence(capsys.readouterr().out)
+    workflow = evidence["acceptance_workflow"]
+    assert exit_code == 2
+    assert evidence["final_status"] != "PASS"
+    assert workflow["status"] == "BLOCKED"
+    assert workflow["real_robot_motion_executed"] is False
+    assert "E_EXCEEDS_HARD_SAFETY_LIMIT" in workflow["blocking_reasons"]
+
+
 def test_unsafe_qwen_distance_blocks_before_execution_preview(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: pytest.fail("pose lookup should not run"))
     monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_unsafe_distance)
@@ -650,6 +747,43 @@ def _fake_qwen_success(request):
     }
 
 
+def _fake_qwen_two_mm_up_success(request):
+    raw = json.dumps(
+        {
+            "intent": "relative_cartesian_motion",
+            "axis": "z",
+            "direction": "+",
+            "distance_m": 0.002,
+            "confidence": 0.96,
+            "reason": "small upward acceptance motion",
+        }
+    )
+    return {
+        "qwen_motion_parser_status": "PASS",
+        "parser_source": "qwen_llm",
+        "llm_called": True,
+        "model_name": request.model_name or "qwen2.5vl:3b",
+        "qwen_endpoint": request.endpoint,
+        "llm_latency_ms": 1.0,
+        "raw_llm_output": raw,
+        "normalized_contract": {
+            "intent": "relative_cartesian_motion",
+            "frame": "base_link",
+            "delta_m": [0.0, 0.0, 0.002],
+            "max_distance_m": request.max_distance_m,
+            "hard_safety_limit_m": request.hard_safety_limit_m,
+            "must_confirm": True,
+        },
+        "axis": "z",
+        "direction": "+",
+        "distance_m": 0.002,
+        "confidence": 0.96,
+        "delta_m": [0.0, 0.0, 0.002],
+        "parser_blocking_reasons": [],
+        "blocking_reasons": [],
+    }
+
+
 def _fake_qwen_down_success(request):
     raw = json.dumps(
         {
@@ -684,6 +818,45 @@ def _fake_qwen_down_success(request):
         "delta_m": [0.0, 0.0, -0.002],
         "parser_blocking_reasons": [],
         "blocking_reasons": [],
+    }
+
+
+def _fake_plan_only_execution(request):
+    assert request.config["enable_moveit_execute"] is False
+    assert request.config["enable_real_robot_motion"] is False
+    assert request.config["trajectory_send_allowed"] is False
+    return {
+        "cartesian_motion_execution_status": "PASS",
+        "moveit_plan_requested": True,
+        "moveit_plan_success": True,
+        "manual_confirmation_required": True,
+        "manual_confirmation_accepted": False,
+        "moveit_execute_called": False,
+        "trajectory_send_allowed": False,
+        "trajectory_sent": False,
+        "controller_command_sent": False,
+        "real_robot_motion_executed": False,
+        "moveit_pose_executor_result": {
+            "moveit_pose_executor_status": "PASS",
+            "plan_success": True,
+            "moveit_plan_called": True,
+            "moveit_execute_called": False,
+            "trajectory_send_allowed": False,
+            "trajectory_sent": False,
+            "controller_command_sent": False,
+            "real_robot_motion_executed": False,
+            "planned_trajectory": _trajectory_object(
+                [
+                    ([0.0, 0.0, 0.0, 0.0, 0.0, 0.0], {"sec": 0, "nanosec": 0}),
+                    ([0.0, 0.01, 0.0, 0.0, 0.0, 0.0], {"sec": 0, "nanosec": 500000000}),
+                ]
+            ),
+            "trajectory_point_count": 2,
+            "blocking_reasons": [],
+            "warnings": [],
+        },
+        "blocking_reasons": [],
+        "warnings": [],
     }
 
 
