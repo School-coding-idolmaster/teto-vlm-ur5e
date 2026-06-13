@@ -66,6 +66,7 @@ else
   ) >> "${LOG_PATH}" 2>&1 &
   server_pid=$!
   echo "${server_pid}" > "${PID_PATH}"
+  sleep 0.1
 fi
 
 deadline=$((SECONDS + TIMEOUT_S))

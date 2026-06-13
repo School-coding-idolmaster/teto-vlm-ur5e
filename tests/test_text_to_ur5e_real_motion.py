@@ -455,6 +455,10 @@ def test_acceptance_dry_run_two_mm_up_has_workflow_evidence(monkeypatch, capsys)
     assert workflow["trajectory_sent"] is False
     assert workflow["execute_trajectory_called"] is False
     assert workflow["real_robot_motion_executed"] is False
+    assert evidence["post_motion_verification_status"] == "NOT_RUN"
+    assert evidence["post_motion_verification"]["reason"] == "real_robot_motion_executed=false"
+    assert evidence["post_motion_verification"]["intended_delta_m"] == [0.0, 0.0, 0.002]
+    assert evidence["actual_displacement_m"] is None
 
 
 def test_acceptance_dry_run_with_mock_current_tcp_pose_passes_without_real_state(monkeypatch, capsys):
@@ -661,7 +665,8 @@ def test_dry_run_with_cmd_works(monkeypatch, capsys):
 
 
 def test_real_confirmation_accepts_exact_lowercase_y(monkeypatch, capsys):
-    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
+    poses = iter([_pose(), _pose_z_offset(0.005)])
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: next(poses))
     monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_success)
     monkeypatch.setattr(cli, "_execution_prereq_blockers", lambda timeout_s: [])
     monkeypatch.setattr(cli, "evaluate_cartesian_motion_execution", _fake_success_execution)
@@ -677,6 +682,20 @@ def test_real_confirmation_accepts_exact_lowercase_y(monkeypatch, capsys):
     assert '"final_status": "PASS"' in output
     assert '"real_robot_motion_executed": true' in output
     assert '"moveit_execute_error_code": 1' in output
+    evidence = _final_evidence(output)
+    post_motion = evidence["post_motion_verification"]
+    assert evidence["post_motion_verification_status"] == "PASS"
+    assert post_motion["tcp_pose_before_execution"]["position_m"] == [0.4, 0.0, 0.3]
+    assert post_motion["target_tcp_pose"]["position_m"] == [0.4, 0.0, 0.305]
+    assert post_motion["tcp_pose_after_execution"]["position_m"] == [0.4, 0.0, 0.305]
+    assert post_motion["intended_delta_m"] == [0.0, 0.0, 0.005]
+    assert post_motion["actual_displacement_m"] == [0.0, 0.0, 0.005]
+    assert post_motion["actual_displacement_distance_m"] == 0.005
+    assert post_motion["actual_distance_error_m"] == 0.0
+    assert post_motion["intended_direction"] == "z+"
+    assert post_motion["actual_direction"] == "z+"
+    assert post_motion["direction_check_passed"] is True
+    assert post_motion["orientation_change_rad"] == 0.0
 
 
 def test_confirmation_mismatch_aborts(monkeypatch, capsys):
@@ -727,6 +746,12 @@ def _pose():
         "position_m": [0.4, 0.0, 0.3],
         "orientation_xyzw": [0.0, 0.0, 0.0, 1.0],
     }
+
+
+def _pose_z_offset(offset_m):
+    pose = _pose()
+    pose["position_m"] = [0.4, 0.0, round(0.3 + offset_m, 12)]
+    return pose
 
 
 def _gateway_with_plan_metrics(metrics):

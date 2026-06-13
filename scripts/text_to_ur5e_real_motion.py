@@ -205,16 +205,16 @@ def main(argv: list[str] | None = None) -> int:
     acceptance_mode = _acceptance_mode(args)
 
     if real_requested and args.dry_run:
-        print(_json({"final_status": STATUS_BLOCKED, "blocking_reasons": ["E_REAL_AND_DRY_RUN_CONFLICT"]}))
+        print(_json({"final_status": STATUS_BLOCKED, "blocking_reasons": ["E_REAL_AND_DRY_RUN_CONFLICT"], "real_robot_motion_executed": False, **_post_motion_not_run_fields()}))
         return 2
     if real_requested and args.plan_only_smoke:
-        print(_json({"final_status": STATUS_BLOCKED, "blocking_reasons": ["E_REAL_AND_PLAN_ONLY_SMOKE_CONFLICT"], "real_robot_motion_executed": False}))
+        print(_json({"final_status": STATUS_BLOCKED, "blocking_reasons": ["E_REAL_AND_PLAN_ONLY_SMOKE_CONFLICT"], "real_robot_motion_executed": False, **_post_motion_not_run_fields()}))
         return 2
     if args.real_small_motion and args.yes:
-        print(_json({"final_status": STATUS_BLOCKED, "blocking_reasons": ["E_REAL_SMALL_MOTION_REQUIRES_MANUAL_CONFIRMATION"], "real_robot_motion_executed": False}))
+        print(_json({"final_status": STATUS_BLOCKED, "blocking_reasons": ["E_REAL_SMALL_MOTION_REQUIRES_MANUAL_CONFIRMATION"], "real_robot_motion_executed": False, **_post_motion_not_run_fields()}))
         return 2
     if args.acceptance and args.real and not args.real_small_motion:
-        print(_json({"final_status": STATUS_BLOCKED, "blocking_reasons": ["E_ACCEPTANCE_REAL_REQUIRES_REAL_SMALL_MOTION"], "real_robot_motion_executed": False}))
+        print(_json({"final_status": STATUS_BLOCKED, "blocking_reasons": ["E_ACCEPTANCE_REAL_REQUIRES_REAL_SMALL_MOTION"], "real_robot_motion_executed": False, **_post_motion_not_run_fields()}))
         return 2
     if real_requested and (args.mock_current_tcp_pose or args.current_tcp_pose_json):
         print(
@@ -227,12 +227,13 @@ def main(argv: list[str] | None = None) -> int:
                     "execute_trajectory_called": False,
                     "controller_command_sent": False,
                     "real_robot_motion_executed": False,
+                    **_post_motion_not_run_fields(),
                 }
             )
         )
         return 2
     if real_requested and args.yes and args.cmd is None:
-        print(_json({"final_status": STATUS_BLOCKED, "blocking_reasons": ["E_YES_REQUIRES_CMD"], "real_robot_motion_executed": False}))
+        print(_json({"final_status": STATUS_BLOCKED, "blocking_reasons": ["E_YES_REQUIRES_CMD"], "real_robot_motion_executed": False, **_post_motion_not_run_fields()}))
         return 2
     dry_run = not real_requested or args.dry_run
 
@@ -257,7 +258,7 @@ def main(argv: list[str] | None = None) -> int:
                 normalized_contract=None,
                 parser_blocking_reasons=["E_NO_INPUT"],
             )
-            print(_json({**metadata, "final_status": STATUS_BLOCKED, "blocking_reasons": ["E_NO_INPUT"], "real_robot_motion_executed": False}))
+            print(_json({**metadata, "final_status": STATUS_BLOCKED, "blocking_reasons": ["E_NO_INPUT"], "real_robot_motion_executed": False, **_post_motion_not_run_fields()}))
             return 2
 
     parsed, parser_result = _parse_command_for_mode(
@@ -280,6 +281,14 @@ def main(argv: list[str] | None = None) -> int:
     _print_parser_summary(parser_metadata)
 
     if parsed is None:
+        post_motion = _post_motion_verification(
+            real_robot_motion_executed=False,
+            before_tcp_pose=None,
+            target_tcp_pose=None,
+            after_tcp_pose=None,
+            intended_delta_m=None,
+            reason="real_robot_motion_executed=false",
+        )
         result = {
             **parser_metadata,
             "parsed_contract": None,
@@ -303,6 +312,7 @@ def main(argv: list[str] | None = None) -> int:
             "trajectory_sent": False,
             "controller_command_sent": False,
             "real_robot_motion_executed": False,
+            **_post_motion_top_level_fields(post_motion),
             "final_status": STATUS_BLOCKED,
         }
         print("Final execution evidence:")
@@ -523,6 +533,9 @@ def main(argv: list[str] | None = None) -> int:
             },
         )
     )
+    post_motion_tcp_pose = None
+    if execution.get("real_robot_motion_executed") is True:
+        post_motion_tcp_pose = _lookup_current_tcp_pose(timeout_s=3.0)
 
     status = STATUS_PASS if execution.get("real_robot_motion_executed") is True else STATUS_BLOCKED
     planner_acceptance = _planner_acceptance(
@@ -540,6 +553,7 @@ def main(argv: list[str] | None = None) -> int:
         planner_acceptance=planner_acceptance,
         acceptance_mode=acceptance_mode,
         current_tcp_pose=current_pose_evidence,
+        post_motion_tcp_pose=post_motion_tcp_pose,
         manual_confirmation_received=True,
     )
     print("Final execution evidence:")
@@ -1407,6 +1421,7 @@ def _evidence(
     planner_acceptance: dict[str, Any] | None = None,
     acceptance_mode: str | None = None,
     current_tcp_pose: dict[str, Any] | None = None,
+    post_motion_tcp_pose: dict[str, Any] | None = None,
     manual_confirmation_received: bool = False,
     blocking_reasons: list[str] | None = None,
 ) -> dict[str, Any]:
@@ -1419,6 +1434,14 @@ def _evidence(
     execute_trajectory_called = (
         execution.get("moveit_execute_called") is True
         or (isinstance(planner_acceptance, dict) and planner_acceptance.get("execute_trajectory_called") is True)
+    )
+    post_motion = _post_motion_verification(
+        real_robot_motion_executed=real_robot_motion_executed is True,
+        before_tcp_pose=current_tcp_pose,
+        target_tcp_pose=motion.get("target_pose"),
+        after_tcp_pose=post_motion_tcp_pose,
+        intended_delta_m=_intended_delta_from_contract(parsed_contract),
+        reason=None if real_robot_motion_executed is True else "real_robot_motion_executed=false",
     )
     return {
         **parser_metadata,
@@ -1451,6 +1474,7 @@ def _evidence(
         "controller_command_sent": controller_command_sent,
         "real_robot_motion_executed": real_robot_motion_executed,
         "target_pose": motion.get("target_pose"),
+        **_post_motion_top_level_fields(post_motion),
         **motion_check,
         "blocking_reasons": reasons,
         "warnings": execution.get("warnings", []),
@@ -1466,12 +1490,21 @@ def _blocked_result(
     acceptance_mode: str | None = None,
     current_tcp_pose: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    current_tcp_pose = current_tcp_pose or _current_tcp_pose_unavailable(real_required=False)
+    post_motion = _post_motion_verification(
+        real_robot_motion_executed=False,
+        before_tcp_pose=current_tcp_pose,
+        target_tcp_pose=None,
+        after_tcp_pose=None,
+        intended_delta_m=_intended_delta_from_contract(parsed_contract),
+        reason="real_robot_motion_executed=false",
+    )
     return {
         **parser_metadata,
         "parsed_contract": parsed_contract,
         "execution_preview": parsed_contract.get("execution_preview"),
         "planner_acceptance": None,
-        "current_tcp_pose": current_tcp_pose or _current_tcp_pose_unavailable(real_required=False),
+        "current_tcp_pose": current_tcp_pose,
         "acceptance_workflow": _acceptance_workflow(
             status=STATUS_BLOCKED,
             mode=acceptance_mode,
@@ -1493,9 +1526,161 @@ def _blocked_result(
         "execute_trajectory_called": False,
         "controller_command_sent": False,
         "real_robot_motion_executed": False,
+        **_post_motion_top_level_fields(post_motion),
         "blocking_reasons": [reason],
         "final_status": STATUS_BLOCKED,
     }
+
+
+def _post_motion_verification(
+    *,
+    real_robot_motion_executed: bool,
+    before_tcp_pose: dict[str, Any] | None,
+    target_tcp_pose: dict[str, Any] | None,
+    after_tcp_pose: dict[str, Any] | None,
+    intended_delta_m: list[float] | None,
+    reason: str | None = None,
+    distance_tolerance_m: float = 0.005,
+) -> dict[str, Any]:
+    before = _tcp_pose_for_evidence(before_tcp_pose)
+    target = _tcp_pose_for_evidence(target_tcp_pose)
+    intended_delta = [round(float(value), 6) for value in intended_delta_m] if _vector3(intended_delta_m) else None
+    intended_direction = _direction_label_from_delta(intended_delta)
+
+    result: dict[str, Any] = {
+        "tcp_pose_before_execution": before,
+        "target_tcp_pose": target,
+        "tcp_pose_after_execution": None,
+        "intended_delta_m": intended_delta,
+        "actual_displacement_m": None,
+        "actual_displacement_distance_m": None,
+        "actual_distance_error_m": None,
+        "intended_direction": intended_direction,
+        "actual_direction": None,
+        "direction_check_passed": False,
+        "orientation_change_rad": None,
+        "post_motion_verification_status": "NOT_RUN",
+        "reason": reason,
+    }
+    if not real_robot_motion_executed:
+        result["reason"] = reason or "real_robot_motion_executed=false"
+        return result
+
+    after = _current_tcp_pose_evidence(
+        after_tcp_pose or {},
+        source="real_robot_state_after_execution",
+        allowed_for_real_execution=True,
+    )
+    result["tcp_pose_after_execution"] = after
+    if before is None or target is None or after is None:
+        result["post_motion_verification_status"] = STATUS_FAILED
+        result["reason"] = "tcp_pose_before_target_or_after_unavailable"
+        return result
+
+    before_position = before.get("position_m")
+    after_position = after.get("position_m")
+    if not _vector3(before_position) or not _vector3(after_position):
+        result["post_motion_verification_status"] = STATUS_FAILED
+        result["reason"] = "tcp_position_before_or_after_unavailable"
+        return result
+
+    actual_displacement = [float(right) - float(left) for left, right in zip(before_position, after_position)]
+    actual_distance = math.sqrt(sum(value**2 for value in actual_displacement))
+    intended_distance = math.sqrt(sum(float(value) ** 2 for value in intended_delta)) if intended_delta is not None else None
+    actual_direction = _direction_label_from_delta(actual_displacement)
+    direction_passed = intended_direction is not None and actual_direction == intended_direction
+    actual_distance_error = abs(actual_distance - intended_distance) if intended_distance is not None else None
+    orientation_change = None
+    before_orientation = before.get("orientation_xyzw")
+    after_orientation = after.get("orientation_xyzw")
+    if _quaternion(before_orientation) and _quaternion(after_orientation):
+        orientation_change = _quaternion_angle(before_orientation, after_orientation)
+
+    result.update(
+        {
+            "actual_displacement_m": [round(value, 6) for value in actual_displacement],
+            "actual_displacement_distance_m": round(actual_distance, 6),
+            "actual_distance_error_m": round(actual_distance_error, 6) if actual_distance_error is not None else None,
+            "actual_direction": actual_direction,
+            "direction_check_passed": direction_passed,
+            "orientation_change_rad": orientation_change,
+            "post_motion_verification_status": (
+                STATUS_PASS
+                if direction_passed
+                and actual_distance_error is not None
+                and actual_distance_error <= float(distance_tolerance_m) + EPS
+                else STATUS_FAILED
+            ),
+            "reason": None,
+        }
+    )
+    if result["post_motion_verification_status"] != STATUS_PASS:
+        result["reason"] = "post_motion_direction_or_distance_check_failed"
+    return result
+
+
+def _tcp_pose_for_evidence(pose: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(pose, dict) or pose.get("available") is False:
+        return None
+    if _vector3(pose.get("position_m")) and _quaternion(pose.get("orientation_xyzw")):
+        return {
+            "available": True,
+            "frame": pose.get("frame") or "base_link",
+            "position_m": [round(float(value), 12) for value in pose["position_m"]],
+            "orientation_xyzw": [round(float(value), 15) for value in pose["orientation_xyzw"]],
+            "source": pose.get("source"),
+            "allowed_for_real_execution": pose.get("allowed_for_real_execution"),
+        }
+    return _current_tcp_pose_evidence(
+        pose,
+        source=str(pose.get("source") or "target_tcp_pose"),
+        allowed_for_real_execution=pose.get("allowed_for_real_execution") is not False,
+    )
+
+
+def _post_motion_top_level_fields(post_motion: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "post_motion_verification": post_motion,
+        "post_motion_verification_status": post_motion.get("post_motion_verification_status"),
+        "actual_displacement_m": post_motion.get("actual_displacement_m"),
+        "actual_displacement_distance_m": post_motion.get("actual_displacement_distance_m"),
+        "actual_distance_error_m": post_motion.get("actual_distance_error_m"),
+        "orientation_change_rad": post_motion.get("orientation_change_rad"),
+    }
+
+
+def _post_motion_not_run_fields() -> dict[str, Any]:
+    return _post_motion_top_level_fields(
+        _post_motion_verification(
+            real_robot_motion_executed=False,
+            before_tcp_pose=None,
+            target_tcp_pose=None,
+            after_tcp_pose=None,
+            intended_delta_m=None,
+            reason="real_robot_motion_executed=false",
+        )
+    )
+
+
+def _intended_delta_from_contract(parsed_contract: dict[str, Any] | None) -> list[float] | None:
+    if not isinstance(parsed_contract, dict):
+        return None
+    delta = parsed_contract.get("delta_m")
+    if _vector3(delta):
+        return list(delta)
+    preview = parsed_contract.get("execution_preview")
+    if isinstance(preview, dict) and _vector3(preview.get("delta_m")):
+        return list(preview["delta_m"])
+    return None
+
+
+def _direction_label_from_delta(delta_m: list[float] | None) -> str | None:
+    if not _vector3(delta_m):
+        return None
+    axis, sign = _axis_direction_from_delta([float(value) for value in delta_m])
+    if axis is None or sign is None:
+        return None
+    return f"{axis}{sign}"
 
 
 def _acceptance_workflow(
