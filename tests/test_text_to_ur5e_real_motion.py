@@ -308,6 +308,135 @@ def test_moveit_plan_only_trajectory_object_metrics_are_reported():
     assert planner["execute_trajectory_called"] is False
 
 
+def test_plan_only_smoke_path_extracts_metrics_without_execute(monkeypatch, capsys):
+    captured_requests = []
+
+    def fake_execution(request):
+        captured_requests.append(request)
+        assert request.config["enable_moveit_execute"] is False
+        assert request.config["enable_real_robot_motion"] is False
+        assert request.config["trajectory_send_allowed"] is False
+        return {
+            "cartesian_motion_execution_status": "PASS",
+            "moveit_plan_requested": True,
+            "moveit_plan_success": True,
+            "manual_confirmation_required": True,
+            "manual_confirmation_accepted": False,
+            "moveit_execute_called": False,
+            "trajectory_send_allowed": False,
+            "trajectory_sent": False,
+            "controller_command_sent": False,
+            "real_robot_motion_executed": False,
+            "moveit_pose_executor_result": {
+                "moveit_pose_executor_status": "PASS",
+                "plan_success": True,
+                "moveit_plan_called": True,
+                "moveit_execute_called": False,
+                "trajectory_send_allowed": False,
+                "trajectory_sent": False,
+                "controller_command_sent": False,
+                "real_robot_motion_executed": False,
+                "planned_trajectory": _trajectory_object(
+                    [
+                        ([0.0, 0.0, 0.0, 0.0, 0.0, 0.0], {"sec": 0, "nanosec": 0}),
+                        ([0.0, 0.03, 0.01, 0.0, 0.0, 0.0], {"sec": 1, "nanosec": 100000000}),
+                    ]
+                ),
+                "trajectory_point_count": 2,
+                "blocking_reasons": [],
+                "warnings": [],
+            },
+            "blocking_reasons": [],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
+    monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_success)
+    monkeypatch.setattr(cli, "evaluate_cartesian_motion_execution", fake_execution)
+    monkeypatch.setattr(cli, "_execution_prereq_blockers", lambda timeout_s: pytest.fail("execute prereq path should not run"))
+
+    exit_code = cli.main(["--plan-only-smoke", "--cmd", "raise the tcp by 5 millimeters"])
+
+    evidence = _final_evidence(capsys.readouterr().out)
+    planner = evidence["planner_acceptance"]
+    assert exit_code == 0
+    assert captured_requests
+    assert planner["status"] == "PASS"
+    assert planner["plan_only"] is True
+    assert planner["execution_allowed"] is False
+    assert planner["trajectory_sent"] is False
+    assert planner["controller_command_sent"] is False
+    assert planner["execute_trajectory_called"] is False
+    assert planner["real_robot_motion_executed"] is False
+    assert planner["metrics_source"] == "moveit_plan_only"
+    assert planner["planned_waypoint_count"] == 2
+    assert planner["max_joint_delta_rad"] == 0.03
+    assert planner["total_joint_motion_rad"] == 0.04
+    assert planner["trajectory_duration_s"] == 1.1
+    assert evidence["trajectory_sent"] is False
+    assert evidence["controller_command_sent"] is False
+    assert evidence["real_robot_motion_executed"] is False
+
+
+def test_plan_only_smoke_unavailable_remains_safe(monkeypatch, capsys):
+    def fake_execution(request):
+        assert request.config["enable_moveit_execute"] is False
+        assert request.config["enable_real_robot_motion"] is False
+        return {
+            "cartesian_motion_execution_status": "BLOCKED",
+            "moveit_plan_requested": True,
+            "moveit_plan_success": False,
+            "moveit_execute_called": False,
+            "trajectory_send_allowed": False,
+            "trajectory_sent": False,
+            "controller_command_sent": False,
+            "real_robot_motion_executed": False,
+            "moveit_pose_executor_result": {
+                "moveit_pose_executor_status": "BLOCKED",
+                "plan_success": False,
+                "moveit_plan_called": False,
+                "moveit_execute_called": False,
+                "trajectory_send_allowed": False,
+                "trajectory_sent": False,
+                "controller_command_sent": False,
+                "real_robot_motion_executed": False,
+                "blocking_reasons": ["E_MOVEIT_ACTION_SERVER_UNAVAILABLE"],
+                "warnings": [],
+            },
+            "blocking_reasons": ["E_MOVEIT_ACTION_SERVER_UNAVAILABLE"],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
+    monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_success)
+    monkeypatch.setattr(cli, "evaluate_cartesian_motion_execution", fake_execution)
+
+    exit_code = cli.main(["--plan-only-smoke", "--cmd", "raise the tcp by 5 millimeters"])
+
+    evidence = _final_evidence(capsys.readouterr().out)
+    planner = evidence["planner_acceptance"]
+    assert exit_code == 2
+    assert planner["status"] == "BLOCKED"
+    assert planner["metrics_source"] == "not_available"
+    assert planner["planned_waypoint_count"] is None
+    assert "E_MOVEIT_ACTION_SERVER_UNAVAILABLE" in planner["blocking_reasons"]
+    assert planner["execution_allowed"] is False
+    assert planner["trajectory_sent"] is False
+    assert planner["controller_command_sent"] is False
+    assert planner["execute_trajectory_called"] is False
+    assert planner["real_robot_motion_executed"] is False
+    assert evidence["real_robot_motion_executed"] is False
+
+
+def test_plan_only_smoke_rejects_real_flag(capsys):
+    exit_code = cli.main(["--real", "--plan-only-smoke", "--cmd", "raise the tcp by 5 millimeters"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 2
+    assert "E_REAL_AND_PLAN_ONLY_SMOKE_CONFLICT" in output
+    assert '"real_robot_motion_executed": false' in output
+
+
 def test_unsafe_qwen_distance_blocks_before_execution_preview(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: pytest.fail("pose lookup should not run"))
     monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_unsafe_distance)

@@ -171,6 +171,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Interactive text-to-UR5e relative Cartesian motion entrypoint.")
     parser.add_argument("--real", action="store_true", help="Enable real MoveIt ExecuteTrajectory.")
     parser.add_argument("--dry-run", action="store_true", help="Parse and validate without executing.")
+    parser.add_argument("--plan-only-smoke", action="store_true", help="Request MoveIt planning only; ExecuteTrajectory remains disabled.")
     parser.add_argument("--cmd", help='One-shot command, for example: --cmd "move up 5 mm".')
     parser.add_argument("--yes", action="store_true", help="Skip real-mode confirmation; only allowed together with --real --cmd.")
     parser.add_argument("--parser", choices=["rule", "qwen", "auto"], default="qwen", help="Text parser mode. Default: qwen.")
@@ -184,6 +185,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.real and args.dry_run:
         print(_json({"final_status": STATUS_BLOCKED, "blocking_reasons": ["E_REAL_AND_DRY_RUN_CONFLICT"]}))
+        return 2
+    if args.real and args.plan_only_smoke:
+        print(_json({"final_status": STATUS_BLOCKED, "blocking_reasons": ["E_REAL_AND_PLAN_ONLY_SMOKE_CONFLICT"], "real_robot_motion_executed": False}))
         return 2
     if args.real and args.yes and args.cmd is None:
         print(_json({"final_status": STATUS_BLOCKED, "blocking_reasons": ["E_YES_REQUIRES_CMD"], "real_robot_motion_executed": False}))
@@ -310,6 +314,42 @@ def main(argv: list[str] | None = None) -> int:
         print("Final execution evidence:")
         print(_json(result))
         return 2
+
+    if args.plan_only_smoke:
+        plan_only_config = _build_plan_only_smoke_config(
+            current_pose=current_pose,
+            max_step_m=float(args.max_step_m),
+            speed_scale=float(args.speed_scale),
+            acc_scale=float(args.acc_scale),
+        )
+        execution = evaluate_cartesian_motion_execution(
+            CartesianMotionExecutionRequest(
+                requested=True,
+                config=plan_only_config,
+                cartesian_motion_result=motion,
+                manual_confirmation_result={"manual_confirmation_accepted": False},
+                ur5_state_result={"read_only_state_contract_ready": True},
+            )
+        )
+        planner_acceptance = _planner_acceptance(
+            execution_preview=execution_preview,
+            motion=motion,
+            execution=execution,
+            dry_run=True,
+        )
+        status = STATUS_PASS if planner_acceptance.get("status") == STATUS_PASS else STATUS_BLOCKED
+        result = _evidence(
+            status=status,
+            motion=motion,
+            execution=execution,
+            parsed_contract=printed_contract,
+            parser_metadata=parser_metadata,
+            planner_acceptance=planner_acceptance,
+            blocking_reasons=planner_acceptance.get("blocking_reasons", []),
+        )
+        print("Final execution evidence:")
+        print(_json(result))
+        return 0 if status == STATUS_PASS else 2
 
     if dry_run:
         result = _evidence(
@@ -757,6 +797,34 @@ def _build_gateway_config(
     }
 
 
+def _build_plan_only_smoke_config(
+    *,
+    current_pose: dict[str, Any],
+    max_step_m: float,
+    speed_scale: float,
+    acc_scale: float,
+) -> dict[str, Any]:
+    return {
+        **_build_gateway_config(
+            current_pose=current_pose,
+            max_step_m=max_step_m,
+            speed_scale=speed_scale,
+            acc_scale=acc_scale,
+            real=True,
+            dry_run=False,
+        ),
+        "moveit_execution_mode": "real",
+        "enable_ros2_runtime": True,
+        "enable_moveit_plan": True,
+        "enable_moveit_execute": False,
+        "enable_real_robot_motion": False,
+        "moveit_execute_allowed": False,
+        "trajectory_send_allowed": False,
+        "execution_allowed": False,
+        "manual_confirmation_required": True,
+    }
+
+
 def _planner_acceptance(
     *,
     execution_preview: dict[str, Any],
@@ -774,6 +842,16 @@ def _planner_acceptance(
         execution.get("trajectory_sent") is True
         or moveit_result.get("trajectory_sent") is True
         or motion.get("trajectory_sent") is True
+    )
+    controller_command_sent = (
+        execution.get("controller_command_sent") is True
+        or moveit_result.get("controller_command_sent") is True
+        or motion.get("controller_command_sent") is True
+    )
+    real_robot_motion_executed = (
+        execution.get("real_robot_motion_executed") is True
+        or moveit_result.get("real_robot_motion_executed") is True
+        or motion.get("real_robot_motion_executed") is True
     )
     execute_called = (
         execution.get("moveit_execute_called") is True
@@ -807,8 +885,14 @@ def _planner_acceptance(
         blocking_reasons.append("E_PLANNER_ACCEPTANCE_NOT_PLAN_ONLY")
     if trajectory_sent:
         blocking_reasons.append("E_PLANNER_ACCEPTANCE_TRAJECTORY_SENT")
+    if controller_command_sent:
+        blocking_reasons.append("E_PLANNER_ACCEPTANCE_CONTROLLER_COMMAND_SENT")
     if execute_called:
         blocking_reasons.append("E_PLANNER_ACCEPTANCE_EXECUTE_CALLED")
+    if real_robot_motion_executed:
+        blocking_reasons.append("E_PLANNER_ACCEPTANCE_REAL_ROBOT_MOTION_EXECUTED")
+    if execution.get("cartesian_motion_execution_status") == STATUS_BLOCKED:
+        blocking_reasons.extend(_string_list(execution.get("blocking_reasons")))
 
     max_joint_delta = trajectory_metrics["max_joint_delta_rad"]
     if (
@@ -836,7 +920,9 @@ def _planner_acceptance(
         "plan_only": dry_run and not execution_allowed,
         "execution_allowed": execution_allowed,
         "trajectory_sent": trajectory_sent,
+        "controller_command_sent": controller_command_sent,
         "execute_trajectory_called": execute_called,
+        "real_robot_motion_executed": real_robot_motion_executed,
         "requested_delta_m": requested_delta if _vector3(requested_delta) else None,
         "requested_distance_m": requested_distance,
         "planned_goal_frame": motion.get("frame") or execution_preview.get("frame"),
