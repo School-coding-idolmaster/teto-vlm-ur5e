@@ -12,6 +12,8 @@ Modes:
   --dry-run             Parse, preview, and record acceptance evidence without MoveIt execution.
   --plan-only-smoke     Request MoveIt planning only; ExecuteTrajectory remains disabled.
   --real-small-motion   Guarded future real acceptance path requiring manual confirmation.
+  --auto-start-qwen     Check/start the local Qwen parser server before running acceptance.
+  --no-auto-start-qwen  Preserve existing behavior and do not start Qwen automatically.
 
 Initial future real acceptance commands:
   raise the tcp by 2 millimeters
@@ -20,6 +22,7 @@ Initial future real acceptance commands:
 
 Examples:
   bash scripts/run_qwen_manual_acceptance.sh --cmd "raise the tcp by 2 millimeters" --dry-run
+  bash scripts/run_qwen_manual_acceptance.sh --cmd "raise the tcp by 2 millimeters" --dry-run --auto-start-qwen
   bash scripts/run_qwen_manual_acceptance.sh --cmd "raise the tcp by 2 millimeters" --plan-only-smoke
   bash scripts/run_qwen_manual_acceptance.sh --cmd "raise the tcp by 2 millimeters" --real-small-motion
 EOF
@@ -30,6 +33,23 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   exit 0
 fi
 
+AUTO_START_QWEN=0
+ARGS=()
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    --auto-start-qwen)
+      AUTO_START_QWEN=1
+      ;;
+    --no-auto-start-qwen)
+      AUTO_START_QWEN=0
+      ;;
+    *)
+      ARGS+=("$1")
+      ;;
+  esac
+  shift
+done
+
 cd "${REPO_ROOT}"
 source /opt/ros/humble/setup.bash
 export ROS_LOG_DIR=/tmp/teto_ros_logs
@@ -38,9 +58,14 @@ export TETO_QWEN_ENDPOINT="${TETO_QWEN_ENDPOINT:-http://127.0.0.1:18080/api/gene
 export TETO_QWEN_MODEL="${TETO_QWEN_MODEL:-Qwen/Qwen2.5-VL-3B-Instruct}"
 export TETO_QWEN_TIMEOUT_S="${TETO_QWEN_TIMEOUT_S:-60}"
 
-PYTHON="${REPO_ROOT}/.venv_lab/bin/python"
+if [[ "${AUTO_START_QWEN}" == "1" ]]; then
+  BOOTSTRAP_SCRIPT="${TETO_QWEN_BOOTSTRAP_SCRIPT:-scripts/ensure_qwen_motion_server.sh}"
+  bash "${BOOTSTRAP_SCRIPT}"
+fi
+
+PYTHON="${TETO_QWEN_ACCEPTANCE_PYTHON:-${REPO_ROOT}/.venv_lab/bin/python}"
 if [[ ! -x "${PYTHON}" ]]; then
   PYTHON=/usr/bin/python3
 fi
 
-"${PYTHON}" scripts/text_to_ur5e_real_motion.py --acceptance --parser qwen "$@"
+"${PYTHON}" scripts/text_to_ur5e_real_motion.py --acceptance --parser qwen "${ARGS[@]}"
