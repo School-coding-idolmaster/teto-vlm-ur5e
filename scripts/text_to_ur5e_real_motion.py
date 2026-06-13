@@ -36,6 +36,9 @@ CONFIRMATION_REPLY = "y"
 STATUS_PASS = "PASS"
 STATUS_BLOCKED = "BLOCKED"
 STATUS_FAILED = "FAILED"
+STATUS_WARNING = "WARNING"
+
+SUSPICIOUS_TINY_MOTION_JOINT_DELTA_RAD = 1.0
 
 
 class MotionParseError(ValueError):
@@ -233,6 +236,7 @@ def main(argv: list[str] | None = None) -> int:
         result = {
             **parser_metadata,
             "parsed_contract": None,
+            "planner_acceptance": None,
             **_empty_motion_check(None),
             "blocking_reasons": parser_metadata["parser_blocking_reasons"],
             "goal_accepted": False,
@@ -286,6 +290,12 @@ def main(argv: list[str] | None = None) -> int:
             current_tcp_pose=current_pose,
         )
     )
+    planner_acceptance = _planner_acceptance(
+        execution_preview=execution_preview,
+        motion=motion,
+        execution={},
+        dry_run=dry_run,
+    )
     if motion.get("cartesian_motion_gateway_status") != STATUS_PASS:
         result = _evidence(
             status=STATUS_BLOCKED,
@@ -293,6 +303,7 @@ def main(argv: list[str] | None = None) -> int:
             execution={},
             parsed_contract=printed_contract,
             parser_metadata=parser_metadata,
+            planner_acceptance=planner_acceptance,
             blocking_reasons=motion.get("blocking_reasons", []),
         )
         print("Final execution evidence:")
@@ -300,7 +311,14 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if dry_run:
-        result = _evidence(status=STATUS_PASS, motion=motion, execution={}, parsed_contract=printed_contract, parser_metadata=parser_metadata)
+        result = _evidence(
+            status=STATUS_PASS,
+            motion=motion,
+            execution={},
+            parsed_contract=printed_contract,
+            parser_metadata=parser_metadata,
+            planner_acceptance=planner_acceptance,
+        )
         print("Final execution evidence:")
         print(_json(result))
         return 0
@@ -314,6 +332,7 @@ def main(argv: list[str] | None = None) -> int:
                 execution={},
                 parsed_contract=printed_contract,
                 parser_metadata=parser_metadata,
+                planner_acceptance=planner_acceptance,
                 blocking_reasons=["E_CONFIRMATION_MISMATCH"],
             )
             print("Final execution evidence:")
@@ -328,6 +347,7 @@ def main(argv: list[str] | None = None) -> int:
             execution={},
             parsed_contract=printed_contract,
             parser_metadata=parser_metadata,
+            planner_acceptance=planner_acceptance,
             blocking_reasons=prereq_blockers,
         )
         print("Final execution evidence:")
@@ -352,7 +372,20 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     status = STATUS_PASS if execution.get("real_robot_motion_executed") is True else STATUS_BLOCKED
-    result = _evidence(status=status, motion=motion, execution=execution, parsed_contract=printed_contract, parser_metadata=parser_metadata)
+    planner_acceptance = _planner_acceptance(
+        execution_preview=execution_preview,
+        motion=motion,
+        execution=execution,
+        dry_run=dry_run,
+    )
+    result = _evidence(
+        status=status,
+        motion=motion,
+        execution=execution,
+        parsed_contract=printed_contract,
+        parser_metadata=parser_metadata,
+        planner_acceptance=planner_acceptance,
+    )
     print("Final execution evidence:")
     print(_json(result))
     return 0 if status == STATUS_PASS else 2
@@ -723,6 +756,141 @@ def _build_gateway_config(
     }
 
 
+def _planner_acceptance(
+    *,
+    execution_preview: dict[str, Any],
+    motion: dict[str, Any],
+    execution: dict[str, Any],
+    dry_run: bool,
+) -> dict[str, Any]:
+    requested_delta = execution_preview.get("delta_m")
+    requested_distance = _optional_number(execution_preview.get("distance_m"))
+    gateway_distance = _optional_number(motion.get("translation_distance_m"))
+    moveit_result = _moveit_result_from(motion, execution)
+    trajectory_metrics = _trajectory_metrics(moveit_result)
+
+    trajectory_sent = (
+        execution.get("trajectory_sent") is True
+        or moveit_result.get("trajectory_sent") is True
+        or motion.get("trajectory_sent") is True
+    )
+    execute_called = (
+        execution.get("moveit_execute_called") is True
+        or moveit_result.get("moveit_execute_called") is True
+        or motion.get("moveit_execute_called") is True
+    )
+    execution_allowed = (
+        not dry_run
+        and execution.get("trajectory_send_allowed") is True
+        and execution.get("real_robot_motion_executed") is True
+    )
+    distance_matches = (
+        requested_distance is not None
+        and gateway_distance is not None
+        and abs(requested_distance - gateway_distance) <= EPS
+    )
+    within_safety_limit = (
+        requested_distance is not None
+        and requested_distance <= float(execution_preview.get("hard_safety_limit_m", HARD_SAFETY_LIMIT_M)) + EPS
+    )
+
+    blocking_reasons: list[str] = []
+    warnings: list[str] = []
+    if motion.get("cartesian_motion_gateway_status") != STATUS_PASS:
+        blocking_reasons.extend(_string_list(motion.get("blocking_reasons")))
+    if not distance_matches:
+        blocking_reasons.append("E_PLANNER_REQUEST_DISTANCE_MISMATCH")
+    if not within_safety_limit:
+        blocking_reasons.append("E_PLANNER_REQUEST_EXCEEDS_HARD_LIMIT")
+    if not dry_run and execution_allowed:
+        blocking_reasons.append("E_PLANNER_ACCEPTANCE_NOT_PLAN_ONLY")
+    if trajectory_sent:
+        blocking_reasons.append("E_PLANNER_ACCEPTANCE_TRAJECTORY_SENT")
+    if execute_called:
+        blocking_reasons.append("E_PLANNER_ACCEPTANCE_EXECUTE_CALLED")
+
+    max_joint_delta = trajectory_metrics["max_joint_delta_rad"]
+    if (
+        max_joint_delta is not None
+        and requested_distance is not None
+        and requested_distance <= HARD_SAFETY_LIMIT_M + EPS
+        and max_joint_delta > SUSPICIOUS_TINY_MOTION_JOINT_DELTA_RAD
+    ):
+        warnings.append("W_SUSPICIOUS_JOINT_DELTA_FOR_TINY_CARTESIAN_MOTION")
+
+    blocking_reasons = _unique(blocking_reasons)
+    warnings = _unique(warnings)
+    reasonableness_check = STATUS_BLOCKED if blocking_reasons else STATUS_WARNING if warnings else STATUS_PASS
+    status = STATUS_BLOCKED if blocking_reasons else STATUS_WARNING if warnings else STATUS_PASS
+    return {
+        "status": status,
+        "plan_only": dry_run and not execution_allowed,
+        "execution_allowed": execution_allowed,
+        "trajectory_sent": trajectory_sent,
+        "execute_trajectory_called": execute_called,
+        "requested_delta_m": requested_delta if _vector3(requested_delta) else None,
+        "requested_distance_m": requested_distance,
+        "planned_goal_frame": motion.get("frame") or execution_preview.get("frame"),
+        "planned_waypoint_count": trajectory_metrics["planned_waypoint_count"],
+        "estimated_cartesian_path_length_m": trajectory_metrics["estimated_cartesian_path_length_m"],
+        "max_joint_delta_rad": max_joint_delta,
+        "orientation_change_rad": trajectory_metrics["orientation_change_rad"],
+        "reasonableness_check": reasonableness_check,
+        "blocking_reasons": blocking_reasons,
+        "warnings": warnings,
+    }
+
+
+def _moveit_result_from(motion: dict[str, Any], execution: dict[str, Any]) -> dict[str, Any]:
+    if isinstance(execution.get("moveit_pose_executor_result"), dict):
+        return execution["moveit_pose_executor_result"]
+    if isinstance(motion.get("moveit_pose_executor_result"), dict):
+        return motion["moveit_pose_executor_result"]
+    return {}
+
+
+def _trajectory_metrics(moveit_result: dict[str, Any]) -> dict[str, Any]:
+    waypoint_count = moveit_result.get("trajectory_point_count")
+    waypoint_count = int(waypoint_count) if isinstance(waypoint_count, int) and not isinstance(waypoint_count, bool) else None
+    joint_points = _joint_trajectory_points(moveit_result)
+    max_joint_delta = _max_joint_delta(joint_points)
+    if waypoint_count is None and joint_points:
+        waypoint_count = len(joint_points)
+    return {
+        "planned_waypoint_count": waypoint_count,
+        "estimated_cartesian_path_length_m": _optional_number(moveit_result.get("estimated_cartesian_path_length_m")),
+        "max_joint_delta_rad": max_joint_delta,
+        "orientation_change_rad": _optional_number(moveit_result.get("orientation_change_rad")),
+    }
+
+
+def _joint_trajectory_points(moveit_result: dict[str, Any]) -> list[list[float]]:
+    raw_points = moveit_result.get("joint_trajectory_points") or moveit_result.get("planned_joint_positions")
+    if not isinstance(raw_points, list):
+        return []
+    points: list[list[float]] = []
+    for raw in raw_points:
+        positions = raw.get("positions") if isinstance(raw, dict) else raw
+        if not isinstance(positions, list) or not positions:
+            continue
+        values = [_optional_number(value) for value in positions]
+        if any(value is None for value in values):
+            continue
+        points.append([float(value) for value in values if value is not None])
+    return points
+
+
+def _max_joint_delta(points: list[list[float]]) -> float | None:
+    if len(points) < 2:
+        return None
+    max_delta = 0.0
+    for left, right in zip(points, points[1:]):
+        if len(left) != len(right):
+            continue
+        max_delta = max(max_delta, max(abs(float(b) - float(a)) for a, b in zip(left, right)))
+    return round(max_delta, 6)
+
+
 def _evidence(
     *,
     status: str,
@@ -730,6 +898,7 @@ def _evidence(
     execution: dict[str, Any],
     parsed_contract: dict[str, Any],
     parser_metadata: dict[str, Any],
+    planner_acceptance: dict[str, Any] | None = None,
     blocking_reasons: list[str] | None = None,
 ) -> dict[str, Any]:
     moveit = execution.get("moveit_pose_executor_result") if isinstance(execution.get("moveit_pose_executor_result"), dict) else {}
@@ -738,6 +907,7 @@ def _evidence(
         **parser_metadata,
         "parsed_contract": parsed_contract,
         "execution_preview": parsed_contract.get("execution_preview"),
+        "planner_acceptance": planner_acceptance,
         "cartesian_motion_gateway_status": motion.get("cartesian_motion_gateway_status"),
         "cartesian_motion_execution_status": execution.get("cartesian_motion_execution_status"),
         "goal_accepted": moveit.get("goal_accepted", False),
@@ -760,6 +930,7 @@ def _blocked_result(reason: str, parsed_contract: dict[str, Any], parser_metadat
         **parser_metadata,
         "parsed_contract": parsed_contract,
         "execution_preview": parsed_contract.get("execution_preview"),
+        "planner_acceptance": None,
         **_empty_motion_check(parsed_contract),
         "goal_accepted": False,
         "execute_accepted": False,
@@ -832,6 +1003,13 @@ def _env_float(name: str) -> float | None:
         number = float(value)
     except ValueError:
         return None
+    return number if math.isfinite(number) else None
+
+
+def _optional_number(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
     return number if math.isfinite(number) else None
 
 

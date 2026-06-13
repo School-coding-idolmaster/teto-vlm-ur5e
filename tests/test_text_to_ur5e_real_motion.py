@@ -149,6 +149,17 @@ def test_manual_qwen_path_reads_stdin_and_preserves_text(monkeypatch, capsys):
         "manual_confirmation_required": True,
         "preview_status": "PASS",
     }
+    planner = evidence["planner_acceptance"]
+    assert planner["status"] == "PASS"
+    assert planner["requested_distance_m"] == 0.005
+    assert planner["requested_delta_m"] == [0.0, 0.0, 0.005]
+    assert planner["plan_only"] is True
+    assert planner["execution_allowed"] is False
+    assert planner["trajectory_sent"] is False
+    assert planner["execute_trajectory_called"] is False
+    assert planner["planned_goal_frame"] == "base_link"
+    assert planner["reasonableness_check"] == "PASS"
+    assert evidence["real_robot_motion_executed"] is False
 
 
 def test_manual_qwen_down_command_prints_negative_z_preview(monkeypatch, capsys):
@@ -169,6 +180,51 @@ def test_manual_qwen_down_command_prints_negative_z_preview(monkeypatch, capsys)
     assert preview["within_safety_limit"] is True
     assert preview["dry_run"] is True
     assert preview["real_robot_motion_requested"] is False
+    planner = evidence["planner_acceptance"]
+    assert planner["status"] == "PASS"
+    assert planner["requested_delta_m"] == [0.0, 0.0, -0.002]
+    assert planner["requested_distance_m"] == 0.002
+    assert planner["plan_only"] is True
+    assert planner["execution_allowed"] is False
+    assert planner["trajectory_sent"] is False
+    assert planner["execute_trajectory_called"] is False
+
+
+def test_suspicious_mocked_joint_trajectory_is_exposed_in_planner_acceptance(monkeypatch, capsys):
+    real_gateway = cli.evaluate_cartesian_motion_gateway
+
+    def fake_gateway(request):
+        result = real_gateway(request)
+        result["moveit_pose_executor_result"] = {
+            "trajectory_point_count": 2,
+            "joint_trajectory_points": [
+                {"positions": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]},
+                {"positions": [0.0, 1.25, 0.0, 0.0, 0.0, 0.0]},
+            ],
+            "trajectory_sent": False,
+            "moveit_execute_called": False,
+        }
+        return result
+
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
+    monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_success)
+    monkeypatch.setattr(cli, "evaluate_cartesian_motion_gateway", fake_gateway)
+    monkeypatch.setattr("builtins.input", lambda _prompt: "raise the tcp by 5 millimeters")
+
+    exit_code = cli.main(["--dry-run"])
+
+    evidence = _final_evidence(capsys.readouterr().out)
+    planner = evidence["planner_acceptance"]
+    assert exit_code == 0
+    assert planner["status"] == "WARNING"
+    assert planner["reasonableness_check"] == "WARNING"
+    assert planner["planned_waypoint_count"] == 2
+    assert planner["max_joint_delta_rad"] == 1.25
+    assert "W_SUSPICIOUS_JOINT_DELTA_FOR_TINY_CARTESIAN_MOTION" in planner["warnings"]
+    assert planner["execution_allowed"] is False
+    assert planner["trajectory_sent"] is False
+    assert planner["execute_trajectory_called"] is False
+    assert evidence["real_robot_motion_executed"] is False
 
 
 def test_unsafe_qwen_distance_blocks_before_execution_preview(monkeypatch, capsys):
@@ -182,6 +238,7 @@ def test_unsafe_qwen_distance_blocks_before_execution_preview(monkeypatch, capsy
     assert exit_code == 2
     assert evidence["final_status"] != "PASS"
     assert evidence.get("execution_preview") is None
+    assert evidence["planner_acceptance"] is None
     assert "E_EXCEEDS_HARD_SAFETY_LIMIT" in evidence["blocking_reasons"]
     assert evidence["real_robot_motion_executed"] is False
 
