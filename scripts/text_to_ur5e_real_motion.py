@@ -50,6 +50,7 @@ DEFAULT_MOVEIT_PLANNING_FRAME = DEFAULT_TCP_POSE_BASE_FRAME
 DEFAULT_MOVEIT_END_EFFECTOR_LINK = DEFAULT_TCP_POSE_TOOL_FRAME
 DEFAULT_SAFETY_POLICY_NAME = "lab_directional_step_motion_v1"
 DEFAULT_SAFETY_POLICY_SOURCE = "cli_defaults"
+DEFAULT_MOTION_PERMISSION_ENVELOPE_VERSION = "teto_v3_0_9_expanded_decomposed_contract_preview"
 EPS = 1e-9
 CONFIRMATION_REPLY = "y"
 BASE_LINK_DIRECTION_MAPPING = {
@@ -277,10 +278,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--warn-path-length-ratio", type=float, default=DEFAULT_WARN_PATH_LENGTH_RATIO)
     parser.add_argument("--enable-planner-risk-blocking", action="store_true")
     parser.add_argument("--enable-long-step-decomposition", action="store_true")
+    parser.add_argument("--motion-permission-envelope-version", default=DEFAULT_MOTION_PERMISSION_ENVELOPE_VERSION)
+    parser.add_argument("--max-one-shot-distance-m", type=float, default=DEFAULT_REAL_MAX_DISTANCE_M)
     parser.add_argument("--long-step-threshold-m", type=float, default=0.05)
-    parser.add_argument("--max-substep-distance-m", type=float, default=0.02)
+    parser.add_argument("--max-substep-distance-m", "--max-decomposed-substep-distance-m", type=float, default=0.02)
     parser.add_argument("--min-final-substep-distance-m", type=float, default=0.001)
-    parser.add_argument("--long-motion-total-limit-m", type=float, default=0.20)
+    parser.add_argument("--long-motion-total-limit-m", "--max-decomposed-total-distance-m", type=float, default=0.20)
     parser.add_argument("--substep-execution-mode", choices=["contract_only"], default="contract_only")
     parser.add_argument("--speed-scale", type=float, default=0.10)
     parser.add_argument("--acc-scale", type=float, default=0.10)
@@ -1405,13 +1408,22 @@ def _safety_policy_from_args(args: argparse.Namespace) -> dict[str, Any]:
     configured_position_tolerance = _optional_number(getattr(args, "position_tolerance_m", None))
     orientation_tolerance = _optional_number(getattr(args, "orientation_tolerance_rad", None))
     max_step_distance = configured_max if configured_max is not None else DEFAULT_REAL_MAX_DISTANCE_M
+    hard_safety_limit = hard_limit if hard_limit is not None else DEFAULT_REAL_HARD_SAFETY_LIMIT_M
+    configured_one_shot = _optional_number(getattr(args, "max_one_shot_distance_m", None))
+    max_one_shot_distance = min(
+        configured_one_shot if configured_one_shot is not None else max_step_distance,
+        max_step_distance,
+        hard_safety_limit,
+    )
+    max_decomposed_substep = _optional_number(getattr(args, "max_substep_distance_m", None)) or 0.02
+    max_decomposed_total = _optional_number(getattr(args, "long_motion_total_limit_m", None)) or 0.20
     return {
         "safety_policy_name": str(getattr(args, "safety_policy_name", None) or DEFAULT_SAFETY_POLICY_NAME),
         "safety_policy_source": DEFAULT_SAFETY_POLICY_SOURCE,
         "configured_max_distance_m": max_step_distance,
         "max_step_distance_m": max_step_distance,
         "max_axis_step_m": max_axis_step if max_axis_step is not None else DEFAULT_MAX_AXIS_STEP_M,
-        "hard_safety_limit_m": hard_limit if hard_limit is not None else DEFAULT_REAL_HARD_SAFETY_LIMIT_M,
+        "hard_safety_limit_m": hard_safety_limit,
         "session_radius_limit_m": session_radius_limit,
         "configured_position_tolerance_m": (
             configured_position_tolerance
@@ -1424,14 +1436,19 @@ def _safety_policy_from_args(args: argparse.Namespace) -> dict[str, Any]:
             else DEFAULT_REAL_ORIENTATION_TOLERANCE_RAD
         ),
         "enable_long_step_decomposition": bool(getattr(args, "enable_long_step_decomposition", False)),
-        "long_step_policy_name": "lab_long_step_decomposition_v1",
-        "long_step_threshold_m": _optional_number(getattr(args, "long_step_threshold_m", None)) or 0.05,
-        "max_substep_distance_m": _optional_number(getattr(args, "max_substep_distance_m", None)) or 0.02,
-        "min_final_substep_distance_m": _optional_number(getattr(args, "min_final_substep_distance_m", None)) or 0.001,
-        "long_motion_total_limit_m": _optional_number(getattr(args, "long_motion_total_limit_m", None)) or 0.20,
-        "hard_single_step_safety_limit_m": (
-            hard_limit if hard_limit is not None else DEFAULT_REAL_HARD_SAFETY_LIMIT_M
+        "motion_permission_envelope_version": str(
+            getattr(args, "motion_permission_envelope_version", None)
+            or DEFAULT_MOTION_PERMISSION_ENVELOPE_VERSION
         ),
+        "long_step_policy_name": "lab_long_step_decomposition_v1",
+        "max_one_shot_distance_m": max_one_shot_distance,
+        "long_step_threshold_m": _optional_number(getattr(args, "long_step_threshold_m", None)) or 0.05,
+        "max_substep_distance_m": max_decomposed_substep,
+        "max_decomposed_substep_distance_m": max_decomposed_substep,
+        "min_final_substep_distance_m": _optional_number(getattr(args, "min_final_substep_distance_m", None)) or 0.001,
+        "long_motion_total_limit_m": max_decomposed_total,
+        "max_decomposed_total_distance_m": max_decomposed_total,
+        "hard_single_step_safety_limit_m": hard_safety_limit,
         "substep_execution_mode": str(getattr(args, "substep_execution_mode", None) or "contract_only"),
     }
 
@@ -1583,11 +1600,15 @@ def _build_gateway_config(
         "small_motion_tolerance_policy": tolerance["small_motion_tolerance_policy"],
         **planner_risk_policy,
         "enable_long_step_decomposition": safety_policy["enable_long_step_decomposition"],
+        "motion_permission_envelope_version": safety_policy["motion_permission_envelope_version"],
         "long_step_policy_name": safety_policy["long_step_policy_name"],
+        "max_one_shot_distance_m": safety_policy["max_one_shot_distance_m"],
         "long_step_threshold_m": safety_policy["long_step_threshold_m"],
         "max_substep_distance_m": safety_policy["max_substep_distance_m"],
+        "max_decomposed_substep_distance_m": safety_policy["max_decomposed_substep_distance_m"],
         "min_final_substep_distance_m": safety_policy["min_final_substep_distance_m"],
         "long_motion_total_limit_m": safety_policy["long_motion_total_limit_m"],
+        "max_decomposed_total_distance_m": safety_policy["max_decomposed_total_distance_m"],
         "hard_single_step_safety_limit_m": safety_policy["hard_single_step_safety_limit_m"],
         "substep_execution_mode": safety_policy["substep_execution_mode"],
         "max_speed_scale": min(float(speed_scale), 0.10),
@@ -1811,13 +1832,18 @@ def _planner_acceptance(
         "hard_safety_limit_m": hard_safety_limit,
         "session_radius_limit_m": motion.get("session_radius_limit_m"),
         "motion_distance_regime": motion.get("motion_distance_regime"),
+        "motion_permission_envelope_version": motion.get("motion_permission_envelope_version"),
         "long_step_decomposition_enabled": motion.get("long_step_decomposition_enabled"),
+        "decomposition_enabled": motion.get("decomposition_enabled"),
         "long_step_policy_name": motion.get("long_step_policy_name"),
         "requested_total_distance_m": motion.get("requested_total_distance_m"),
         "one_shot_distance_limit_m": motion.get("one_shot_distance_limit_m"),
+        "max_one_shot_distance_m": motion.get("max_one_shot_distance_m"),
         "hard_single_step_safety_limit_m": motion.get("hard_single_step_safety_limit_m"),
         "long_motion_total_limit_m": motion.get("long_motion_total_limit_m"),
+        "max_decomposed_total_distance_m": motion.get("max_decomposed_total_distance_m"),
         "max_substep_distance_m": motion.get("max_substep_distance_m"),
+        "max_decomposed_substep_distance_m": motion.get("max_decomposed_substep_distance_m"),
         "min_final_substep_distance_m": motion.get("min_final_substep_distance_m"),
         "planned_execution_style": motion.get("planned_execution_style"),
         "substep_execution_mode": motion.get("substep_execution_mode"),
@@ -1825,6 +1851,9 @@ def _planner_acceptance(
         "planned_substep_count": motion.get("planned_substep_count"),
         "planned_substep_distances_m": motion.get("planned_substep_distances_m"),
         "planned_substep_vectors_m": motion.get("planned_substep_vectors_m"),
+        "substep_count": motion.get("substep_count"),
+        "decomposed_substeps_m": motion.get("decomposed_substeps_m"),
+        "decomposed_total_distance_m": motion.get("decomposed_total_distance_m"),
         "decomposition_remainder_m": motion.get("decomposition_remainder_m"),
         "decomposition_status": motion.get("decomposition_status"),
         "decomposition_blocking_reason": motion.get("decomposition_blocking_reason"),
@@ -2398,13 +2427,18 @@ def _evidence(
         "hard_safety_limit_m": planner_acceptance.get("hard_safety_limit_m") if isinstance(planner_acceptance, dict) else None,
         "session_radius_limit_m": planner_acceptance.get("session_radius_limit_m") if isinstance(planner_acceptance, dict) else None,
         "motion_distance_regime": planner_acceptance.get("motion_distance_regime") if isinstance(planner_acceptance, dict) else None,
+        "motion_permission_envelope_version": planner_acceptance.get("motion_permission_envelope_version") if isinstance(planner_acceptance, dict) else None,
         "long_step_decomposition_enabled": planner_acceptance.get("long_step_decomposition_enabled") if isinstance(planner_acceptance, dict) else None,
+        "decomposition_enabled": planner_acceptance.get("decomposition_enabled") if isinstance(planner_acceptance, dict) else None,
         "long_step_policy_name": planner_acceptance.get("long_step_policy_name") if isinstance(planner_acceptance, dict) else None,
         "requested_total_distance_m": planner_acceptance.get("requested_total_distance_m") if isinstance(planner_acceptance, dict) else None,
         "one_shot_distance_limit_m": planner_acceptance.get("one_shot_distance_limit_m") if isinstance(planner_acceptance, dict) else None,
+        "max_one_shot_distance_m": planner_acceptance.get("max_one_shot_distance_m") if isinstance(planner_acceptance, dict) else None,
         "hard_single_step_safety_limit_m": planner_acceptance.get("hard_single_step_safety_limit_m") if isinstance(planner_acceptance, dict) else None,
         "long_motion_total_limit_m": planner_acceptance.get("long_motion_total_limit_m") if isinstance(planner_acceptance, dict) else None,
+        "max_decomposed_total_distance_m": planner_acceptance.get("max_decomposed_total_distance_m") if isinstance(planner_acceptance, dict) else None,
         "max_substep_distance_m": planner_acceptance.get("max_substep_distance_m") if isinstance(planner_acceptance, dict) else None,
+        "max_decomposed_substep_distance_m": planner_acceptance.get("max_decomposed_substep_distance_m") if isinstance(planner_acceptance, dict) else None,
         "min_final_substep_distance_m": planner_acceptance.get("min_final_substep_distance_m") if isinstance(planner_acceptance, dict) else None,
         "planned_execution_style": planner_acceptance.get("planned_execution_style") if isinstance(planner_acceptance, dict) else None,
         "substep_execution_mode": planner_acceptance.get("substep_execution_mode") if isinstance(planner_acceptance, dict) else None,
@@ -2412,6 +2446,9 @@ def _evidence(
         "planned_substep_count": planner_acceptance.get("planned_substep_count") if isinstance(planner_acceptance, dict) else None,
         "planned_substep_distances_m": planner_acceptance.get("planned_substep_distances_m") if isinstance(planner_acceptance, dict) else None,
         "planned_substep_vectors_m": planner_acceptance.get("planned_substep_vectors_m") if isinstance(planner_acceptance, dict) else None,
+        "substep_count": planner_acceptance.get("substep_count") if isinstance(planner_acceptance, dict) else None,
+        "decomposed_substeps_m": planner_acceptance.get("decomposed_substeps_m") if isinstance(planner_acceptance, dict) else None,
+        "decomposed_total_distance_m": planner_acceptance.get("decomposed_total_distance_m") if isinstance(planner_acceptance, dict) else None,
         "decomposition_remainder_m": planner_acceptance.get("decomposition_remainder_m") if isinstance(planner_acceptance, dict) else None,
         "decomposition_status": planner_acceptance.get("decomposition_status") if isinstance(planner_acceptance, dict) else None,
         "decomposition_blocking_reason": planner_acceptance.get("decomposition_blocking_reason") if isinstance(planner_acceptance, dict) else None,
@@ -2462,6 +2499,7 @@ def _evidence(
         "orientation_locked": planner_acceptance.get("orientation_locked") if isinstance(planner_acceptance, dict) else None,
         "requested_start_tcp_pose": planner_acceptance.get("requested_start_tcp_pose") if isinstance(planner_acceptance, dict) else None,
         "target_pose": motion.get("target_pose"),
+        "moveit_plan_request": motion.get("moveit_plan_request"),
         "planned_joint_names": planner_acceptance.get("planned_joint_names") if isinstance(planner_acceptance, dict) else None,
         "planned_start_joint_positions": planner_acceptance.get("planned_start_joint_positions") if isinstance(planner_acceptance, dict) else None,
         "planned_final_joint_positions": planner_acceptance.get("planned_final_joint_positions") if isinstance(planner_acceptance, dict) else None,

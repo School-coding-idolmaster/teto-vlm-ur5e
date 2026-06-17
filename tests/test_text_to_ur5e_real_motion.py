@@ -1005,16 +1005,69 @@ def test_ten_cm_accepts_as_decomposed_contract_when_enabled(monkeypatch, capsys)
     assert exit_code == 0
     assert evidence["final_status"] == "PASS"
     assert evidence["motion_distance_regime"] == "long_step"
+    assert evidence["motion_permission_envelope_version"] == "teto_v3_0_9_expanded_decomposed_contract_preview"
     assert evidence["planned_execution_style"] == "decomposed_autoregressive_contract"
     assert evidence["planned_substep_count"] == 5
     assert evidence["planned_substep_distances_m"] == [0.02, 0.02, 0.02, 0.02, 0.02]
     assert evidence["planned_substep_vectors_m"] == [[0.0, 0.0, 0.02]] * 5
+    assert evidence["decomposition_enabled"] is True
+    assert evidence["max_one_shot_distance_m"] == 0.05
+    assert evidence["max_decomposed_substep_distance_m"] == 0.02
+    assert evidence["max_decomposed_total_distance_m"] == 0.20
+    assert evidence["requested_distance_m"] == 0.10
+    assert evidence["substep_count"] == 5
+    assert evidence["decomposed_substeps_m"] == [[0.0, 0.0, 0.02]] * 5
+    assert evidence["decomposed_total_distance_m"] == 0.10
     assert evidence["decomposition_status"] == "PASS"
     assert evidence["decomposition_does_not_bypass_safety_limits"] is True
     assert evidence["real_substep_execution_enabled"] is False
     assert evidence["substep_execution_mode"] == "contract_only"
     assert evidence["decomposed_motion_allowed"] is True
     assert evidence["target_pose"] is None
+    assert evidence["moveit_plan_request"] is None
+    assert evidence["trajectory_sent"] is False
+    assert evidence["execute_trajectory_called"] is False
+    assert evidence["real_robot_motion_executed"] is False
+
+
+def test_twenty_cm_accepts_as_expanded_decomposed_contract_when_enabled(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
+
+    exit_code = cli.main(
+        [
+            "--parser",
+            "rule",
+            "--enable-long-step-decomposition",
+            "--max-decomposed-total-distance-m",
+            "0.20",
+            "--cmd",
+            "move up 200 mm",
+        ]
+    )
+
+    evidence = _final_evidence(capsys.readouterr().out)
+    assert exit_code == 0
+    assert evidence["final_status"] == "PASS"
+    assert evidence["motion_permission_envelope_version"] == "teto_v3_0_9_expanded_decomposed_contract_preview"
+    assert evidence["planned_execution_style"] == "decomposed_autoregressive_contract"
+    assert evidence["safety_gate_scope"] == "decomposed_contract"
+    assert evidence["one_shot_distance_check_status"] == "BLOCKED"
+    assert evidence["decomposition_status"] == "PASS"
+    assert evidence["decomposed_motion_allowed"] is True
+    assert evidence["max_one_shot_distance_m"] == 0.05
+    assert evidence["max_decomposed_substep_distance_m"] == 0.02
+    assert evidence["max_decomposed_total_distance_m"] == 0.20
+    assert evidence["requested_distance_m"] == 0.20
+    assert evidence["planned_substep_count"] == 10
+    assert evidence["substep_count"] == 10
+    assert evidence["planned_substep_distances_m"] == [0.02] * 10
+    assert evidence["planned_substep_vectors_m"] == [[0.0, 0.0, 0.02]] * 10
+    assert evidence["decomposed_substeps_m"] == [[0.0, 0.0, 0.02]] * 10
+    assert evidence["decomposed_total_distance_m"] == 0.20
+    assert evidence["substep_execution_mode"] == "contract_only"
+    assert evidence["real_substep_execution_enabled"] is False
+    assert evidence["target_pose"] is None
+    assert evidence["moveit_plan_request"] is None
     assert evidence["trajectory_sent"] is False
     assert evidence["execute_trajectory_called"] is False
     assert evidence["real_robot_motion_executed"] is False

@@ -464,10 +464,22 @@ def test_gateway_can_represent_five_cm_as_decomposed_contract_when_enabled():
     assert result["one_shot_distance_check_status"] == "PASS"
     assert result["decomposition_status"] == "PASS"
     assert result["decomposed_motion_allowed"] is True
+    assert result["motion_permission_envelope_version"] == "teto_v3_0_9_expanded_decomposed_contract_preview"
+    assert result["decomposition_enabled"] is True
+    assert result["max_one_shot_distance_m"] == 0.05
+    assert result["max_decomposed_substep_distance_m"] == 0.02
+    assert result["max_decomposed_total_distance_m"] == 0.20
+    assert result["requested_distance_m"] == 0.05
+    assert result["substep_count"] == 3
+    assert result["decomposed_substeps_m"] == [[0.02, 0.0, 0.0], [0.02, 0.0, 0.0], [0.01, 0.0, 0.0]]
+    assert result["decomposed_total_distance_m"] == 0.05
     assert result["substep_execution_mode"] == "contract_only"
     assert result["real_substep_execution_enabled"] is False
     assert result["target_pose"] is None
     assert result["moveit_plan_request"] is None
+    assert result["execute_trajectory_called"] is False
+    assert result["trajectory_sent"] is False
+    assert result["real_robot_motion_executed"] is False
 
 
 def test_gateway_accepts_ten_cm_as_decomposed_contract_when_enabled():
@@ -488,6 +500,14 @@ def test_gateway_accepts_ten_cm_as_decomposed_contract_when_enabled():
     assert result["planned_substep_count"] == 5
     assert result["planned_substep_distances_m"] == [0.02, 0.02, 0.02, 0.02, 0.02]
     assert result["planned_substep_vectors_m"] == [[0.02, 0.0, 0.0]] * 5
+    assert result["motion_permission_envelope_version"] == "teto_v3_0_9_expanded_decomposed_contract_preview"
+    assert result["max_one_shot_distance_m"] == 0.05
+    assert result["max_decomposed_substep_distance_m"] == 0.02
+    assert result["max_decomposed_total_distance_m"] == 0.20
+    assert result["requested_distance_m"] == 0.10
+    assert result["substep_count"] == 5
+    assert result["decomposed_substeps_m"] == [[0.02, 0.0, 0.0]] * 5
+    assert result["decomposed_total_distance_m"] == 0.10
     assert result["decomposition_status"] == "PASS"
     assert result["decomposition_does_not_bypass_safety_limits"] is True
     assert result["safety_gate_scope"] == "decomposed_contract"
@@ -501,6 +521,44 @@ def test_gateway_accepts_ten_cm_as_decomposed_contract_when_enabled():
     assert result["substep_reobserve_allowed"] is True
     assert result["target_pose"] is None
     assert result["moveit_plan_request"] is None
+    assert result["execute_trajectory_called"] is False
+    assert result["trajectory_sent"] is False
+    assert result["real_robot_motion_executed"] is False
+
+
+def test_gateway_accepts_twenty_cm_as_expanded_decomposed_contract_when_enabled():
+    result = evaluate_cartesian_motion_gateway(
+        CartesianMotionGatewayRequest(
+            requested=True,
+            config=_long_step_config(),
+            command_to_task_result=_task([0.20, 0.0, 0.0]),
+            current_tcp_pose=_pose([0.40, 0.0, 0.30]),
+        )
+    )
+
+    assert result["cartesian_motion_gateway_status"] == "PASS"
+    assert result["planned_execution_style"] == "decomposed_autoregressive_contract"
+    assert result["safety_gate_scope"] == "decomposed_contract"
+    assert result["one_shot_distance_check_status"] == "BLOCKED"
+    assert result["decomposition_status"] == "PASS"
+    assert result["total_long_motion_check_status"] == "PASS"
+    assert result["decomposed_motion_allowed"] is True
+    assert result["max_one_shot_distance_m"] == 0.05
+    assert result["max_decomposed_substep_distance_m"] == 0.02
+    assert result["max_decomposed_total_distance_m"] == 0.20
+    assert result["requested_distance_m"] == 0.20
+    assert result["planned_substep_count"] == 10
+    assert result["substep_count"] == 10
+    assert result["planned_substep_distances_m"] == [0.02] * 10
+    assert result["planned_substep_vectors_m"] == [[0.02, 0.0, 0.0]] * 10
+    assert result["decomposed_substeps_m"] == [[0.02, 0.0, 0.0]] * 10
+    assert result["decomposed_total_distance_m"] == 0.20
+    assert result["substep_execution_mode"] == "contract_only"
+    assert result["real_substep_execution_enabled"] is False
+    assert result["target_pose"] is None
+    assert result["moveit_plan_request"] is None
+    assert result["execute_trajectory_called"] is False
+    assert result["trajectory_sent"] is False
     assert result["real_robot_motion_executed"] is False
 
 
@@ -515,6 +573,23 @@ def test_gateway_blocks_decomposed_contract_when_total_exceeds_long_limit():
     )
 
     assert result["cartesian_motion_gateway_status"] == "BLOCKED"
+    assert result["decomposition_status"] == "BLOCKED"
+    assert result["decomposition_blocking_reason"] == "E_LONG_MOTION_TOTAL_EXCEEDS_LIMIT"
+    assert result["decomposed_motion_allowed"] is False
+
+
+def test_gateway_blocks_decomposed_contract_above_expanded_total_alias():
+    result = evaluate_cartesian_motion_gateway(
+        CartesianMotionGatewayRequest(
+            requested=True,
+            config={**_long_step_config(), "max_decomposed_total_distance_m": 0.20},
+            command_to_task_result=_task([0.21, 0.0, 0.0]),
+            current_tcp_pose=_pose([0.40, 0.0, 0.30]),
+        )
+    )
+
+    assert result["cartesian_motion_gateway_status"] == "BLOCKED"
+    assert result["max_decomposed_total_distance_m"] == 0.20
     assert result["decomposition_status"] == "BLOCKED"
     assert result["decomposition_blocking_reason"] == "E_LONG_MOTION_TOTAL_EXCEEDS_LIMIT"
     assert result["decomposed_motion_allowed"] is False

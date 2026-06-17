@@ -97,6 +97,27 @@ trajectories, and keeps `real_substep_execution_enabled=false` with
 `substep_execution_mode=contract_only`. The feature is offline-testable and
 requires no UR5 connection.
 
+## TETO v3.0.9: Expanded Motion Permission Envelope
+
+TETO v3.0.9 expands only the decomposed contract preview envelope for longer
+relative TCP requests. The one-shot real-motion envelope remains unchanged:
+`max_one_shot_distance_m=0.05` by default, and requests above that limit are
+still blocked as one-shot motions.
+
+When long-step decomposition is enabled, contract-only previews can be accepted
+up to `max_decomposed_total_distance_m=0.20` by default, with each substep
+bounded by `max_decomposed_substep_distance_m=0.02`. The evidence reports the
+motion permission envelope version, one-shot and decomposed limits, requested
+distance, planned execution style, substep count, substep vectors, and
+contract-only execution flags.
+
+This does not enable real multi-step execution. Accepted decomposed contracts
+keep `planned_execution_style=decomposed_autoregressive_contract`,
+`substep_execution_mode=contract_only`,
+`real_substep_execution_enabled=false`, `execute_trajectory_called=false`,
+`trajectory_sent=false`, and `real_robot_motion_executed=false`. They do not
+create a one-shot target pose or MoveIt plan request for the full long motion.
+
 ## Project Structure
 
 ```text
