@@ -162,6 +162,9 @@ def evaluate_cartesian_motion_gateway(request: CartesianMotionGatewayRequest | N
     axis_delta_within_limit = None
     session_radius_within_limit = None
     workspace_envelope_within_limit = None
+    target_orientation_source = None
+    orientation_mode = None
+    orientation_locked = None
 
     blocking_reasons: list[str] = []
     warnings = _string_list(config.get("warnings")) + _string_list(task.get("warnings"))
@@ -195,6 +198,9 @@ def evaluate_cartesian_motion_gateway(request: CartesianMotionGatewayRequest | N
             "position_m": target_position,
             "orientation_xyzw": list(current_pose["orientation_xyzw"]),
         }
+        target_orientation_source = "copied_from_current_tcp_pose"
+        orientation_mode = "keep_current_orientation"
+        orientation_locked = True
         delta_from_current_tcp_m = [round(float(right) - float(left), 6) for left, right in zip(current_pose["position_m"], target_position)]
         if previous_verified_pose is not None and _valid_pose(previous_verified_pose):
             delta_from_previous_verified_tcp_m = [
@@ -255,7 +261,11 @@ def evaluate_cartesian_motion_gateway(request: CartesianMotionGatewayRequest | N
         "first_move_bootstrap_used": first_move_bootstrap_used,
         "previous_verified_tcp_pose": previous_verified_pose,
         "current_measured_tcp_pose": current_pose,
+        "requested_start_tcp_pose": current_pose,
         "requested_target_tcp_pose": requested_target_pose,
+        "target_orientation_source": target_orientation_source,
+        "orientation_mode": orientation_mode,
+        "orientation_locked": orientation_locked,
         "delta_from_current_tcp_m": _round_vector(delta_from_current_tcp_m),
         "delta_from_previous_verified_tcp_m": _round_vector(delta_from_previous_verified_tcp_m),
         "max_step_distance_m": max_step_distance_m,
@@ -562,7 +572,12 @@ def _evaluate_real_moveit_execution(
         requested=True,
         target_pose=motion.get("target_pose"),
         current_tcp_pose=motion.get("current_tcp_pose"),
-        config={**config, "current_tcp_pose": motion.get("current_tcp_pose")},
+        config={
+            **config,
+            "current_tcp_pose": motion.get("current_tcp_pose"),
+            "target_orientation_source": motion.get("target_orientation_source"),
+            "orientation_mode": motion.get("orientation_mode"),
+        },
         execute=execute_requested,
         manual_confirmation_result=confirmation,
         robot_state_result=state,
@@ -612,7 +627,25 @@ def _moveit_plan_request(task_id: str, frame: str, target_pose: Dict[str, Any] |
         "planning_group": _string(config.get("planning_group")) or "ur_manipulator",
         "planning_frame": frame,
         "end_effector_frame": _string(config.get("end_effector_frame")) or "tool0",
+        "planning_pipeline_id": _string(config.get("pipeline_id")),
+        "planner_id": _string(config.get("planner_id")),
+        "planner_mode": "joint_space_pose_goal",
+        "moveit_goal_type": "move_group_pose_goal_constraints",
+        "joint_space_pose_goal_used": True,
+        "cartesian_path_used": False,
+        "cartesian_path_fraction": None,
+        "joint_space_fallback_used": False,
+        "joint_space_fallback_reason": None,
+        "start_state_source": "implicit_planning_scene",
+        "start_state_is_diff": True,
+        "explicit_start_state_provided": False,
+        "current_joint_state_available": False,
+        "current_joint_state_source": None,
+        "current_joint_state_age_s": None,
         "target_pose": target_pose,
+        "target_orientation_source": _string(config.get("target_orientation_source")) or "copied_from_current_tcp_pose",
+        "orientation_mode": _string(config.get("orientation_mode")) or "keep_current_orientation",
+        "orientation_locked": True,
         "requested_distance_m": _optional_float(config.get("requested_distance_m")),
         "configured_max_distance_m": _optional_float(config.get("configured_max_distance_m"))
         or _optional_float(config.get("max_translation_m")),

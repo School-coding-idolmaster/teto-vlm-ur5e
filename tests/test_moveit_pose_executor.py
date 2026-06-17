@@ -66,6 +66,87 @@ def test_plan_success_comes_from_move_group_action_result(monkeypatch):
     assert result["trajectory_point_count"] == 8
 
 
+def test_plan_records_planner_start_state_and_joint_delta_audit(monkeypatch):
+    def fake_plan(_target_pose, _config):
+        return {
+            "action_call_attempted": True,
+            "action_server_available": True,
+            "goal_accepted": True,
+            "success": True,
+            "error_code": 1,
+            "error_code_name": "SUCCESS",
+            "planning_time_s": 0.42,
+            "trajectory_point_count": 2,
+            "planned_joint_names": [
+                "shoulder_pan_joint",
+                "shoulder_lift_joint",
+                "elbow_joint",
+                "wrist_1_joint",
+                "wrist_2_joint",
+                "wrist_3_joint",
+            ],
+            "joint_trajectory_points": [
+                {"positions": [0.0, -1.0, 1.2, 0.1, 0.2, 0.3]},
+                {"positions": [0.01, -0.98, 1.23, 0.35, -1.05, 0.28]},
+            ],
+        }
+
+    monkeypatch.setattr("src.moveit_pose_executor._plan_with_move_group_action", fake_plan)
+
+    result = evaluate_moveit_pose_plan(
+        MoveItPoseExecutorRequest(
+            requested=True,
+            target_pose=_pose([0.40, 0.0, 0.32]),
+            current_tcp_pose=_pose([0.40, 0.0, 0.30]),
+            config={**_base_config(), "pipeline_id": "move_group", "planner_id": "ur_manipulator[RRTConnectkConfigDefault]"},
+        )
+    )
+
+    assert result["moveit_pose_executor_status"] == "PASS"
+    assert result["planner_mode"] == "joint_space_pose_goal"
+    assert result["planning_pipeline_id"] == "move_group"
+    assert result["planner_id"] == "ur_manipulator[RRTConnectkConfigDefault]"
+    assert result["moveit_goal_type"] == "move_group_pose_goal_constraints"
+    assert result["joint_space_pose_goal_used"] is True
+    assert result["cartesian_path_used"] is False
+    assert result["cartesian_path_fraction"] is None
+    assert result["joint_space_fallback_used"] is False
+    assert result["start_state_source"] == "implicit_planning_scene"
+    assert result["start_state_is_diff"] is True
+    assert result["explicit_start_state_provided"] is False
+    assert result["current_joint_state_available"] is False
+    assert result["target_orientation_source"] == "copied_from_current_tcp_pose"
+    assert result["orientation_mode"] == "keep_current_orientation"
+    assert result["orientation_locked"] is True
+    assert result["planned_joint_names"] == [
+        "shoulder_pan_joint",
+        "shoulder_lift_joint",
+        "elbow_joint",
+        "wrist_1_joint",
+        "wrist_2_joint",
+        "wrist_3_joint",
+    ]
+    assert result["planned_start_joint_positions"] == [0.0, -1.0, 1.2, 0.1, 0.2, 0.3]
+    assert result["planned_final_joint_positions"] == [0.01, -0.98, 1.23, 0.35, -1.05, 0.28]
+    assert result["per_joint_delta_rad"]["wrist_1_joint"] == 0.25
+    assert result["per_joint_delta_rad"]["wrist_2_joint"] == -1.25
+    assert result["max_joint_delta_rad"] == 1.25
+    assert result["wrist_joint_names"] == ["wrist_1_joint", "wrist_2_joint", "wrist_3_joint"]
+    assert result["wrist_joint_delta_rad"] == {
+        "wrist_1_joint": 0.25,
+        "wrist_2_joint": -1.25,
+        "wrist_3_joint": -0.02,
+    }
+    assert result["max_wrist_joint_delta_rad"] == 1.25
+    assert result["joint_delta_audit_status"] == "AVAILABLE"
+    assert result["joint_wrap_suspected"] is False
+    assert result["planned_waypoint_count"] == 2
+    assert result["planned_joint_path_length_rad"] == 1.58
+    assert result["path_metric_source"] == "joint_trajectory"
+    assert "W_SUSPICIOUS_WRIST_JOINT_DELTA_FOR_CARTESIAN_STEP" in result["planner_audit_warnings"]
+    assert "W_SUSPICIOUS_WRIST_JOINT_DELTA_FOR_CARTESIAN_STEP" not in result["warnings"]
+
+
 def test_plan_allows_exact_relative_max_translation_from_nonzero_tcp_pose(monkeypatch):
     current_position = [-0.153217, 0.315916, 1.046994]
     target_position = [-0.153217, 0.315916, 1.051994]

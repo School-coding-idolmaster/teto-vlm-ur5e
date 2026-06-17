@@ -87,6 +87,31 @@ def test_gateway_allows_exact_relative_max_motion_from_nonzero_tcp_pose():
     assert result["translation_distance_m"] == 0.005
 
 
+def test_gateway_preserves_current_tcp_orientation_in_target_pose():
+    current_pose = {
+        "frame": "base_link",
+        "position_m": [0.40, 0.0, 0.30],
+        "orientation_xyzw": [0.1, 0.2, 0.3, 0.9273618495495703],
+    }
+
+    result = evaluate_cartesian_motion_gateway(
+        CartesianMotionGatewayRequest(
+            requested=True,
+            config=_step_policy_config(),
+            command_to_task_result=_task([0.01, 0.0, 0.0]),
+            current_tcp_pose=current_pose,
+        )
+    )
+
+    assert result["cartesian_motion_gateway_status"] == "PASS"
+    assert result["requested_start_tcp_pose"] == current_pose
+    assert result["requested_target_tcp_pose"]["orientation_xyzw"] == current_pose["orientation_xyzw"]
+    assert result["target_pose"]["orientation_xyzw"] == current_pose["orientation_xyzw"]
+    assert result["target_orientation_source"] == "copied_from_current_tcp_pose"
+    assert result["orientation_mode"] == "keep_current_orientation"
+    assert result["orientation_locked"] is True
+
+
 def test_directional_step_policy_first_move_bootstraps_from_current_tcp_pose():
     result = evaluate_cartesian_motion_gateway(
         CartesianMotionGatewayRequest(

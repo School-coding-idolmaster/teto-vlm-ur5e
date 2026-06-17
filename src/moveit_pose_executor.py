@@ -29,6 +29,11 @@ DEFAULT_WORKSPACE_BOUNDS = {
     "z": [0.0, 2.0],
 }
 ALLOWED_FRAMES = {"base_link"}
+PLANNER_MODE_JOINT_SPACE_POSE_GOAL = "joint_space_pose_goal"
+MOVEIT_GOAL_TYPE_POSE_CONSTRAINTS = "move_group_pose_goal_constraints"
+START_STATE_SOURCE_IMPLICIT_PLANNING_SCENE = "implicit_planning_scene"
+WRIST_JOINT_NAMES = ("wrist_1_joint", "wrist_2_joint", "wrist_3_joint")
+SUSPICIOUS_WRIST_JOINT_DELTA_RAD = 1.0
 
 E_TARGET_POSE_MISSING = "E_TARGET_POSE_MISSING"
 E_INVALID_TARGET_POSE = "E_INVALID_TARGET_POSE"
@@ -100,8 +105,10 @@ def evaluate_moveit_pose_plan(request: MoveItPoseExecutorRequest | None = None) 
         blocking_reasons.append(E_MOVEIT_PLAN_FAILED)
 
     status = STATUS_PASS if not blocking_reasons else STATUS_BLOCKED
+    plan_audit = _plan_audit_result(config=config, validation=validation, api_result=api_result)
     return {
         **_common_result(config=config, target_pose=target_pose, validation=validation),
+        **plan_audit,
         "moveit_pose_plan_requested": True,
         "moveit_pose_execute_requested": False,
         "moveit_pose_executor_status": status,
@@ -187,8 +194,10 @@ def evaluate_moveit_pose_execute(request: MoveItPoseExecutorRequest | None = Non
 
     execute_success = not blocking_reasons and execute_result.get("success") is True
     status = STATUS_PASS if execute_success else STATUS_BLOCKED
+    plan_audit = _plan_audit_result(config=config, validation=validation, api_result=plan_result)
     return {
         **_common_result(config=config, target_pose=target_pose, validation=validation),
+        **plan_audit,
         "moveit_pose_plan_requested": True,
         "moveit_pose_execute_requested": True,
         "moveit_pose_executor_status": status,
@@ -308,6 +317,9 @@ def _validate_request(
         "safety_policy_source": _string(config.get("safety_policy_source")),
         "safety_policy_name": _string(config.get("safety_policy_name")),
         "workspace_check_passed": bool(target_pose and _point_in_workspace(target_pose["position_m"], workspace_bounds)),
+        "requested_start_tcp_pose": current_pose,
+        "requested_target_tcp_pose": target_pose,
+        **_target_orientation_evidence(target_pose=target_pose, current_pose=current_pose, config=config),
         **tolerance,
     }
 
@@ -558,6 +570,8 @@ def _common_result(*, config: Dict[str, Any], target_pose: Dict[str, Any] | None
         "selected_moveit_interface": "ros2_action_clients",
         "move_group_action_name": _string(config.get("move_group_action_name")) or DEFAULT_MOVE_GROUP_ACTION,
         "execute_trajectory_action_name": _string(config.get("execute_trajectory_action_name")) or DEFAULT_EXECUTE_TRAJECTORY_ACTION,
+        **_planner_mode_evidence(config),
+        **_start_state_evidence(config),
         "planning_group": _string(config.get("planning_group")) or DEFAULT_PLANNING_GROUP,
         "planning_frame": target_pose.get("frame") if target_pose else _string(config.get("planning_frame")) or DEFAULT_FRAME,
         "end_effector_link": _string(config.get("end_effector_link")) or _string(config.get("end_effector_frame")) or DEFAULT_END_EFFECTOR_LINK,
@@ -573,6 +587,11 @@ def _common_result(*, config: Dict[str, Any], target_pose: Dict[str, Any] | None
         "small_motion_tolerance_policy": validation.get("small_motion_tolerance_policy"),
         "target_frame": target_pose.get("frame") if target_pose else None,
         "current_tcp_frame": validation.get("current_tcp_frame"),
+        "target_orientation_source": validation.get("target_orientation_source"),
+        "orientation_mode": validation.get("orientation_mode"),
+        "orientation_locked": validation.get("orientation_locked"),
+        "requested_start_tcp_pose": validation.get("requested_start_tcp_pose"),
+        "requested_target_tcp_pose": validation.get("requested_target_tcp_pose"),
         "moveit_end_effector_link": _string(config.get("end_effector_link")) or _string(config.get("end_effector_frame")) or DEFAULT_END_EFFECTOR_LINK,
         "moveit_planning_frame": target_pose.get("frame") if target_pose else _string(config.get("planning_frame")) or DEFAULT_FRAME,
         "moveit_group_name": _string(config.get("planning_group")) or DEFAULT_PLANNING_GROUP,
@@ -588,6 +607,7 @@ def _common_result(*, config: Dict[str, Any], target_pose: Dict[str, Any] | None
         "motion_check_eps": validation.get("motion_check_eps"),
         "workspace_bounds": validation.get("workspace_bounds"),
         "workspace_check_passed": validation.get("workspace_check_passed") is True,
+        **_empty_plan_audit(),
         "plan_success_source": "actual_moveit_action_result",
         "execute_success_source": "actual_execute_trajectory_action_result",
         "target_pose_generated_by_llm": False,
@@ -634,6 +654,168 @@ def _api_blocked(*, plan: bool, config: Dict[str, Any], reason: str, error: str,
         "real_robot_motion_executed": False,
         "blocking_reasons": _unique(validation["blocking_reasons"] + [reason]),
         "warnings": _unique(validation["warnings"] + [error]),
+    }
+
+
+def _planner_mode_evidence(config: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "planner_mode": PLANNER_MODE_JOINT_SPACE_POSE_GOAL,
+        "planning_pipeline_id": _string(config.get("pipeline_id")),
+        "planner_id": _string(config.get("planner_id")),
+        "moveit_goal_type": MOVEIT_GOAL_TYPE_POSE_CONSTRAINTS,
+        "joint_space_pose_goal_used": True,
+        "cartesian_path_used": False,
+        "cartesian_path_fraction": None,
+        "joint_space_fallback_used": False,
+        "joint_space_fallback_reason": None,
+    }
+
+
+def _start_state_evidence(config: Dict[str, Any]) -> Dict[str, Any]:
+    current_joint_state = config.get("current_joint_state")
+    joint_state_available = isinstance(current_joint_state, dict)
+    return {
+        "start_state_source": START_STATE_SOURCE_IMPLICIT_PLANNING_SCENE,
+        "start_state_is_diff": True,
+        "explicit_start_state_provided": False,
+        "current_joint_state_available": joint_state_available,
+        "current_joint_state_source": _string(config.get("current_joint_state_source")) if joint_state_available else None,
+        "current_joint_state_age_s": _optional_float(config.get("current_joint_state_age_s")) if joint_state_available else None,
+    }
+
+
+def _target_orientation_evidence(
+    *,
+    target_pose: Dict[str, Any] | None,
+    current_pose: Dict[str, Any] | None,
+    config: Dict[str, Any],
+) -> Dict[str, Any]:
+    configured_source = _string(config.get("target_orientation_source"))
+    configured_mode = _string(config.get("orientation_mode"))
+    target_orientation = target_pose.get("orientation_xyzw") if isinstance(target_pose, dict) else None
+    current_orientation = current_pose.get("orientation_xyzw") if isinstance(current_pose, dict) else None
+    preserved = _same_quaternion(target_orientation, current_orientation)
+    return {
+        "target_orientation_source": configured_source or ("copied_from_current_tcp_pose" if preserved else None),
+        "orientation_mode": configured_mode or ("keep_current_orientation" if preserved else None),
+        "orientation_locked": preserved,
+    }
+
+
+def _empty_plan_audit() -> Dict[str, Any]:
+    return {
+        "planned_joint_names": None,
+        "planned_start_joint_positions": None,
+        "planned_final_joint_positions": None,
+        "per_joint_delta_rad": None,
+        "max_joint_delta_rad": None,
+        "wrist_joint_names": list(WRIST_JOINT_NAMES),
+        "wrist_joint_delta_rad": None,
+        "max_wrist_joint_delta_rad": None,
+        "joint_wrap_suspected": None,
+        "joint_delta_audit_status": "NOT_AVAILABLE",
+        "joint_delta_audit_reason": "planned_joint_trajectory_not_available",
+        "planned_waypoint_count": None,
+        "planned_joint_path_length_rad": None,
+        "estimated_cartesian_path_length_m": None,
+        "path_length_ratio": None,
+        "path_metric_source": "not_available",
+    }
+
+
+def _plan_audit_result(
+    *,
+    config: Dict[str, Any],
+    validation: Dict[str, Any],
+    api_result: Dict[str, Any],
+) -> Dict[str, Any]:
+    joint_audit = _joint_delta_audit(api_result)
+    path_audit = _path_metric_audit(api_result, validation, joint_audit)
+    warnings = []
+    max_wrist_delta = joint_audit.get("max_wrist_joint_delta_rad")
+    if max_wrist_delta is not None and max_wrist_delta > SUSPICIOUS_WRIST_JOINT_DELTA_RAD + MOTION_LIMIT_EPS:
+        warnings.append("W_SUSPICIOUS_WRIST_JOINT_DELTA_FOR_CARTESIAN_STEP")
+    return {
+        **_planner_mode_evidence(config),
+        **_start_state_evidence(config),
+        **joint_audit,
+        **path_audit,
+        "planner_audit_warnings": warnings,
+    }
+
+
+def _joint_delta_audit(api_result: Dict[str, Any]) -> Dict[str, Any]:
+    names = _joint_trajectory_names(api_result)
+    points = _joint_trajectory_points(api_result)
+    if len(points) < 2:
+        return _empty_plan_audit()
+    start = points[0]
+    final = points[-1]
+    if len(start) != len(final):
+        result = _empty_plan_audit()
+        result["joint_delta_audit_reason"] = "planned_joint_trajectory_point_size_mismatch"
+        return result
+    if names is not None and len(names) != len(start):
+        names = None
+    deltas = [round(float(right) - float(left), 6) for left, right in zip(start, final)]
+    max_delta = round(max(abs(value) for value in deltas), 6) if deltas else None
+    per_joint_delta = (
+        {name: delta for name, delta in zip(names, deltas)}
+        if names is not None
+        else None
+    )
+    wrist_delta = (
+        {name: per_joint_delta[name] for name in WRIST_JOINT_NAMES if name in per_joint_delta}
+        if per_joint_delta is not None
+        else None
+    )
+    max_wrist_delta = (
+        round(max(abs(value) for value in wrist_delta.values()), 6)
+        if wrist_delta
+        else None
+    )
+    return {
+        **_empty_plan_audit(),
+        "planned_joint_names": names,
+        "planned_start_joint_positions": [round(float(value), 6) for value in start],
+        "planned_final_joint_positions": [round(float(value), 6) for value in final],
+        "per_joint_delta_rad": per_joint_delta,
+        "max_joint_delta_rad": max_delta,
+        "wrist_joint_names": [name for name in WRIST_JOINT_NAMES if wrist_delta and name in wrist_delta],
+        "wrist_joint_delta_rad": wrist_delta,
+        "max_wrist_joint_delta_rad": max_wrist_delta,
+        "joint_wrap_suspected": any(abs(value) > math.pi for value in deltas),
+        "joint_delta_audit_status": "AVAILABLE",
+        "joint_delta_audit_reason": None,
+    }
+
+
+def _path_metric_audit(
+    api_result: Dict[str, Any],
+    validation: Dict[str, Any],
+    joint_audit: Dict[str, Any],
+) -> Dict[str, Any]:
+    points = _joint_trajectory_points(api_result)
+    waypoint_count = api_result.get("trajectory_point_count")
+    if not isinstance(waypoint_count, int) or isinstance(waypoint_count, bool):
+        waypoint_count = len(points) if points else None
+    joint_path_length = _joint_path_length(points)
+    requested_distance = validation.get("requested_distance_m")
+    path_length_ratio = None
+    if joint_path_length is not None and requested_distance is not None and requested_distance > 0.0:
+        path_length_ratio = round(joint_path_length / float(requested_distance), 6)
+    estimated_cartesian_path_length = _optional_float(api_result.get("estimated_cartesian_path_length_m"))
+    source = "joint_trajectory" if joint_path_length is not None else "not_available"
+    if estimated_cartesian_path_length is not None and source == "not_available":
+        source = "provided_cartesian_path_metric"
+    return {
+        "planned_waypoint_count": waypoint_count,
+        "planned_joint_path_length_rad": joint_path_length,
+        "estimated_cartesian_path_length_m": estimated_cartesian_path_length,
+        "path_length_ratio": path_length_ratio,
+        "path_metric_source": source,
+        "joint_delta_audit_status": joint_audit.get("joint_delta_audit_status"),
+        "joint_delta_audit_reason": joint_audit.get("joint_delta_audit_reason"),
     }
 
 
@@ -721,6 +903,57 @@ def _trajectory_point_count(trajectory: Any) -> int:
     return len(joint_points or []) + len(multi_dof_points or [])
 
 
+def _joint_trajectory_names(api_result: Dict[str, Any]) -> list[str] | None:
+    raw_names = api_result.get("planned_joint_names") or api_result.get("joint_names")
+    if isinstance(raw_names, list) and all(isinstance(name, str) and name for name in raw_names):
+        return list(raw_names)
+    trajectory = api_result.get("planned_trajectory")
+    if isinstance(trajectory, dict):
+        joint_trajectory = trajectory.get("joint_trajectory")
+        raw_names = joint_trajectory.get("joint_names") if isinstance(joint_trajectory, dict) else None
+    else:
+        joint_trajectory = getattr(trajectory, "joint_trajectory", None)
+        raw_names = getattr(joint_trajectory, "joint_names", None)
+    if isinstance(raw_names, list) and all(isinstance(name, str) and name for name in raw_names):
+        return list(raw_names)
+    return None
+
+
+def _joint_trajectory_points(api_result: Dict[str, Any]) -> list[list[float]]:
+    raw_points = api_result.get("joint_trajectory_points") or api_result.get("planned_joint_positions")
+    if raw_points is None:
+        trajectory = api_result.get("planned_trajectory")
+        if isinstance(trajectory, dict):
+            joint_trajectory = trajectory.get("joint_trajectory")
+            raw_points = joint_trajectory.get("points") if isinstance(joint_trajectory, dict) else None
+        else:
+            joint_trajectory = getattr(trajectory, "joint_trajectory", None)
+            raw_points = getattr(joint_trajectory, "points", None)
+    if not isinstance(raw_points, list):
+        return []
+    points: list[list[float]] = []
+    for raw in raw_points:
+        positions = raw.get("positions") if isinstance(raw, dict) else getattr(raw, "positions", raw)
+        if not isinstance(positions, list) or not positions:
+            continue
+        values = [_optional_float(value) for value in positions]
+        if any(value is None for value in values):
+            continue
+        points.append([float(value) for value in values if value is not None])
+    return points
+
+
+def _joint_path_length(points: list[list[float]]) -> float | None:
+    if len(points) < 2:
+        return None
+    total = 0.0
+    for left, right in zip(points, points[1:]):
+        if len(left) != len(right):
+            continue
+        total += sum(abs(float(rvalue) - float(lvalue)) for lvalue, rvalue in zip(left, right))
+    return round(total, 6)
+
+
 def _moveit_error_code_name(value: int | None) -> str | None:
     if value is None:
         return None
@@ -790,6 +1023,12 @@ def _valid_quaternion(value: Any) -> bool:
         and len(value) == 4
         and all(isinstance(item, (int, float)) and not isinstance(item, bool) and math.isfinite(float(item)) for item in value)
     )
+
+
+def _same_quaternion(left: Any, right: Any) -> bool:
+    if not _valid_quaternion(left) or not _valid_quaternion(right):
+        return False
+    return all(abs(float(lvalue) - float(rvalue)) <= MOTION_LIMIT_EPS for lvalue, rvalue in zip(left, right))
 
 
 def _allowed_frames(config: Dict[str, Any]) -> set[str]:

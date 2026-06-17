@@ -1675,7 +1675,10 @@ def _planner_acceptance(
     if execution.get("cartesian_motion_execution_status") == STATUS_BLOCKED:
         blocking_reasons.extend(_string_list(execution.get("blocking_reasons")))
 
-    max_joint_delta = trajectory_metrics["max_joint_delta_rad"]
+    max_joint_delta = _first_not_none(
+        _optional_number(moveit_result.get("max_joint_delta_rad")),
+        trajectory_metrics["max_joint_delta_rad"],
+    )
     if (
         max_joint_delta is not None
         and requested_distance is not None
@@ -1744,6 +1747,41 @@ def _planner_acceptance(
             motion.get("safety_policy_name"),
             moveit_result.get("safety_policy_name"),
         ),
+        "planner_mode": _first_not_none(moveit_result.get("planner_mode"), moveit_plan_request.get("planner_mode")),
+        "planning_pipeline_id": _first_not_none(moveit_result.get("planning_pipeline_id"), moveit_plan_request.get("planning_pipeline_id")),
+        "planner_id": _first_not_none(moveit_result.get("planner_id"), moveit_plan_request.get("planner_id")),
+        "moveit_goal_type": _first_not_none(moveit_result.get("moveit_goal_type"), moveit_plan_request.get("moveit_goal_type")),
+        "joint_space_pose_goal_used": _first_not_none(moveit_result.get("joint_space_pose_goal_used"), moveit_plan_request.get("joint_space_pose_goal_used")),
+        "cartesian_path_used": _first_not_none(moveit_result.get("cartesian_path_used"), moveit_plan_request.get("cartesian_path_used")),
+        "cartesian_path_fraction": _first_not_none(moveit_result.get("cartesian_path_fraction"), moveit_plan_request.get("cartesian_path_fraction")),
+        "joint_space_fallback_used": _first_not_none(moveit_result.get("joint_space_fallback_used"), moveit_plan_request.get("joint_space_fallback_used")),
+        "joint_space_fallback_reason": _first_not_none(moveit_result.get("joint_space_fallback_reason"), moveit_plan_request.get("joint_space_fallback_reason")),
+        "start_state_source": _first_not_none(moveit_result.get("start_state_source"), moveit_plan_request.get("start_state_source")),
+        "start_state_is_diff": _first_not_none(moveit_result.get("start_state_is_diff"), moveit_plan_request.get("start_state_is_diff")),
+        "explicit_start_state_provided": _first_not_none(moveit_result.get("explicit_start_state_provided"), moveit_plan_request.get("explicit_start_state_provided")),
+        "current_joint_state_available": _first_not_none(moveit_result.get("current_joint_state_available"), moveit_plan_request.get("current_joint_state_available")),
+        "current_joint_state_source": _first_not_none(moveit_result.get("current_joint_state_source"), moveit_plan_request.get("current_joint_state_source")),
+        "current_joint_state_age_s": _first_not_none(moveit_result.get("current_joint_state_age_s"), moveit_plan_request.get("current_joint_state_age_s")),
+        "target_orientation_source": _first_not_none(
+            moveit_result.get("target_orientation_source"),
+            moveit_plan_request.get("target_orientation_source"),
+            motion.get("target_orientation_source"),
+        ),
+        "orientation_mode": _first_not_none(
+            moveit_result.get("orientation_mode"),
+            moveit_plan_request.get("orientation_mode"),
+            motion.get("orientation_mode"),
+        ),
+        "orientation_locked": _first_not_none(
+            moveit_result.get("orientation_locked"),
+            moveit_plan_request.get("orientation_locked"),
+            motion.get("orientation_locked"),
+        ),
+        "requested_start_tcp_pose": _first_not_none(moveit_result.get("requested_start_tcp_pose"), motion.get("requested_start_tcp_pose")),
+        "requested_target_tcp_pose": _first_not_none(
+            moveit_result.get("requested_target_tcp_pose"),
+            motion.get("requested_target_tcp_pose"),
+        ),
         **tolerance_evidence,
         "planned_goal_frame": motion.get("frame") or execution_preview.get("frame"),
         "target_frame": _first_not_none(moveit_result.get("target_frame"), moveit_plan_request.get("planning_frame"), motion.get("frame"), execution_preview.get("frame")),
@@ -1754,7 +1792,31 @@ def _planner_acceptance(
         "metrics_source": trajectory_metrics["metrics_source"],
         "planned_waypoint_count": trajectory_metrics["planned_waypoint_count"],
         "estimated_cartesian_path_length_m": trajectory_metrics["estimated_cartesian_path_length_m"],
+        "path_metric_source": _first_not_none(moveit_result.get("path_metric_source"), trajectory_metrics["metrics_source"]),
+        "planned_joint_names": moveit_result.get("planned_joint_names"),
+        "planned_start_joint_positions": moveit_result.get("planned_start_joint_positions"),
+        "planned_final_joint_positions": moveit_result.get("planned_final_joint_positions"),
+        "per_joint_delta_rad": moveit_result.get("per_joint_delta_rad"),
         "max_joint_delta_rad": max_joint_delta,
+        "planned_joint_path_length_rad": _first_not_none(
+            _optional_number(moveit_result.get("planned_joint_path_length_rad")),
+            trajectory_metrics["total_joint_motion_rad"],
+        ),
+        "path_length_ratio": _first_not_none(
+            _optional_number(moveit_result.get("path_length_ratio")),
+            (
+                round(float(trajectory_metrics["total_joint_motion_rad"]) / requested_distance, 6)
+                if trajectory_metrics["total_joint_motion_rad"] is not None and requested_distance is not None and requested_distance > 0.0
+                else None
+            ),
+        ),
+        "wrist_joint_names": moveit_result.get("wrist_joint_names"),
+        "wrist_joint_delta_rad": moveit_result.get("wrist_joint_delta_rad"),
+        "max_wrist_joint_delta_rad": moveit_result.get("max_wrist_joint_delta_rad"),
+        "joint_wrap_suspected": moveit_result.get("joint_wrap_suspected"),
+        "joint_delta_audit_status": moveit_result.get("joint_delta_audit_status"),
+        "joint_delta_audit_reason": moveit_result.get("joint_delta_audit_reason"),
+        "planner_audit_warnings": moveit_result.get("planner_audit_warnings"),
         "total_joint_motion_rad": trajectory_metrics["total_joint_motion_rad"],
         "orientation_change_rad": trajectory_metrics["orientation_change_rad"],
         "trajectory_duration_s": trajectory_metrics["trajectory_duration_s"],
@@ -1883,7 +1945,10 @@ def _moveit_result_from(motion: dict[str, Any], execution: dict[str, Any]) -> di
 
 
 def _trajectory_metrics(moveit_result: dict[str, Any]) -> dict[str, Any]:
-    waypoint_count = moveit_result.get("trajectory_point_count")
+    waypoint_count = _first_not_none(
+        moveit_result.get("trajectory_point_count"),
+        moveit_result.get("planned_waypoint_count"),
+    )
     waypoint_count = int(waypoint_count) if isinstance(waypoint_count, int) and not isinstance(waypoint_count, bool) else None
     joint_points = _joint_trajectory_points(moveit_result)
     max_joint_delta = _max_joint_delta(joint_points)
@@ -2210,7 +2275,40 @@ def _evidence(
         "moveit_end_effector_link": planner_acceptance.get("moveit_end_effector_link") if isinstance(planner_acceptance, dict) else None,
         "moveit_planning_frame": planner_acceptance.get("moveit_planning_frame") if isinstance(planner_acceptance, dict) else None,
         "moveit_group_name": planner_acceptance.get("moveit_group_name") if isinstance(planner_acceptance, dict) else None,
+        "planner_mode": planner_acceptance.get("planner_mode") if isinstance(planner_acceptance, dict) else None,
+        "planning_pipeline_id": planner_acceptance.get("planning_pipeline_id") if isinstance(planner_acceptance, dict) else None,
+        "planner_id": planner_acceptance.get("planner_id") if isinstance(planner_acceptance, dict) else None,
+        "moveit_goal_type": planner_acceptance.get("moveit_goal_type") if isinstance(planner_acceptance, dict) else None,
+        "joint_space_pose_goal_used": planner_acceptance.get("joint_space_pose_goal_used") if isinstance(planner_acceptance, dict) else None,
+        "cartesian_path_used": planner_acceptance.get("cartesian_path_used") if isinstance(planner_acceptance, dict) else None,
+        "cartesian_path_fraction": planner_acceptance.get("cartesian_path_fraction") if isinstance(planner_acceptance, dict) else None,
+        "joint_space_fallback_used": planner_acceptance.get("joint_space_fallback_used") if isinstance(planner_acceptance, dict) else None,
+        "joint_space_fallback_reason": planner_acceptance.get("joint_space_fallback_reason") if isinstance(planner_acceptance, dict) else None,
+        "start_state_source": planner_acceptance.get("start_state_source") if isinstance(planner_acceptance, dict) else None,
+        "start_state_is_diff": planner_acceptance.get("start_state_is_diff") if isinstance(planner_acceptance, dict) else None,
+        "explicit_start_state_provided": planner_acceptance.get("explicit_start_state_provided") if isinstance(planner_acceptance, dict) else None,
+        "current_joint_state_available": planner_acceptance.get("current_joint_state_available") if isinstance(planner_acceptance, dict) else None,
+        "current_joint_state_source": planner_acceptance.get("current_joint_state_source") if isinstance(planner_acceptance, dict) else None,
+        "current_joint_state_age_s": planner_acceptance.get("current_joint_state_age_s") if isinstance(planner_acceptance, dict) else None,
+        "target_orientation_source": planner_acceptance.get("target_orientation_source") if isinstance(planner_acceptance, dict) else None,
+        "orientation_mode": planner_acceptance.get("orientation_mode") if isinstance(planner_acceptance, dict) else None,
+        "orientation_locked": planner_acceptance.get("orientation_locked") if isinstance(planner_acceptance, dict) else None,
+        "requested_start_tcp_pose": planner_acceptance.get("requested_start_tcp_pose") if isinstance(planner_acceptance, dict) else None,
         "target_pose": motion.get("target_pose"),
+        "planned_joint_names": planner_acceptance.get("planned_joint_names") if isinstance(planner_acceptance, dict) else None,
+        "planned_start_joint_positions": planner_acceptance.get("planned_start_joint_positions") if isinstance(planner_acceptance, dict) else None,
+        "planned_final_joint_positions": planner_acceptance.get("planned_final_joint_positions") if isinstance(planner_acceptance, dict) else None,
+        "per_joint_delta_rad": planner_acceptance.get("per_joint_delta_rad") if isinstance(planner_acceptance, dict) else None,
+        "planned_joint_path_length_rad": planner_acceptance.get("planned_joint_path_length_rad") if isinstance(planner_acceptance, dict) else None,
+        "path_length_ratio": planner_acceptance.get("path_length_ratio") if isinstance(planner_acceptance, dict) else None,
+        "path_metric_source": planner_acceptance.get("path_metric_source") if isinstance(planner_acceptance, dict) else None,
+        "wrist_joint_names": planner_acceptance.get("wrist_joint_names") if isinstance(planner_acceptance, dict) else None,
+        "wrist_joint_delta_rad": planner_acceptance.get("wrist_joint_delta_rad") if isinstance(planner_acceptance, dict) else None,
+        "max_wrist_joint_delta_rad": planner_acceptance.get("max_wrist_joint_delta_rad") if isinstance(planner_acceptance, dict) else None,
+        "joint_wrap_suspected": planner_acceptance.get("joint_wrap_suspected") if isinstance(planner_acceptance, dict) else None,
+        "joint_delta_audit_status": planner_acceptance.get("joint_delta_audit_status") if isinstance(planner_acceptance, dict) else None,
+        "joint_delta_audit_reason": planner_acceptance.get("joint_delta_audit_reason") if isinstance(planner_acceptance, dict) else None,
+        "planner_audit_warnings": planner_acceptance.get("planner_audit_warnings") if isinstance(planner_acceptance, dict) else None,
         **_post_motion_top_level_fields(post_motion),
         **motion_check,
         "blocking_reasons": reasons,

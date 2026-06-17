@@ -31,6 +31,25 @@ Future work can connect Qwen2.5-VL, LLaVA, InternVL, Isaac Sim execution,
 live ROS2 publish, MoveIt2 execution, UR5 controllers, or other local robotics
 and VLM components.
 
+## TETO v3.0.6: Planner Audit Evidence
+
+TETO v3.0.5 verifies the current TCP pose before relative real motion and
+blocks direction parsing mismatches before target generation. TETO v3.0.6 does
+not change planner behavior yet, does not switch to Cartesian path planning,
+and does not add a hard path-quality blocker.
+
+Instead, v3.0.6 records how MoveIt planned a relative TCP step so strange paths
+can be diagnosed offline. The run evidence now reports planner mode, planner
+pipeline and planner id, MoveIt goal type, start-state source, target
+orientation source, joint deltas, wrist deltas, Cartesian-path usage status,
+and path metrics when a planned trajectory is available. This is intended to
+explain cases where the target position is reached but the wrist rotates more
+than expected.
+
+The planner audit evidence is software-only and mock-testable. It does not
+require a UR5 connection, does not launch robot bringup, does not call
+ExecuteTrajectory, and does not send a trajectory.
+
 ## Project Structure
 
 ```text

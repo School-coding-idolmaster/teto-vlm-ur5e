@@ -180,6 +180,23 @@ def test_manual_qwen_path_reads_stdin_and_preserves_text(monkeypatch, capsys):
     assert planner["trajectory_sent"] is False
     assert planner["execute_trajectory_called"] is False
     assert planner["planned_goal_frame"] == "base_link"
+    assert planner["planner_mode"] == "joint_space_pose_goal"
+    assert planner["planning_pipeline_id"] == "move_group"
+    assert planner["planner_id"] == "ur_manipulator[RRTConnectkConfigDefault]"
+    assert planner["moveit_goal_type"] == "move_group_pose_goal_constraints"
+    assert planner["joint_space_pose_goal_used"] is True
+    assert planner["cartesian_path_used"] is False
+    assert planner["cartesian_path_fraction"] is None
+    assert planner["joint_space_fallback_used"] is False
+    assert planner["start_state_source"] == "implicit_planning_scene"
+    assert planner["start_state_is_diff"] is True
+    assert planner["explicit_start_state_provided"] is False
+    assert planner["current_joint_state_available"] is False
+    assert planner["target_orientation_source"] == "copied_from_current_tcp_pose"
+    assert planner["orientation_mode"] == "keep_current_orientation"
+    assert planner["orientation_locked"] is True
+    assert planner["requested_start_tcp_pose"]["position_m"] == [0.4, 0.0, 0.3]
+    assert planner["requested_target_tcp_pose"]["orientation_xyzw"] == planner["requested_start_tcp_pose"]["orientation_xyzw"]
     assert planner["metrics_source"] == "not_available"
     assert planner["planned_waypoint_count"] is None
     assert planner["max_joint_delta_rad"] is None
@@ -215,6 +232,49 @@ def test_mocked_normal_plan_only_metrics_are_reported(monkeypatch, capsys):
     assert planner["orientation_change_rad"] == 0.0
     assert planner["trajectory_duration_s"] == 1.2
     assert planner["reasonableness_check"] == "PASS"
+
+
+def test_mocked_plan_audit_fields_are_reported_without_blocking(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
+    monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_success)
+    monkeypatch.setattr(cli, "evaluate_cartesian_motion_execution", _fake_plan_audit_execution)
+
+    exit_code = cli.main(["--acceptance", "--plan-only-smoke", "--cmd", "raise the tcp by 2 millimeters"])
+
+    evidence = _final_evidence(capsys.readouterr().out)
+    planner = evidence["planner_acceptance"]
+    assert exit_code == 0
+    assert planner["status"] == "PASS"
+    assert planner["planner_mode"] == "joint_space_pose_goal"
+    assert planner["cartesian_path_used"] is False
+    assert planner["cartesian_path_fraction"] is None
+    assert planner["joint_space_fallback_used"] is False
+    assert planner["start_state_source"] == "implicit_planning_scene"
+    assert planner["explicit_start_state_provided"] is False
+    assert planner["target_orientation_source"] == "copied_from_current_tcp_pose"
+    assert planner["orientation_locked"] is True
+    assert planner["planned_joint_names"] == [
+        "shoulder_pan_joint",
+        "shoulder_lift_joint",
+        "elbow_joint",
+        "wrist_1_joint",
+        "wrist_2_joint",
+        "wrist_3_joint",
+    ]
+    assert planner["per_joint_delta_rad"]["wrist_2_joint"] == -0.95
+    assert planner["max_joint_delta_rad"] == 0.95
+    assert planner["wrist_joint_delta_rad"]["wrist_2_joint"] == -0.95
+    assert planner["max_wrist_joint_delta_rad"] == 0.95
+    assert planner["joint_delta_audit_status"] == "AVAILABLE"
+    assert planner["planned_joint_path_length_rad"] == 1.28
+    assert planner["path_metric_source"] == "joint_trajectory"
+    assert planner["planner_audit_warnings"] == []
+    assert planner["warnings"] == []
+    assert planner["trajectory_sent"] is False
+    assert planner["execute_trajectory_called"] is False
+    assert planner["real_robot_motion_executed"] is False
+    assert evidence["max_wrist_joint_delta_rad"] == 0.95
+    assert evidence["joint_delta_audit_status"] == "AVAILABLE"
 
 
 def test_manual_qwen_down_command_prints_negative_z_preview(monkeypatch, capsys):
@@ -1513,6 +1573,95 @@ def _fake_plan_only_execution(request):
                 ]
             ),
             "trajectory_point_count": 2,
+            "blocking_reasons": [],
+            "warnings": [],
+        },
+        "blocking_reasons": [],
+        "warnings": [],
+    }
+
+
+def _fake_plan_audit_execution(request):
+    assert request.config["enable_moveit_execute"] is False
+    assert request.config["enable_real_robot_motion"] is False
+    return {
+        "cartesian_motion_execution_status": "PASS",
+        "moveit_plan_requested": True,
+        "moveit_plan_success": True,
+        "manual_confirmation_required": True,
+        "manual_confirmation_accepted": False,
+        "moveit_execute_called": False,
+        "trajectory_send_allowed": False,
+        "trajectory_sent": False,
+        "controller_command_sent": False,
+        "real_robot_motion_executed": False,
+        "moveit_pose_executor_result": {
+            "moveit_pose_executor_status": "PASS",
+            "plan_success": True,
+            "moveit_plan_called": True,
+            "moveit_execute_called": False,
+            "trajectory_send_allowed": False,
+            "trajectory_sent": False,
+            "controller_command_sent": False,
+            "real_robot_motion_executed": False,
+            "planner_mode": "joint_space_pose_goal",
+            "planning_pipeline_id": "move_group",
+            "planner_id": "ur_manipulator[RRTConnectkConfigDefault]",
+            "moveit_goal_type": "move_group_pose_goal_constraints",
+            "joint_space_pose_goal_used": True,
+            "cartesian_path_used": False,
+            "cartesian_path_fraction": None,
+            "joint_space_fallback_used": False,
+            "joint_space_fallback_reason": None,
+            "start_state_source": "implicit_planning_scene",
+            "start_state_is_diff": True,
+            "explicit_start_state_provided": False,
+            "current_joint_state_available": False,
+            "current_joint_state_source": None,
+            "current_joint_state_age_s": None,
+            "target_orientation_source": "copied_from_current_tcp_pose",
+            "orientation_mode": "keep_current_orientation",
+            "orientation_locked": True,
+            "requested_start_tcp_pose": _pose(),
+            "requested_target_tcp_pose": _pose_z_offset(0.002),
+            "planned_joint_names": [
+                "shoulder_pan_joint",
+                "shoulder_lift_joint",
+                "elbow_joint",
+                "wrist_1_joint",
+                "wrist_2_joint",
+                "wrist_3_joint",
+            ],
+            "planned_start_joint_positions": [0.0, -1.0, 1.2, 0.1, 0.2, 0.3],
+            "planned_final_joint_positions": [0.01, -0.98, 1.23, 0.35, -0.75, 0.28],
+            "per_joint_delta_rad": {
+                "shoulder_pan_joint": 0.01,
+                "shoulder_lift_joint": 0.02,
+                "elbow_joint": 0.03,
+                "wrist_1_joint": 0.25,
+                "wrist_2_joint": -0.95,
+                "wrist_3_joint": -0.02,
+            },
+            "max_joint_delta_rad": 0.95,
+            "wrist_joint_names": ["wrist_1_joint", "wrist_2_joint", "wrist_3_joint"],
+            "wrist_joint_delta_rad": {
+                "wrist_1_joint": 0.25,
+                "wrist_2_joint": -0.95,
+                "wrist_3_joint": -0.02,
+            },
+            "max_wrist_joint_delta_rad": 0.95,
+            "joint_wrap_suspected": False,
+            "joint_delta_audit_status": "AVAILABLE",
+            "joint_delta_audit_reason": None,
+            "trajectory_point_count": 2,
+            "joint_trajectory_points": [
+                {"positions": [0.0, -1.0, 1.2, 0.1, 0.2, 0.3]},
+                {"positions": [0.01, -0.98, 1.23, 0.35, -0.75, 0.28]},
+            ],
+            "planned_joint_path_length_rad": 1.28,
+            "path_metric_source": "joint_trajectory",
+            "path_length_ratio": 640.0,
+            "planner_audit_warnings": [],
             "blocking_reasons": [],
             "warnings": [],
         },
