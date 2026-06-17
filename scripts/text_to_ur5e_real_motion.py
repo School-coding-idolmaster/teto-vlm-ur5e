@@ -276,6 +276,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--warn-max-wrist-joint-delta-rad", type=float, default=DEFAULT_WARN_MAX_WRIST_JOINT_DELTA_RAD)
     parser.add_argument("--warn-path-length-ratio", type=float, default=DEFAULT_WARN_PATH_LENGTH_RATIO)
     parser.add_argument("--enable-planner-risk-blocking", action="store_true")
+    parser.add_argument("--enable-long-step-decomposition", action="store_true")
+    parser.add_argument("--long-step-threshold-m", type=float, default=0.05)
+    parser.add_argument("--max-substep-distance-m", type=float, default=0.02)
+    parser.add_argument("--min-final-substep-distance-m", type=float, default=0.001)
+    parser.add_argument("--long-motion-total-limit-m", type=float, default=0.20)
+    parser.add_argument("--substep-execution-mode", choices=["contract_only"], default="contract_only")
     parser.add_argument("--speed-scale", type=float, default=0.10)
     parser.add_argument("--acc-scale", type=float, default=0.10)
     args = parser.parse_args(argv)
@@ -336,6 +342,16 @@ def main(argv: list[str] | None = None) -> int:
         print(_json({"final_status": STATUS_BLOCKED, "blocking_reasons": ["E_YES_REQUIRES_CMD"], "real_robot_motion_executed": False, **_post_motion_not_run_fields()}))
         return 2
     dry_run = not real_requested or args.dry_run
+    parser_max_distance_m = (
+        safety_policy["long_motion_total_limit_m"]
+        if safety_policy["enable_long_step_decomposition"]
+        else safety_policy["configured_max_distance_m"]
+    )
+    parser_hard_safety_limit_m = (
+        safety_policy["long_motion_total_limit_m"]
+        if safety_policy["enable_long_step_decomposition"]
+        else safety_policy["hard_safety_limit_m"]
+    )
 
     if args.cmd is not None:
         command = args.cmd
@@ -366,8 +382,8 @@ def main(argv: list[str] | None = None) -> int:
         parser_mode=args.parser,
         real=real_requested,
         dry_run=dry_run,
-        max_distance_m=safety_policy["configured_max_distance_m"],
-        hard_safety_limit_m=safety_policy["hard_safety_limit_m"],
+        max_distance_m=parser_max_distance_m,
+        hard_safety_limit_m=parser_hard_safety_limit_m,
         input_mode=input_mode,
         qwen_model=args.qwen_model,
         qwen_endpoint=args.qwen_endpoint,
@@ -1407,6 +1423,16 @@ def _safety_policy_from_args(args: argparse.Namespace) -> dict[str, Any]:
             if orientation_tolerance is not None
             else DEFAULT_REAL_ORIENTATION_TOLERANCE_RAD
         ),
+        "enable_long_step_decomposition": bool(getattr(args, "enable_long_step_decomposition", False)),
+        "long_step_policy_name": "lab_long_step_decomposition_v1",
+        "long_step_threshold_m": _optional_number(getattr(args, "long_step_threshold_m", None)) or 0.05,
+        "max_substep_distance_m": _optional_number(getattr(args, "max_substep_distance_m", None)) or 0.02,
+        "min_final_substep_distance_m": _optional_number(getattr(args, "min_final_substep_distance_m", None)) or 0.001,
+        "long_motion_total_limit_m": _optional_number(getattr(args, "long_motion_total_limit_m", None)) or 0.20,
+        "hard_single_step_safety_limit_m": (
+            hard_limit if hard_limit is not None else DEFAULT_REAL_HARD_SAFETY_LIMIT_M
+        ),
+        "substep_execution_mode": str(getattr(args, "substep_execution_mode", None) or "contract_only"),
     }
 
 
@@ -1556,6 +1582,14 @@ def _build_gateway_config(
         "tolerance_to_requested_distance_ratio": tolerance["tolerance_to_requested_distance_ratio"],
         "small_motion_tolerance_policy": tolerance["small_motion_tolerance_policy"],
         **planner_risk_policy,
+        "enable_long_step_decomposition": safety_policy["enable_long_step_decomposition"],
+        "long_step_policy_name": safety_policy["long_step_policy_name"],
+        "long_step_threshold_m": safety_policy["long_step_threshold_m"],
+        "max_substep_distance_m": safety_policy["max_substep_distance_m"],
+        "min_final_substep_distance_m": safety_policy["min_final_substep_distance_m"],
+        "long_motion_total_limit_m": safety_policy["long_motion_total_limit_m"],
+        "hard_single_step_safety_limit_m": safety_policy["hard_single_step_safety_limit_m"],
+        "substep_execution_mode": safety_policy["substep_execution_mode"],
         "max_speed_scale": min(float(speed_scale), 0.10),
         "max_acc_scale": min(float(acc_scale), 0.10),
         "current_tcp_pose": current_pose,
@@ -1776,6 +1810,35 @@ def _planner_acceptance(
         "max_axis_step_m": motion.get("max_axis_step_m"),
         "hard_safety_limit_m": hard_safety_limit,
         "session_radius_limit_m": motion.get("session_radius_limit_m"),
+        "motion_distance_regime": motion.get("motion_distance_regime"),
+        "long_step_decomposition_enabled": motion.get("long_step_decomposition_enabled"),
+        "long_step_policy_name": motion.get("long_step_policy_name"),
+        "requested_total_distance_m": motion.get("requested_total_distance_m"),
+        "one_shot_distance_limit_m": motion.get("one_shot_distance_limit_m"),
+        "hard_single_step_safety_limit_m": motion.get("hard_single_step_safety_limit_m"),
+        "long_motion_total_limit_m": motion.get("long_motion_total_limit_m"),
+        "max_substep_distance_m": motion.get("max_substep_distance_m"),
+        "min_final_substep_distance_m": motion.get("min_final_substep_distance_m"),
+        "planned_execution_style": motion.get("planned_execution_style"),
+        "substep_execution_mode": motion.get("substep_execution_mode"),
+        "real_substep_execution_enabled": motion.get("real_substep_execution_enabled"),
+        "planned_substep_count": motion.get("planned_substep_count"),
+        "planned_substep_distances_m": motion.get("planned_substep_distances_m"),
+        "planned_substep_vectors_m": motion.get("planned_substep_vectors_m"),
+        "decomposition_remainder_m": motion.get("decomposition_remainder_m"),
+        "decomposition_status": motion.get("decomposition_status"),
+        "decomposition_blocking_reason": motion.get("decomposition_blocking_reason"),
+        "decomposition_does_not_bypass_safety_limits": motion.get("decomposition_does_not_bypass_safety_limits"),
+        "safety_gate_scope": motion.get("safety_gate_scope"),
+        "one_shot_distance_check_status": motion.get("one_shot_distance_check_status"),
+        "substep_distance_check_status": motion.get("substep_distance_check_status"),
+        "total_long_motion_check_status": motion.get("total_long_motion_check_status"),
+        "workspace_envelope_check_status": motion.get("workspace_envelope_check_status"),
+        "decomposed_motion_allowed": motion.get("decomposed_motion_allowed"),
+        "decomposed_motion_blocking_reason": motion.get("decomposed_motion_blocking_reason"),
+        "autoregressive_update_required": motion.get("autoregressive_update_required"),
+        "substep_feedback_required": motion.get("substep_feedback_required"),
+        "substep_reobserve_allowed": motion.get("substep_reobserve_allowed"),
         "step_delta_within_limit": motion.get("step_delta_within_limit"),
         "axis_delta_within_limit": motion.get("axis_delta_within_limit"),
         "workspace_envelope_within_limit": motion.get("workspace_envelope_within_limit"),
@@ -2334,6 +2397,35 @@ def _evidence(
         "max_axis_step_m": planner_acceptance.get("max_axis_step_m") if isinstance(planner_acceptance, dict) else None,
         "hard_safety_limit_m": planner_acceptance.get("hard_safety_limit_m") if isinstance(planner_acceptance, dict) else None,
         "session_radius_limit_m": planner_acceptance.get("session_radius_limit_m") if isinstance(planner_acceptance, dict) else None,
+        "motion_distance_regime": planner_acceptance.get("motion_distance_regime") if isinstance(planner_acceptance, dict) else None,
+        "long_step_decomposition_enabled": planner_acceptance.get("long_step_decomposition_enabled") if isinstance(planner_acceptance, dict) else None,
+        "long_step_policy_name": planner_acceptance.get("long_step_policy_name") if isinstance(planner_acceptance, dict) else None,
+        "requested_total_distance_m": planner_acceptance.get("requested_total_distance_m") if isinstance(planner_acceptance, dict) else None,
+        "one_shot_distance_limit_m": planner_acceptance.get("one_shot_distance_limit_m") if isinstance(planner_acceptance, dict) else None,
+        "hard_single_step_safety_limit_m": planner_acceptance.get("hard_single_step_safety_limit_m") if isinstance(planner_acceptance, dict) else None,
+        "long_motion_total_limit_m": planner_acceptance.get("long_motion_total_limit_m") if isinstance(planner_acceptance, dict) else None,
+        "max_substep_distance_m": planner_acceptance.get("max_substep_distance_m") if isinstance(planner_acceptance, dict) else None,
+        "min_final_substep_distance_m": planner_acceptance.get("min_final_substep_distance_m") if isinstance(planner_acceptance, dict) else None,
+        "planned_execution_style": planner_acceptance.get("planned_execution_style") if isinstance(planner_acceptance, dict) else None,
+        "substep_execution_mode": planner_acceptance.get("substep_execution_mode") if isinstance(planner_acceptance, dict) else None,
+        "real_substep_execution_enabled": planner_acceptance.get("real_substep_execution_enabled") if isinstance(planner_acceptance, dict) else None,
+        "planned_substep_count": planner_acceptance.get("planned_substep_count") if isinstance(planner_acceptance, dict) else None,
+        "planned_substep_distances_m": planner_acceptance.get("planned_substep_distances_m") if isinstance(planner_acceptance, dict) else None,
+        "planned_substep_vectors_m": planner_acceptance.get("planned_substep_vectors_m") if isinstance(planner_acceptance, dict) else None,
+        "decomposition_remainder_m": planner_acceptance.get("decomposition_remainder_m") if isinstance(planner_acceptance, dict) else None,
+        "decomposition_status": planner_acceptance.get("decomposition_status") if isinstance(planner_acceptance, dict) else None,
+        "decomposition_blocking_reason": planner_acceptance.get("decomposition_blocking_reason") if isinstance(planner_acceptance, dict) else None,
+        "decomposition_does_not_bypass_safety_limits": planner_acceptance.get("decomposition_does_not_bypass_safety_limits") if isinstance(planner_acceptance, dict) else None,
+        "safety_gate_scope": planner_acceptance.get("safety_gate_scope") if isinstance(planner_acceptance, dict) else None,
+        "one_shot_distance_check_status": planner_acceptance.get("one_shot_distance_check_status") if isinstance(planner_acceptance, dict) else None,
+        "substep_distance_check_status": planner_acceptance.get("substep_distance_check_status") if isinstance(planner_acceptance, dict) else None,
+        "total_long_motion_check_status": planner_acceptance.get("total_long_motion_check_status") if isinstance(planner_acceptance, dict) else None,
+        "workspace_envelope_check_status": planner_acceptance.get("workspace_envelope_check_status") if isinstance(planner_acceptance, dict) else None,
+        "decomposed_motion_allowed": planner_acceptance.get("decomposed_motion_allowed") if isinstance(planner_acceptance, dict) else None,
+        "decomposed_motion_blocking_reason": planner_acceptance.get("decomposed_motion_blocking_reason") if isinstance(planner_acceptance, dict) else None,
+        "autoregressive_update_required": planner_acceptance.get("autoregressive_update_required") if isinstance(planner_acceptance, dict) else None,
+        "substep_feedback_required": planner_acceptance.get("substep_feedback_required") if isinstance(planner_acceptance, dict) else None,
+        "substep_reobserve_allowed": planner_acceptance.get("substep_reobserve_allowed") if isinstance(planner_acceptance, dict) else None,
         "step_delta_within_limit": planner_acceptance.get("step_delta_within_limit") if isinstance(planner_acceptance, dict) else None,
         "axis_delta_within_limit": planner_acceptance.get("axis_delta_within_limit") if isinstance(planner_acceptance, dict) else None,
         "workspace_envelope_within_limit": planner_acceptance.get("workspace_envelope_within_limit") if isinstance(planner_acceptance, dict) else None,

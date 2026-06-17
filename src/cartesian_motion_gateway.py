@@ -40,6 +40,13 @@ STATUS_NOT_REQUESTED = "NOT_REQUESTED"
 DEFAULT_FRAME = "base_link"
 DEFAULT_MAX_TRANSLATION_M = 0.20
 DEFAULT_HARD_SAFETY_LIMIT_M = DEFAULT_MAX_TRANSLATION_M
+DEFAULT_MICRO_STEP_THRESHOLD_M = 0.005
+DEFAULT_LONG_STEP_THRESHOLD_M = 0.05
+DEFAULT_LONG_STEP_POLICY_NAME = "lab_long_step_decomposition_v1"
+DEFAULT_MAX_SUBSTEP_DISTANCE_M = 0.02
+DEFAULT_HARD_SINGLE_STEP_SAFETY_LIMIT_M = 0.05
+DEFAULT_LONG_MOTION_TOTAL_LIMIT_M = 0.20
+DEFAULT_MIN_FINAL_SUBSTEP_DISTANCE_M = 0.001
 MOTION_LIMIT_EPS = 1e-9
 DEFAULT_CONFIRMATION_TOKEN = "CONFIRM_REAL_UR5_CARTESIAN"
 DEFAULT_UNDERSTANDING_PHRASE = "I understand this will move the real UR5"
@@ -75,6 +82,10 @@ E_FORBIDDEN_CONTROL_ARTIFACT = "E_FORBIDDEN_CONTROL_ARTIFACT"
 E_STEP_DELTA_EXCEEDS_LIMIT = "E_STEP_DELTA_EXCEEDS_LIMIT"
 E_AXIS_STEP_EXCEEDS_LIMIT = "E_AXIS_STEP_EXCEEDS_LIMIT"
 E_SESSION_RADIUS_EXCEEDS_LIMIT = "E_SESSION_RADIUS_EXCEEDS_LIMIT"
+E_LONG_MOTION_TOTAL_EXCEEDS_LIMIT = "E_LONG_MOTION_TOTAL_EXCEEDS_LIMIT"
+E_SUBSTEP_DISTANCE_EXCEEDS_LIMIT = "E_SUBSTEP_DISTANCE_EXCEEDS_LIMIT"
+E_SUBSTEP_DISTANCE_EXCEEDS_HARD_SINGLE_STEP_LIMIT = "E_SUBSTEP_DISTANCE_EXCEEDS_HARD_SINGLE_STEP_LIMIT"
+E_DECOMPOSED_WORKSPACE_ENVELOPE_EXCEEDED = "E_DECOMPOSED_WORKSPACE_ENVELOPE_EXCEEDED"
 
 
 @dataclass(frozen=True)
@@ -142,6 +153,20 @@ def evaluate_cartesian_motion_gateway(request: CartesianMotionGatewayRequest | N
     max_axis_step_m = _optional_float(config.get("max_axis_step_m")) or max_step_distance_m
     hard_safety_limit_m = _optional_float(config.get("hard_safety_limit_m")) or DEFAULT_HARD_SAFETY_LIMIT_M
     session_radius_limit_m = _optional_float(config.get("session_radius_limit_m"))
+    long_step_decomposition_enabled = config.get("enable_long_step_decomposition") is True
+    long_step_policy_name = _string(config.get("long_step_policy_name")) or DEFAULT_LONG_STEP_POLICY_NAME
+    long_step_threshold_m = _optional_float(config.get("long_step_threshold_m")) or DEFAULT_LONG_STEP_THRESHOLD_M
+    max_substep_distance_m = _optional_float(config.get("max_substep_distance_m")) or DEFAULT_MAX_SUBSTEP_DISTANCE_M
+    hard_single_step_safety_limit_m = (
+        _optional_float(config.get("hard_single_step_safety_limit_m"))
+        or DEFAULT_HARD_SINGLE_STEP_SAFETY_LIMIT_M
+    )
+    long_motion_total_limit_m = _optional_float(config.get("long_motion_total_limit_m")) or DEFAULT_LONG_MOTION_TOTAL_LIMIT_M
+    min_final_substep_distance_m = (
+        _optional_float(config.get("min_final_substep_distance_m"))
+        or DEFAULT_MIN_FINAL_SUBSTEP_DISTANCE_M
+    )
+    substep_execution_mode = _string(config.get("substep_execution_mode")) or "contract_only"
     workspace_bounds = _workspace_bounds(config)
     allowed_frames = _allowed_frames(config)
     translation_distance_m = round(_distance(offset), 6) if offset else None
@@ -165,6 +190,33 @@ def evaluate_cartesian_motion_gateway(request: CartesianMotionGatewayRequest | N
     target_orientation_source = None
     orientation_mode = None
     orientation_locked = None
+    motion_distance_regime = _motion_distance_regime(translation_distance_m, long_step_threshold_m)
+    one_shot_distance_limit_m = min(max_translation_m, hard_safety_limit_m)
+    one_shot_distance_check_status = (
+        STATUS_PASS
+        if translation_distance_m is not None and translation_distance_m <= one_shot_distance_limit_m + MOTION_LIMIT_EPS
+        else STATUS_BLOCKED
+        if translation_distance_m is not None
+        else "UNKNOWN"
+    )
+    should_decompose = (
+        long_step_decomposition_enabled
+        and translation_distance_m is not None
+        and translation_distance_m > max_substep_distance_m + MOTION_LIMIT_EPS
+    )
+    decomposition_contract = _decomposition_not_applicable(
+        motion_distance_regime=motion_distance_regime,
+        enabled=long_step_decomposition_enabled,
+        policy_name=long_step_policy_name,
+        requested_total_distance_m=translation_distance_m,
+        one_shot_distance_limit_m=one_shot_distance_limit_m,
+        hard_single_step_safety_limit_m=hard_single_step_safety_limit_m,
+        long_motion_total_limit_m=long_motion_total_limit_m,
+        max_substep_distance_m=max_substep_distance_m,
+        min_final_substep_distance_m=min_final_substep_distance_m,
+        substep_execution_mode=substep_execution_mode,
+        one_shot_distance_check_status=one_shot_distance_check_status,
+    )
 
     blocking_reasons: list[str] = []
     warnings = _string_list(config.get("warnings")) + _string_list(task.get("warnings"))
@@ -179,9 +231,9 @@ def evaluate_cartesian_motion_gateway(request: CartesianMotionGatewayRequest | N
         blocking_reasons.append(E_OFFSET_MISSING)
     elif not _valid_vector3(offset) or not any(abs(value) > 0.0 for value in offset):
         blocking_reasons.append(E_INVALID_OFFSET)
-    elif _distance(offset) > hard_safety_limit_m + MOTION_LIMIT_EPS:
+    elif _distance(offset) > hard_safety_limit_m + MOTION_LIMIT_EPS and not long_step_decomposition_enabled:
         blocking_reasons.append(E_EXCESSIVE_CARTESIAN_MOTION)
-    elif _distance(offset) > max_translation_m + MOTION_LIMIT_EPS:
+    elif _distance(offset) > max_translation_m + MOTION_LIMIT_EPS and not long_step_decomposition_enabled:
         blocking_reasons.append(E_EXCESSIVE_CARTESIAN_MOTION)
     if current_pose is None:
         blocking_reasons.append(E_CURRENT_TCP_POSE_MISSING)
@@ -215,9 +267,9 @@ def evaluate_cartesian_motion_gateway(request: CartesianMotionGatewayRequest | N
             step_distance = round(_distance(step_delta), 6)
             step_delta_within_limit = step_distance <= max_step_distance_m + MOTION_LIMIT_EPS
             axis_delta_within_limit = max(abs(float(value)) for value in step_delta) <= max_axis_step_m + MOTION_LIMIT_EPS
-            if not step_delta_within_limit:
+            if not step_delta_within_limit and not should_decompose:
                 blocking_reasons.extend([E_EXCESSIVE_CARTESIAN_MOTION, E_STEP_DELTA_EXCEEDS_LIMIT])
-            if not axis_delta_within_limit:
+            if not axis_delta_within_limit and not should_decompose:
                 blocking_reasons.extend([E_EXCESSIVE_CARTESIAN_MOTION, E_AXIS_STEP_EXCEEDS_LIMIT])
         if session_radius_limit_m is not None:
             origin_pose = session_origin_pose or previous_verified_pose or current_pose
@@ -231,8 +283,33 @@ def evaluate_cartesian_motion_gateway(request: CartesianMotionGatewayRequest | N
         workspace_envelope_within_limit = _point_in_workspace(target_position, workspace_bounds)
         if not workspace_envelope_within_limit:
             blocking_reasons.append(E_OUT_OF_WORKSPACE)
+        decomposition_contract = build_long_step_decomposition_contract(
+            offset_m=offset,
+            target_position_m=target_position,
+            workspace_envelope_within_limit=workspace_envelope_within_limit,
+            session_radius_within_limit=session_radius_within_limit,
+            enabled=long_step_decomposition_enabled,
+            policy_name=long_step_policy_name,
+            motion_distance_regime=motion_distance_regime,
+            one_shot_distance_limit_m=one_shot_distance_limit_m,
+            hard_single_step_safety_limit_m=hard_single_step_safety_limit_m,
+            long_motion_total_limit_m=long_motion_total_limit_m,
+            max_substep_distance_m=max_substep_distance_m,
+            min_final_substep_distance_m=min_final_substep_distance_m,
+            substep_execution_mode=substep_execution_mode,
+            one_shot_distance_check_status=one_shot_distance_check_status,
+        )
+        if decomposition_contract.get("decomposition_status") == STATUS_BLOCKED:
+            reason = _string(decomposition_contract.get("decomposition_blocking_reason"))
+            if reason:
+                blocking_reasons.append(reason)
 
-    target_pose = requested_target_pose if not blocking_reasons and requested_target_pose is not None else None
+    decomposed_motion_allowed = decomposition_contract.get("decomposed_motion_allowed") is True
+    target_pose = (
+        requested_target_pose
+        if not blocking_reasons and requested_target_pose is not None and not decomposed_motion_allowed
+        else None
+    )
     workspace_check_passed = workspace_envelope_within_limit is True
 
     blocking_reasons = _unique(blocking_reasons)
@@ -282,8 +359,9 @@ def evaluate_cartesian_motion_gateway(request: CartesianMotionGatewayRequest | N
         "target_position_m": target_pose.get("position_m") if target_pose else None,
         "workspace_bounds": workspace_bounds,
         "workspace_check_passed": workspace_check_passed,
+        **decomposition_contract,
         "moveit_plan_request": _moveit_plan_request(task_id, frame, target_pose, config) if status == STATUS_PASS else None,
-        "target_pose_generated_by_teto": status == STATUS_PASS,
+        "target_pose_generated_by_teto": status == STATUS_PASS and target_pose is not None,
         "target_pose_generated_by_llm": False,
         "trajectory_generated": False,
         "joint_targets_generated": False,
@@ -674,6 +752,222 @@ def _moveit_plan_request(task_id: str, frame: str, target_pose: Dict[str, Any] |
         "generated_by_teto": True,
         "generated_by_llm": False,
     }
+
+
+def decompose_relative_motion(
+    offset_m: list[float],
+    *,
+    max_substep_distance_m: float = DEFAULT_MAX_SUBSTEP_DISTANCE_M,
+    min_final_substep_distance_m: float = DEFAULT_MIN_FINAL_SUBSTEP_DISTANCE_M,
+) -> Dict[str, Any]:
+    total_distance = _distance(offset_m)
+    if total_distance <= MOTION_LIMIT_EPS:
+        return {
+            "planned_substep_count": 0,
+            "planned_substep_distances_m": [],
+            "planned_substep_vectors_m": [],
+            "decomposition_remainder_m": 0.0,
+        }
+    max_substep = max(float(max_substep_distance_m), MOTION_LIMIT_EPS)
+    min_final = max(float(min_final_substep_distance_m), 0.0)
+    unit = [float(value) / total_distance for value in offset_m]
+    full_count = int(total_distance // max_substep)
+    remainder = total_distance - (full_count * max_substep)
+    distances = [max_substep for _ in range(full_count)]
+    if remainder > MOTION_LIMIT_EPS:
+        if distances and remainder < min_final - MOTION_LIMIT_EPS:
+            step_count = max(1, math.ceil(total_distance / max_substep))
+            distances = [total_distance / step_count for _ in range(step_count)]
+            remainder = 0.0
+        else:
+            distances.append(remainder)
+    distances = [round(float(value), 6) for value in distances if value > MOTION_LIMIT_EPS]
+    vectors = [
+        [round(component * distance, 6) for component in unit]
+        for distance in distances
+    ]
+    return {
+        "planned_substep_count": len(distances),
+        "planned_substep_distances_m": distances,
+        "planned_substep_vectors_m": vectors,
+        "decomposition_remainder_m": round(float(remainder), 6) if remainder > MOTION_LIMIT_EPS else 0.0,
+    }
+
+
+def build_long_step_decomposition_contract(
+    *,
+    offset_m: list[float],
+    target_position_m: list[float] | None,
+    workspace_envelope_within_limit: bool | None,
+    session_radius_within_limit: bool | None,
+    enabled: bool,
+    policy_name: str,
+    motion_distance_regime: str,
+    one_shot_distance_limit_m: float,
+    hard_single_step_safety_limit_m: float,
+    long_motion_total_limit_m: float,
+    max_substep_distance_m: float,
+    min_final_substep_distance_m: float,
+    substep_execution_mode: str,
+    one_shot_distance_check_status: str,
+) -> Dict[str, Any]:
+    requested_total = round(_distance(offset_m), 6)
+    if not enabled or requested_total <= max_substep_distance_m + MOTION_LIMIT_EPS:
+        return _decomposition_not_applicable(
+            motion_distance_regime=motion_distance_regime,
+            enabled=enabled,
+            policy_name=policy_name,
+            requested_total_distance_m=requested_total,
+            one_shot_distance_limit_m=one_shot_distance_limit_m,
+            hard_single_step_safety_limit_m=hard_single_step_safety_limit_m,
+            long_motion_total_limit_m=long_motion_total_limit_m,
+            max_substep_distance_m=max_substep_distance_m,
+            min_final_substep_distance_m=min_final_substep_distance_m,
+            substep_execution_mode=substep_execution_mode,
+            one_shot_distance_check_status=one_shot_distance_check_status,
+        )
+
+    decomposition = decompose_relative_motion(
+        offset_m,
+        max_substep_distance_m=max_substep_distance_m,
+        min_final_substep_distance_m=min_final_substep_distance_m,
+    )
+    distances = decomposition["planned_substep_distances_m"]
+    substep_within_limit = all(distance <= max_substep_distance_m + MOTION_LIMIT_EPS for distance in distances)
+    substep_within_hard_limit = all(distance <= hard_single_step_safety_limit_m + MOTION_LIMIT_EPS for distance in distances)
+    total_within_limit = requested_total <= long_motion_total_limit_m + MOTION_LIMIT_EPS
+    workspace_ok = workspace_envelope_within_limit is not False
+    session_ok = session_radius_within_limit is not False
+    blocking_reason = None
+    if not total_within_limit:
+        blocking_reason = E_LONG_MOTION_TOTAL_EXCEEDS_LIMIT
+    elif not substep_within_limit:
+        blocking_reason = E_SUBSTEP_DISTANCE_EXCEEDS_LIMIT
+    elif not substep_within_hard_limit:
+        blocking_reason = E_SUBSTEP_DISTANCE_EXCEEDS_HARD_SINGLE_STEP_LIMIT
+    elif not workspace_ok:
+        blocking_reason = E_DECOMPOSED_WORKSPACE_ENVELOPE_EXCEEDED
+    elif not session_ok:
+        blocking_reason = E_SESSION_RADIUS_EXCEEDS_LIMIT
+    status = STATUS_BLOCKED if blocking_reason else STATUS_PASS
+    return {
+        **_decomposition_common(
+            motion_distance_regime=motion_distance_regime,
+            enabled=enabled,
+            policy_name=policy_name,
+            requested_total_distance_m=requested_total,
+            one_shot_distance_limit_m=one_shot_distance_limit_m,
+            hard_single_step_safety_limit_m=hard_single_step_safety_limit_m,
+            long_motion_total_limit_m=long_motion_total_limit_m,
+            max_substep_distance_m=max_substep_distance_m,
+            min_final_substep_distance_m=min_final_substep_distance_m,
+            substep_execution_mode=substep_execution_mode,
+            one_shot_distance_check_status=one_shot_distance_check_status,
+        ),
+        **decomposition,
+        "planned_execution_style": "decomposed_autoregressive_contract",
+        "decomposition_status": status,
+        "decomposition_blocking_reason": blocking_reason,
+        "safety_gate_scope": "decomposed_contract",
+        "substep_distance_check_status": STATUS_PASS if substep_within_limit and substep_within_hard_limit else STATUS_BLOCKED,
+        "total_long_motion_check_status": STATUS_PASS if total_within_limit else STATUS_BLOCKED,
+        "workspace_envelope_check_status": STATUS_PASS if workspace_ok else STATUS_BLOCKED,
+        "decomposed_motion_allowed": status == STATUS_PASS,
+        "decomposed_motion_blocking_reason": blocking_reason,
+        "autoregressive_update_required": True,
+        "substep_feedback_required": True,
+        "substep_reobserve_allowed": True,
+        "requested_target_position_m": _round_vector(target_position_m),
+    }
+
+
+def _decomposition_not_applicable(
+    *,
+    motion_distance_regime: str,
+    enabled: bool,
+    policy_name: str,
+    requested_total_distance_m: float | None,
+    one_shot_distance_limit_m: float,
+    hard_single_step_safety_limit_m: float,
+    long_motion_total_limit_m: float,
+    max_substep_distance_m: float,
+    min_final_substep_distance_m: float,
+    substep_execution_mode: str,
+    one_shot_distance_check_status: str,
+) -> Dict[str, Any]:
+    return {
+        **_decomposition_common(
+            motion_distance_regime=motion_distance_regime,
+            enabled=enabled,
+            policy_name=policy_name,
+            requested_total_distance_m=requested_total_distance_m,
+            one_shot_distance_limit_m=one_shot_distance_limit_m,
+            hard_single_step_safety_limit_m=hard_single_step_safety_limit_m,
+            long_motion_total_limit_m=long_motion_total_limit_m,
+            max_substep_distance_m=max_substep_distance_m,
+            min_final_substep_distance_m=min_final_substep_distance_m,
+            substep_execution_mode=substep_execution_mode,
+            one_shot_distance_check_status=one_shot_distance_check_status,
+        ),
+        "planned_execution_style": "one_shot",
+        "planned_substep_count": 0,
+        "planned_substep_distances_m": [],
+        "planned_substep_vectors_m": [],
+        "decomposition_remainder_m": 0.0,
+        "decomposition_status": "NOT_APPLICABLE",
+        "decomposition_blocking_reason": None,
+        "safety_gate_scope": "one_shot",
+        "substep_distance_check_status": "NOT_APPLICABLE",
+        "total_long_motion_check_status": "NOT_APPLICABLE",
+        "workspace_envelope_check_status": "NOT_APPLICABLE",
+        "decomposed_motion_allowed": False,
+        "decomposed_motion_blocking_reason": None,
+        "autoregressive_update_required": False,
+        "substep_feedback_required": False,
+        "substep_reobserve_allowed": False,
+        "requested_target_position_m": None,
+    }
+
+
+def _decomposition_common(
+    *,
+    motion_distance_regime: str,
+    enabled: bool,
+    policy_name: str,
+    requested_total_distance_m: float | None,
+    one_shot_distance_limit_m: float,
+    hard_single_step_safety_limit_m: float,
+    long_motion_total_limit_m: float,
+    max_substep_distance_m: float,
+    min_final_substep_distance_m: float,
+    substep_execution_mode: str,
+    one_shot_distance_check_status: str,
+) -> Dict[str, Any]:
+    return {
+        "motion_distance_regime": motion_distance_regime,
+        "long_step_decomposition_enabled": enabled,
+        "long_step_policy_name": policy_name,
+        "requested_total_distance_m": requested_total_distance_m,
+        "one_shot_distance_limit_m": round(float(one_shot_distance_limit_m), 6),
+        "hard_single_step_safety_limit_m": round(float(hard_single_step_safety_limit_m), 6),
+        "long_motion_total_limit_m": round(float(long_motion_total_limit_m), 6),
+        "max_substep_distance_m": round(float(max_substep_distance_m), 6),
+        "min_final_substep_distance_m": round(float(min_final_substep_distance_m), 6),
+        "substep_execution_mode": substep_execution_mode,
+        "real_substep_execution_enabled": False,
+        "decomposition_does_not_bypass_safety_limits": True,
+        "one_shot_distance_check_status": one_shot_distance_check_status,
+    }
+
+
+def _motion_distance_regime(distance_m: float | None, long_step_threshold_m: float) -> str | None:
+    if distance_m is None:
+        return None
+    if distance_m <= DEFAULT_MICRO_STEP_THRESHOLD_M + MOTION_LIMIT_EPS:
+        return "micro_step"
+    if distance_m <= long_step_threshold_m + MOTION_LIMIT_EPS:
+        return "normal_step"
+    return "long_step"
 
 
 def _tolerance_ratio(config: Dict[str, Any]) -> float | None:

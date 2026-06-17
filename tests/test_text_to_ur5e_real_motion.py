@@ -974,6 +974,52 @@ def test_unsafe_qwen_distance_blocks_before_execution_preview(monkeypatch, capsy
     assert evidence["real_robot_motion_executed"] is False
 
 
+def test_one_shot_ten_cm_blocks_when_long_step_decomposition_disabled(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: pytest.fail("pose lookup should not run"))
+
+    exit_code = cli.main(["--parser", "rule", "--cmd", "move up 100 mm"])
+
+    evidence = _final_evidence(capsys.readouterr().out)
+    assert exit_code == 2
+    assert evidence["final_status"] == "BLOCKED"
+    assert "E_EXCEEDS_HARD_SAFETY_LIMIT" in evidence["blocking_reasons"]
+    assert evidence["trajectory_sent"] is False
+    assert evidence["execute_trajectory_called"] is False
+    assert evidence["real_robot_motion_executed"] is False
+
+
+def test_ten_cm_accepts_as_decomposed_contract_when_enabled(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
+
+    exit_code = cli.main(
+        [
+            "--parser",
+            "rule",
+            "--enable-long-step-decomposition",
+            "--cmd",
+            "move up 100 mm",
+        ]
+    )
+
+    evidence = _final_evidence(capsys.readouterr().out)
+    assert exit_code == 0
+    assert evidence["final_status"] == "PASS"
+    assert evidence["motion_distance_regime"] == "long_step"
+    assert evidence["planned_execution_style"] == "decomposed_autoregressive_contract"
+    assert evidence["planned_substep_count"] == 5
+    assert evidence["planned_substep_distances_m"] == [0.02, 0.02, 0.02, 0.02, 0.02]
+    assert evidence["planned_substep_vectors_m"] == [[0.0, 0.0, 0.02]] * 5
+    assert evidence["decomposition_status"] == "PASS"
+    assert evidence["decomposition_does_not_bypass_safety_limits"] is True
+    assert evidence["real_substep_execution_enabled"] is False
+    assert evidence["substep_execution_mode"] == "contract_only"
+    assert evidence["decomposed_motion_allowed"] is True
+    assert evidence["target_pose"] is None
+    assert evidence["trajectory_sent"] is False
+    assert evidence["execute_trajectory_called"] is False
+    assert evidence["real_robot_motion_executed"] is False
+
+
 def test_dry_run_with_cmd_works(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
 

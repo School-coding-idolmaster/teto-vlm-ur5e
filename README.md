@@ -70,6 +70,33 @@ classification is evidence-only unless an explicit hard-block policy is enabled
 later. The feature is offline-testable with mocks and requires no UR5
 connection.
 
+## TETO v3.0.8: Long-Step Decomposition Contract
+
+TETO v3.0.5 verifies the current TCP pose before real relative motion. TETO
+v3.0.6 records planner audit evidence, and v3.0.7 classifies that evidence with
+soft planner risk status. TETO v3.0.8 adds an offline long-step decomposition
+contract for longer relative TCP requests.
+
+When enabled, a long requested displacement can be accepted only as a
+decomposed contract: each substep must remain within the configured substep and
+single-step safety limits, while the total displacement and final workspace or
+session envelope must remain valid. The decomposition evidence records the
+distance regime, substep distances and vectors, total-motion checks, workspace
+checks, and explicit proof that safety limits were not bypassed.
+
+The 5 cm boundary remains explicit: with decomposition disabled, `0.05 m` can
+remain a valid one-shot step when it is within the configured hard safety
+limit. With decomposition enabled, the same `0.05 m` request may also be
+represented as a contract-only decomposition such as `[0.02, 0.02, 0.01]`.
+Requests above the one-shot hard limit are never accepted as one-shot motions;
+they can pass only as `decomposed_autoregressive_contract` when all substep,
+total, workspace, and session checks pass.
+
+v3.0.8 does not execute multiple real robot motions, does not send
+trajectories, and keeps `real_substep_execution_enabled=false` with
+`substep_execution_mode=contract_only`. The feature is offline-testable and
+requires no UR5 connection.
+
 ## Project Structure
 
 ```text

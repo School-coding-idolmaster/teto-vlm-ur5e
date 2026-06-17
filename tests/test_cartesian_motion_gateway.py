@@ -10,6 +10,7 @@ from src.cartesian_motion_gateway import (
     CartesianMotionExecutionRequest,
     CartesianMotionGatewayRequest,
     CartesianMotionPipelineRequest,
+    decompose_relative_motion,
     evaluate_cartesian_motion_execution,
     evaluate_cartesian_motion_gateway,
     evaluate_cartesian_motion_pipeline,
@@ -382,6 +383,175 @@ def test_real_moveit_mode_routes_plan_only_through_pose_executor(monkeypatch):
     assert calls[0].current_tcp_pose == motion["current_tcp_pose"]
 
 
+def test_decompose_relative_motion_splits_five_cm_into_bounded_substeps():
+    result = decompose_relative_motion([0.0, 0.0, 0.05], max_substep_distance_m=0.02)
+
+    assert result["planned_substep_distances_m"] == [0.02, 0.02, 0.01]
+    assert result["planned_substep_vectors_m"] == [[0.0, 0.0, 0.02], [0.0, 0.0, 0.02], [0.0, 0.0, 0.01]]
+    assert result["planned_substep_count"] == 3
+
+
+def test_decompose_relative_motion_splits_ten_cm_into_five_substeps():
+    result = decompose_relative_motion([0.10, 0.0, 0.0], max_substep_distance_m=0.02)
+
+    assert result["planned_substep_distances_m"] == [0.02, 0.02, 0.02, 0.02, 0.02]
+    assert result["planned_substep_vectors_m"] == [[0.02, 0.0, 0.0]] * 5
+    assert result["planned_substep_count"] == 5
+
+
+def test_decompose_relative_motion_preserves_negative_z_direction_and_sum():
+    result = decompose_relative_motion([0.0, 0.0, -0.05], max_substep_distance_m=0.02)
+
+    assert result["planned_substep_vectors_m"] == [[0.0, 0.0, -0.02], [0.0, 0.0, -0.02], [0.0, 0.0, -0.01]]
+    summed = [round(sum(vector[index] for vector in result["planned_substep_vectors_m"]), 6) for index in range(3)]
+    assert summed == [0.0, 0.0, -0.05]
+    assert all(distance <= 0.02 for distance in result["planned_substep_distances_m"])
+
+
+def test_gateway_blocks_long_one_shot_when_decomposition_disabled():
+    result = evaluate_cartesian_motion_gateway(
+        CartesianMotionGatewayRequest(
+            requested=True,
+            config={"max_translation_m": 0.05, "hard_safety_limit_m": 0.05},
+            command_to_task_result=_task([0.10, 0.0, 0.0]),
+            current_tcp_pose=_pose([0.40, 0.0, 0.30]),
+        )
+    )
+
+    assert result["cartesian_motion_gateway_status"] == "BLOCKED"
+    assert E_EXCESSIVE_CARTESIAN_MOTION in result["blocking_reasons"]
+    assert result["safety_gate_scope"] == "one_shot"
+    assert result["one_shot_distance_check_status"] == "BLOCKED"
+    assert result["decomposition_status"] == "NOT_APPLICABLE"
+
+
+def test_gateway_allows_five_cm_one_shot_at_hard_limit_when_decomposition_disabled():
+    result = evaluate_cartesian_motion_gateway(
+        CartesianMotionGatewayRequest(
+            requested=True,
+            config={"max_translation_m": 0.05, "hard_safety_limit_m": 0.05},
+            command_to_task_result=_task([0.05, 0.0, 0.0]),
+            current_tcp_pose=_pose([0.40, 0.0, 0.30]),
+        )
+    )
+
+    assert result["cartesian_motion_gateway_status"] == "PASS"
+    assert result["motion_distance_regime"] == "normal_step"
+    assert result["planned_execution_style"] == "one_shot"
+    assert result["safety_gate_scope"] == "one_shot"
+    assert result["one_shot_distance_check_status"] == "PASS"
+    assert result["decomposition_status"] == "NOT_APPLICABLE"
+    assert result["target_pose"]["position_m"] == [0.45, 0.0, 0.3]
+    assert result["moveit_plan_request"]["target_pose"] == result["target_pose"]
+
+
+def test_gateway_can_represent_five_cm_as_decomposed_contract_when_enabled():
+    result = evaluate_cartesian_motion_gateway(
+        CartesianMotionGatewayRequest(
+            requested=True,
+            config=_long_step_config(),
+            command_to_task_result=_task([0.05, 0.0, 0.0]),
+            current_tcp_pose=_pose([0.40, 0.0, 0.30]),
+        )
+    )
+
+    assert result["cartesian_motion_gateway_status"] == "PASS"
+    assert result["motion_distance_regime"] == "normal_step"
+    assert result["planned_execution_style"] == "decomposed_autoregressive_contract"
+    assert result["planned_substep_distances_m"] == [0.02, 0.02, 0.01]
+    assert result["planned_substep_vectors_m"] == [[0.02, 0.0, 0.0], [0.02, 0.0, 0.0], [0.01, 0.0, 0.0]]
+    assert result["safety_gate_scope"] == "decomposed_contract"
+    assert result["one_shot_distance_check_status"] == "PASS"
+    assert result["decomposition_status"] == "PASS"
+    assert result["decomposed_motion_allowed"] is True
+    assert result["substep_execution_mode"] == "contract_only"
+    assert result["real_substep_execution_enabled"] is False
+    assert result["target_pose"] is None
+    assert result["moveit_plan_request"] is None
+
+
+def test_gateway_accepts_ten_cm_as_decomposed_contract_when_enabled():
+    result = evaluate_cartesian_motion_gateway(
+        CartesianMotionGatewayRequest(
+            requested=True,
+            config=_long_step_config(),
+            command_to_task_result=_task([0.10, 0.0, 0.0]),
+            current_tcp_pose=_pose([0.40, 0.0, 0.30]),
+        )
+    )
+
+    assert result["cartesian_motion_gateway_status"] == "PASS"
+    assert result["motion_distance_regime"] == "long_step"
+    assert result["planned_execution_style"] == "decomposed_autoregressive_contract"
+    assert result["substep_execution_mode"] == "contract_only"
+    assert result["real_substep_execution_enabled"] is False
+    assert result["planned_substep_count"] == 5
+    assert result["planned_substep_distances_m"] == [0.02, 0.02, 0.02, 0.02, 0.02]
+    assert result["planned_substep_vectors_m"] == [[0.02, 0.0, 0.0]] * 5
+    assert result["decomposition_status"] == "PASS"
+    assert result["decomposition_does_not_bypass_safety_limits"] is True
+    assert result["safety_gate_scope"] == "decomposed_contract"
+    assert result["one_shot_distance_check_status"] == "BLOCKED"
+    assert result["substep_distance_check_status"] == "PASS"
+    assert result["total_long_motion_check_status"] == "PASS"
+    assert result["workspace_envelope_check_status"] == "PASS"
+    assert result["decomposed_motion_allowed"] is True
+    assert result["autoregressive_update_required"] is True
+    assert result["substep_feedback_required"] is True
+    assert result["substep_reobserve_allowed"] is True
+    assert result["target_pose"] is None
+    assert result["moveit_plan_request"] is None
+    assert result["real_robot_motion_executed"] is False
+
+
+def test_gateway_blocks_decomposed_contract_when_total_exceeds_long_limit():
+    result = evaluate_cartesian_motion_gateway(
+        CartesianMotionGatewayRequest(
+            requested=True,
+            config={**_long_step_config(), "long_motion_total_limit_m": 0.08},
+            command_to_task_result=_task([0.10, 0.0, 0.0]),
+            current_tcp_pose=_pose([0.40, 0.0, 0.30]),
+        )
+    )
+
+    assert result["cartesian_motion_gateway_status"] == "BLOCKED"
+    assert result["decomposition_status"] == "BLOCKED"
+    assert result["decomposition_blocking_reason"] == "E_LONG_MOTION_TOTAL_EXCEEDS_LIMIT"
+    assert result["decomposed_motion_allowed"] is False
+
+
+def test_gateway_blocks_decomposed_contract_when_substep_exceeds_hard_single_step():
+    result = evaluate_cartesian_motion_gateway(
+        CartesianMotionGatewayRequest(
+            requested=True,
+            config={**_long_step_config(), "max_substep_distance_m": 0.06, "hard_single_step_safety_limit_m": 0.05},
+            command_to_task_result=_task([0.10, 0.0, 0.0]),
+            current_tcp_pose=_pose([0.40, 0.0, 0.30]),
+        )
+    )
+
+    assert result["cartesian_motion_gateway_status"] == "BLOCKED"
+    assert result["decomposition_status"] == "BLOCKED"
+    assert result["decomposition_blocking_reason"] == "E_SUBSTEP_DISTANCE_EXCEEDS_HARD_SINGLE_STEP_LIMIT"
+    assert result["substep_distance_check_status"] == "BLOCKED"
+
+
+def test_gateway_blocks_decomposed_contract_when_workspace_exceeded():
+    result = evaluate_cartesian_motion_gateway(
+        CartesianMotionGatewayRequest(
+            requested=True,
+            config={**_long_step_config(), "workspace_bounds": {"x": [0.0, 0.45], "y": [-1.0, 1.0], "z": [0.0, 2.0]}},
+            command_to_task_result=_task([0.10, 0.0, 0.0]),
+            current_tcp_pose=_pose([0.40, 0.0, 0.30]),
+        )
+    )
+
+    assert result["cartesian_motion_gateway_status"] == "BLOCKED"
+    assert result["decomposition_status"] == "BLOCKED"
+    assert result["decomposition_blocking_reason"] == "E_DECOMPOSED_WORKSPACE_ENVELOPE_EXCEEDED"
+    assert result["workspace_envelope_check_status"] == "BLOCKED"
+
+
 def _task(offset):
     return {
         "command_to_task_status": "PASS",
@@ -420,6 +590,24 @@ def _step_policy_config():
         "max_step_distance_m": 0.05,
         "max_axis_step_m": 0.05,
         "hard_safety_limit_m": 0.1,
+        "workspace_bounds": {"x": [-1.0, 1.0], "y": [-1.0, 1.0], "z": [0.0, 2.0]},
+    }
+
+
+def _long_step_config():
+    return {
+        "enable_long_step_decomposition": True,
+        "long_step_policy_name": "lab_long_step_decomposition_v1",
+        "max_translation_m": 0.05,
+        "configured_max_distance_m": 0.05,
+        "max_step_distance_m": 0.05,
+        "max_axis_step_m": 0.05,
+        "hard_safety_limit_m": 0.05,
+        "hard_single_step_safety_limit_m": 0.05,
+        "long_motion_total_limit_m": 0.20,
+        "max_substep_distance_m": 0.02,
+        "min_final_substep_distance_m": 0.001,
+        "substep_execution_mode": "contract_only",
         "workspace_bounds": {"x": [-1.0, 1.0], "y": [-1.0, 1.0], "z": [0.0, 2.0]},
     }
 
