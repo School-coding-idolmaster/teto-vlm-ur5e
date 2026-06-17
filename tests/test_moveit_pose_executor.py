@@ -4,6 +4,7 @@ from src.moveit_pose_executor import (
     E_MANUAL_CONFIRMATION_REQUIRED,
     E_MOVEIT_PLAN_FAILED,
     MoveItPoseExecutorRequest,
+    evaluate_planner_audit_risk,
     evaluate_moveit_pose_execute,
     evaluate_moveit_pose_plan,
 )
@@ -145,6 +146,97 @@ def test_plan_records_planner_start_state_and_joint_delta_audit(monkeypatch):
     assert result["path_metric_source"] == "joint_trajectory"
     assert "W_SUSPICIOUS_WRIST_JOINT_DELTA_FOR_CARTESIAN_STEP" in result["planner_audit_warnings"]
     assert "W_SUSPICIOUS_WRIST_JOINT_DELTA_FOR_CARTESIAN_STEP" not in result["warnings"]
+    assert result["planner_risk_status"] == "WARN"
+    assert result["planner_risk_reasons"] == ["W_PATH_LENGTH_RATIO_HIGH"]
+    assert result["planner_risk_blocking_enabled"] is False
+
+
+def test_planner_risk_passes_low_joint_and_wrist_deltas():
+    result = evaluate_planner_audit_risk(
+        {
+            "max_joint_delta_rad": 0.4,
+            "max_wrist_joint_delta_rad": 0.3,
+            "joint_wrap_suspected": False,
+            "path_length_ratio": 1.5,
+            "cartesian_path_used": False,
+            "start_state_source": "implicit_planning_scene",
+        }
+    )
+
+    assert result["planner_risk_status"] == "PASS"
+    assert result["planner_risk_reasons"] == []
+    assert result["planner_risk_warnings"] == []
+    assert "I_CARTESIAN_PATH_NOT_USED" in result["planner_risk_infos"]
+    assert "I_START_STATE_IMPLICIT" in result["planner_risk_infos"]
+    assert result["planner_risk_blocking_enabled"] is False
+    assert result["planner_risk_blocking_reason"] is None
+
+
+def test_planner_risk_warns_high_wrist_delta_without_blocking():
+    result = evaluate_planner_audit_risk(
+        {
+            "max_joint_delta_rad": 1.2,
+            "max_wrist_joint_delta_rad": 1.8,
+            "joint_wrap_suspected": False,
+            "path_length_ratio": 2.0,
+            "cartesian_path_used": False,
+            "start_state_source": "implicit_planning_scene",
+        }
+    )
+
+    assert result["planner_risk_status"] == "WARN"
+    assert result["planner_risk_reasons"] == ["W_MAX_WRIST_DELTA_HIGH"]
+    assert "W_MAX_WRIST_DELTA_HIGH" in result["planner_risk_warnings"]
+    assert result["planner_risk_blocking_enabled"] is False
+    assert result["planner_risk_blocking_reason"] is None
+
+
+def test_planner_risk_warns_high_joint_delta_wrap_and_path_ratio_without_blocking():
+    result = evaluate_planner_audit_risk(
+        {
+            "max_joint_delta_rad": 1.9,
+            "max_wrist_joint_delta_rad": 0.4,
+            "joint_wrap_suspected": True,
+            "path_length_ratio": 4.2,
+        }
+    )
+
+    assert result["planner_risk_status"] == "WARN"
+    assert result["planner_risk_reasons"] == [
+        "W_MAX_JOINT_DELTA_HIGH",
+        "W_JOINT_WRAP_SUSPECTED",
+        "W_PATH_LENGTH_RATIO_HIGH",
+    ]
+    assert result["planner_risk_blocking_enabled"] is False
+
+
+def test_planner_risk_unknown_when_audit_data_missing():
+    result = evaluate_planner_audit_risk(
+        {
+            "cartesian_path_used": False,
+            "start_state_source": "implicit_planning_scene",
+        }
+    )
+
+    assert result["planner_risk_status"] == "UNKNOWN"
+    assert result["planner_risk_reasons"] == []
+    assert result["planner_risk_warnings"] == []
+    assert "I_CARTESIAN_PATH_NOT_USED" in result["planner_risk_infos"]
+    assert "I_START_STATE_IMPLICIT" in result["planner_risk_infos"]
+
+
+def test_planner_risk_hard_block_requires_explicit_mode_and_flag():
+    result = evaluate_planner_audit_risk(
+        {
+            "max_joint_delta_rad": 2.0,
+            "planner_risk_policy_mode": "hard_block",
+            "planner_risk_blocking_enabled": True,
+        }
+    )
+
+    assert result["planner_risk_status"] == "WARN"
+    assert result["planner_risk_blocking_enabled"] is True
+    assert result["planner_risk_blocking_reason"] == "E_PLANNER_RISK_POLICY_BLOCKED"
 
 
 def test_plan_allows_exact_relative_max_translation_from_nonzero_tcp_pose(monkeypatch):

@@ -50,6 +50,26 @@ The planner audit evidence is software-only and mock-testable. It does not
 require a UR5 connection, does not launch robot bringup, does not call
 ExecuteTrajectory, and does not send a trajectory.
 
+## TETO v3.0.7: Soft Planner Risk Classification
+
+TETO v3.0.7 classifies the v3.0.6 planner audit evidence into
+`planner_risk_status=PASS`, `WARN`, `UNKNOWN`, or `NOT_APPLICABLE`. The default
+policy is `lab_planner_audit_soft_v1` in `soft_warn` mode with planner-risk
+blocking disabled.
+
+The classifier warns about suspicious joint and wrist deltas, suspected joint
+wrap, and long joint-path-to-requested-distance ratios. It also records
+informational advisory codes for implicit planning-scene start state and
+current MoveGroup pose-goal planning where `cartesian_path_used=false`. Those
+advisories live in `planner_risk_infos`, not `planner_risk_warnings`, and do
+not by themselves mean the plan failed.
+
+This version does not change default MoveIt planning behavior, does not switch
+to `compute_cartesian_path`, and does not block execution by default. Risk
+classification is evidence-only unless an explicit hard-block policy is enabled
+later. The feature is offline-testable with mocks and requires no UR5
+connection.
+
 ## Project Structure
 
 ```text

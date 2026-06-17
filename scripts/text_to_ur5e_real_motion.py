@@ -23,6 +23,14 @@ from src.cartesian_motion_gateway import (  # noqa: E402
     evaluate_cartesian_motion_execution,
     evaluate_cartesian_motion_gateway,
 )
+from src.moveit_pose_executor import (  # noqa: E402
+    DEFAULT_PLANNER_RISK_POLICY_MODE,
+    DEFAULT_PLANNER_RISK_POLICY_NAME,
+    DEFAULT_WARN_MAX_JOINT_DELTA_RAD,
+    DEFAULT_WARN_MAX_WRIST_JOINT_DELTA_RAD,
+    DEFAULT_WARN_PATH_LENGTH_RATIO,
+    evaluate_planner_audit_risk,
+)
 from src.qwen_motion_parser import (  # noqa: E402
     QwenMotionParserRequest,
     evaluate_qwen_motion_parser,
@@ -258,11 +266,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tcp-pose-tool-frame", default=DEFAULT_TCP_POSE_TOOL_FRAME)
     parser.add_argument("--moveit-planning-frame", default=DEFAULT_MOVEIT_PLANNING_FRAME)
     parser.add_argument("--moveit-end-effector-link", default=DEFAULT_MOVEIT_END_EFFECTOR_LINK)
+    parser.add_argument("--planner-risk-policy", default=DEFAULT_PLANNER_RISK_POLICY_NAME)
+    parser.add_argument(
+        "--planner-risk-mode",
+        choices=["evidence_only", "soft_warn", "hard_block"],
+        default=DEFAULT_PLANNER_RISK_POLICY_MODE,
+    )
+    parser.add_argument("--warn-max-joint-delta-rad", type=float, default=DEFAULT_WARN_MAX_JOINT_DELTA_RAD)
+    parser.add_argument("--warn-max-wrist-joint-delta-rad", type=float, default=DEFAULT_WARN_MAX_WRIST_JOINT_DELTA_RAD)
+    parser.add_argument("--warn-path-length-ratio", type=float, default=DEFAULT_WARN_PATH_LENGTH_RATIO)
+    parser.add_argument("--enable-planner-risk-blocking", action="store_true")
     parser.add_argument("--speed-scale", type=float, default=0.10)
     parser.add_argument("--acc-scale", type=float, default=0.10)
     args = parser.parse_args(argv)
     safety_policy = _safety_policy_from_args(args)
     frame_config = _frame_config_from_args(args)
+    planner_risk_policy = _planner_risk_policy_from_args(args)
 
     real_requested = bool(args.real or args.real_small_motion)
     acceptance_mode = _acceptance_mode(args)
@@ -473,6 +492,7 @@ def main(argv: list[str] | None = None) -> int:
         previous_verified_tcp_pose=previous_verified_pose,
         safety_policy=safety_policy,
         frame_config=frame_config,
+        planner_risk_policy=planner_risk_policy,
         speed_scale=float(args.speed_scale),
         acc_scale=float(args.acc_scale),
         real=real_requested,
@@ -534,6 +554,7 @@ def main(argv: list[str] | None = None) -> int:
             previous_verified_tcp_pose=previous_verified_pose,
             safety_policy=safety_policy,
             frame_config=frame_config,
+            planner_risk_policy=planner_risk_policy,
             speed_scale=float(args.speed_scale),
             acc_scale=float(args.acc_scale),
             requested_distance_m=parsed.distance_m,
@@ -553,7 +574,7 @@ def main(argv: list[str] | None = None) -> int:
             execution=execution,
             dry_run=True,
         )
-        status = STATUS_PASS if planner_acceptance.get("status") == STATUS_PASS else STATUS_BLOCKED
+        status = STATUS_BLOCKED if planner_acceptance.get("status") == STATUS_BLOCKED else STATUS_PASS
         result = _evidence(
             status=status,
             motion=motion,
@@ -1398,6 +1419,27 @@ def _frame_config_from_args(args: argparse.Namespace) -> dict[str, str]:
     }
 
 
+def _planner_risk_policy_from_args(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "planner_risk_policy_name": str(getattr(args, "planner_risk_policy", None) or DEFAULT_PLANNER_RISK_POLICY_NAME),
+        "planner_risk_policy_mode": str(getattr(args, "planner_risk_mode", None) or DEFAULT_PLANNER_RISK_POLICY_MODE),
+        "planner_risk_blocking_enabled": bool(getattr(args, "enable_planner_risk_blocking", False)),
+        "warn_max_joint_delta_rad": (
+            _optional_number(getattr(args, "warn_max_joint_delta_rad", None))
+            or DEFAULT_WARN_MAX_JOINT_DELTA_RAD
+        ),
+        "warn_max_wrist_joint_delta_rad": (
+            _optional_number(getattr(args, "warn_max_wrist_joint_delta_rad", None))
+            or DEFAULT_WARN_MAX_WRIST_JOINT_DELTA_RAD
+        ),
+        "warn_path_length_ratio": (
+            _optional_number(getattr(args, "warn_path_length_ratio", None))
+            or DEFAULT_WARN_PATH_LENGTH_RATIO
+        ),
+        "warn_joint_wrap_suspected": True,
+    }
+
+
 def _previous_verified_tcp_pose_from_args(args: argparse.Namespace) -> tuple[dict[str, Any] | None, str | None]:
     raw = getattr(args, "previous_verified_tcp_pose_json", None)
     if not raw:
@@ -1472,6 +1514,7 @@ def _build_gateway_config(
     previous_verified_tcp_pose: dict[str, Any] | None,
     safety_policy: dict[str, Any],
     frame_config: dict[str, str],
+    planner_risk_policy: dict[str, Any],
     speed_scale: float,
     acc_scale: float,
     real: bool,
@@ -1512,6 +1555,7 @@ def _build_gateway_config(
         "orientation_tolerance_rad": tolerance["orientation_tolerance_rad"],
         "tolerance_to_requested_distance_ratio": tolerance["tolerance_to_requested_distance_ratio"],
         "small_motion_tolerance_policy": tolerance["small_motion_tolerance_policy"],
+        **planner_risk_policy,
         "max_speed_scale": min(float(speed_scale), 0.10),
         "max_acc_scale": min(float(acc_scale), 0.10),
         "current_tcp_pose": current_pose,
@@ -1533,6 +1577,7 @@ def _build_plan_only_smoke_config(
     previous_verified_tcp_pose: dict[str, Any] | None,
     safety_policy: dict[str, Any],
     frame_config: dict[str, str],
+    planner_risk_policy: dict[str, Any],
     speed_scale: float,
     acc_scale: float,
     requested_distance_m: float | None = None,
@@ -1543,6 +1588,7 @@ def _build_plan_only_smoke_config(
             previous_verified_tcp_pose=previous_verified_tcp_pose,
             safety_policy=safety_policy,
             frame_config=frame_config,
+            planner_risk_policy=planner_risk_policy,
             speed_scale=speed_scale,
             acc_scale=acc_scale,
             real=True,
@@ -1699,7 +1745,7 @@ def _planner_acceptance(
     warnings = _unique(warnings)
     reasonableness_check = STATUS_BLOCKED if blocking_reasons else STATUS_WARNING if warnings else STATUS_PASS
     status = STATUS_BLOCKED if blocking_reasons else STATUS_WARNING if warnings else STATUS_PASS
-    return {
+    result = {
         "status": status,
         "planner_acceptance_context": "plan_only_safety_audit",
         "planner_acceptance_blocks_real_execution": False,
@@ -1817,6 +1863,34 @@ def _planner_acceptance(
         "joint_delta_audit_status": moveit_result.get("joint_delta_audit_status"),
         "joint_delta_audit_reason": moveit_result.get("joint_delta_audit_reason"),
         "planner_audit_warnings": moveit_result.get("planner_audit_warnings"),
+        "planner_risk_policy_name": _first_not_none(
+            moveit_result.get("planner_risk_policy_name"),
+            moveit_plan_request.get("planner_risk_policy_name"),
+        ),
+        "planner_risk_policy_mode": _first_not_none(
+            moveit_result.get("planner_risk_policy_mode"),
+            moveit_plan_request.get("planner_risk_policy_mode"),
+        ),
+        "planner_risk_blocking_enabled": _first_not_none(
+            moveit_result.get("planner_risk_blocking_enabled"),
+            moveit_plan_request.get("planner_risk_blocking_enabled"),
+        ),
+        "warn_max_joint_delta_rad": _first_not_none(
+            moveit_result.get("warn_max_joint_delta_rad"),
+            moveit_plan_request.get("warn_max_joint_delta_rad"),
+        ),
+        "warn_max_wrist_joint_delta_rad": _first_not_none(
+            moveit_result.get("warn_max_wrist_joint_delta_rad"),
+            moveit_plan_request.get("warn_max_wrist_joint_delta_rad"),
+        ),
+        "warn_path_length_ratio": _first_not_none(
+            moveit_result.get("warn_path_length_ratio"),
+            moveit_plan_request.get("warn_path_length_ratio"),
+        ),
+        "warn_joint_wrap_suspected": _first_not_none(
+            moveit_result.get("warn_joint_wrap_suspected"),
+            moveit_plan_request.get("warn_joint_wrap_suspected"),
+        ),
         "total_joint_motion_rad": trajectory_metrics["total_joint_motion_rad"],
         "orientation_change_rad": trajectory_metrics["orientation_change_rad"],
         "trajectory_duration_s": trajectory_metrics["trajectory_duration_s"],
@@ -1824,6 +1898,7 @@ def _planner_acceptance(
         "blocking_reasons": blocking_reasons,
         "warnings": warnings,
     }
+    return {**result, **evaluate_planner_audit_risk(result)}
 
 
 def _moveit_tolerance_evidence(
@@ -2309,6 +2384,15 @@ def _evidence(
         "joint_delta_audit_status": planner_acceptance.get("joint_delta_audit_status") if isinstance(planner_acceptance, dict) else None,
         "joint_delta_audit_reason": planner_acceptance.get("joint_delta_audit_reason") if isinstance(planner_acceptance, dict) else None,
         "planner_audit_warnings": planner_acceptance.get("planner_audit_warnings") if isinstance(planner_acceptance, dict) else None,
+        "planner_risk_status": planner_acceptance.get("planner_risk_status") if isinstance(planner_acceptance, dict) else None,
+        "planner_risk_reasons": planner_acceptance.get("planner_risk_reasons") if isinstance(planner_acceptance, dict) else None,
+        "planner_risk_warnings": planner_acceptance.get("planner_risk_warnings") if isinstance(planner_acceptance, dict) else None,
+        "planner_risk_infos": planner_acceptance.get("planner_risk_infos") if isinstance(planner_acceptance, dict) else None,
+        "planner_risk_policy_name": planner_acceptance.get("planner_risk_policy_name") if isinstance(planner_acceptance, dict) else None,
+        "planner_risk_policy_mode": planner_acceptance.get("planner_risk_policy_mode") if isinstance(planner_acceptance, dict) else None,
+        "planner_risk_blocking_enabled": planner_acceptance.get("planner_risk_blocking_enabled") if isinstance(planner_acceptance, dict) else None,
+        "planner_risk_blocking_reason": planner_acceptance.get("planner_risk_blocking_reason") if isinstance(planner_acceptance, dict) else None,
+        "planner_risk_thresholds": planner_acceptance.get("planner_risk_thresholds") if isinstance(planner_acceptance, dict) else None,
         **_post_motion_top_level_fields(post_motion),
         **motion_check,
         "blocking_reasons": reasons,

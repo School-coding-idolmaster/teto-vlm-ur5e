@@ -34,6 +34,11 @@ MOVEIT_GOAL_TYPE_POSE_CONSTRAINTS = "move_group_pose_goal_constraints"
 START_STATE_SOURCE_IMPLICIT_PLANNING_SCENE = "implicit_planning_scene"
 WRIST_JOINT_NAMES = ("wrist_1_joint", "wrist_2_joint", "wrist_3_joint")
 SUSPICIOUS_WRIST_JOINT_DELTA_RAD = 1.0
+DEFAULT_PLANNER_RISK_POLICY_NAME = "lab_planner_audit_soft_v1"
+DEFAULT_PLANNER_RISK_POLICY_MODE = "soft_warn"
+DEFAULT_WARN_MAX_JOINT_DELTA_RAD = 1.57
+DEFAULT_WARN_MAX_WRIST_JOINT_DELTA_RAD = 1.57
+DEFAULT_WARN_PATH_LENGTH_RATIO = 3.0
 
 E_TARGET_POSE_MISSING = "E_TARGET_POSE_MISSING"
 E_INVALID_TARGET_POSE = "E_INVALID_TARGET_POSE"
@@ -56,6 +61,14 @@ E_MOVEIT_PLAN_FAILED = "E_MOVEIT_PLAN_FAILED"
 E_MOVEIT_EXECUTE_FAILED = "E_MOVEIT_EXECUTE_FAILED"
 E_MOVEIT_API_ERROR = "E_MOVEIT_API_ERROR"
 E_SMALL_MOTION_TOLERANCE_POLICY_VIOLATION = "E_SMALL_MOTION_TOLERANCE_POLICY_VIOLATION"
+E_PLANNER_RISK_POLICY_BLOCKED = "E_PLANNER_RISK_POLICY_BLOCKED"
+
+W_MAX_JOINT_DELTA_HIGH = "W_MAX_JOINT_DELTA_HIGH"
+W_MAX_WRIST_DELTA_HIGH = "W_MAX_WRIST_DELTA_HIGH"
+W_JOINT_WRAP_SUSPECTED = "W_JOINT_WRAP_SUSPECTED"
+W_PATH_LENGTH_RATIO_HIGH = "W_PATH_LENGTH_RATIO_HIGH"
+I_CARTESIAN_PATH_NOT_USED = "I_CARTESIAN_PATH_NOT_USED"
+I_START_STATE_IMPLICIT = "I_START_STATE_IMPLICIT"
 
 
 @dataclass(frozen=True)
@@ -106,9 +119,14 @@ def evaluate_moveit_pose_plan(request: MoveItPoseExecutorRequest | None = None) 
 
     status = STATUS_PASS if not blocking_reasons else STATUS_BLOCKED
     plan_audit = _plan_audit_result(config=config, validation=validation, api_result=api_result)
+    risk = evaluate_planner_audit_risk({**_planner_mode_evidence(config), **plan_audit, **validation, **config})
+    if _planner_risk_blocks(risk):
+        blocking_reasons.append(E_PLANNER_RISK_POLICY_BLOCKED)
+        status = STATUS_BLOCKED
     return {
         **_common_result(config=config, target_pose=target_pose, validation=validation),
         **plan_audit,
+        **risk,
         "moveit_pose_plan_requested": True,
         "moveit_pose_execute_requested": False,
         "moveit_pose_executor_status": status,
@@ -195,9 +213,15 @@ def evaluate_moveit_pose_execute(request: MoveItPoseExecutorRequest | None = Non
     execute_success = not blocking_reasons and execute_result.get("success") is True
     status = STATUS_PASS if execute_success else STATUS_BLOCKED
     plan_audit = _plan_audit_result(config=config, validation=validation, api_result=plan_result)
+    risk = evaluate_planner_audit_risk({**_planner_mode_evidence(config), **plan_audit, **validation, **config})
+    if _planner_risk_blocks(risk):
+        blocking_reasons.append(E_PLANNER_RISK_POLICY_BLOCKED)
+        execute_success = False
+        status = STATUS_BLOCKED
     return {
         **_common_result(config=config, target_pose=target_pose, validation=validation),
         **plan_audit,
+        **risk,
         "moveit_pose_plan_requested": True,
         "moveit_pose_execute_requested": True,
         "moveit_pose_executor_status": status,
@@ -608,6 +632,9 @@ def _common_result(*, config: Dict[str, Any], target_pose: Dict[str, Any] | None
         "workspace_bounds": validation.get("workspace_bounds"),
         "workspace_check_passed": validation.get("workspace_check_passed") is True,
         **_empty_plan_audit(),
+        **evaluate_planner_audit_risk(
+            {**config, **_planner_mode_evidence(config), **_start_state_evidence(config), **_empty_plan_audit()}
+        ),
         "plan_success_source": "actual_moveit_action_result",
         "execute_success_source": "actual_execute_trajectory_action_result",
         "target_pose_generated_by_llm": False,
@@ -669,6 +696,98 @@ def _planner_mode_evidence(config: Dict[str, Any]) -> Dict[str, Any]:
         "joint_space_fallback_used": False,
         "joint_space_fallback_reason": None,
     }
+
+
+def evaluate_planner_audit_risk(evidence: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    evidence = evidence if isinstance(evidence, dict) else {}
+    policy = _planner_risk_policy(evidence)
+    reasons: list[str] = []
+    infos: list[str] = []
+
+    max_joint_delta = _optional_float(evidence.get("max_joint_delta_rad"))
+    max_wrist_delta = _optional_float(evidence.get("max_wrist_joint_delta_rad"))
+    path_length_ratio = _optional_float(evidence.get("path_length_ratio"))
+    joint_wrap_suspected = evidence.get("joint_wrap_suspected")
+
+    if (
+        max_joint_delta is not None
+        and max_joint_delta > policy["warn_max_joint_delta_rad"] + MOTION_LIMIT_EPS
+    ):
+        reasons.append(W_MAX_JOINT_DELTA_HIGH)
+    if (
+        max_wrist_delta is not None
+        and max_wrist_delta > policy["warn_max_wrist_joint_delta_rad"] + MOTION_LIMIT_EPS
+    ):
+        reasons.append(W_MAX_WRIST_DELTA_HIGH)
+    if joint_wrap_suspected is True and policy["warn_joint_wrap_suspected"]:
+        reasons.append(W_JOINT_WRAP_SUSPECTED)
+    if (
+        path_length_ratio is not None
+        and path_length_ratio > policy["warn_path_length_ratio"] + MOTION_LIMIT_EPS
+    ):
+        reasons.append(W_PATH_LENGTH_RATIO_HIGH)
+
+    if evidence.get("cartesian_path_used") is False:
+        infos.append(I_CARTESIAN_PATH_NOT_USED)
+    if _string(evidence.get("start_state_source")) == START_STATE_SOURCE_IMPLICIT_PLANNING_SCENE:
+        infos.append(I_START_STATE_IMPLICIT)
+
+    decisive_data_available = any(
+        value is not None
+        for value in (max_joint_delta, max_wrist_delta, path_length_ratio, joint_wrap_suspected)
+    )
+    status = "WARN" if reasons else "PASS" if decisive_data_available else "UNKNOWN"
+    blocking_enabled = policy["planner_risk_blocking_enabled"]
+    blocking_reason = E_PLANNER_RISK_POLICY_BLOCKED if status == "WARN" and blocking_enabled else None
+    return {
+        "planner_risk_status": status,
+        "planner_risk_reasons": _unique(reasons),
+        "planner_risk_warnings": _unique(reasons),
+        "planner_risk_infos": _unique(infos),
+        "planner_risk_policy_name": policy["planner_risk_policy_name"],
+        "planner_risk_policy_mode": policy["planner_risk_policy_mode"],
+        "planner_risk_blocking_enabled": blocking_enabled,
+        "planner_risk_blocking_reason": blocking_reason,
+        "planner_risk_thresholds": {
+            "warn_max_joint_delta_rad": policy["warn_max_joint_delta_rad"],
+            "warn_max_wrist_joint_delta_rad": policy["warn_max_wrist_joint_delta_rad"],
+            "warn_path_length_ratio": policy["warn_path_length_ratio"],
+            "warn_joint_wrap_suspected": policy["warn_joint_wrap_suspected"],
+        },
+    }
+
+
+def _planner_risk_policy(evidence: Dict[str, Any]) -> Dict[str, Any]:
+    mode = _string(evidence.get("planner_risk_policy_mode")) or DEFAULT_PLANNER_RISK_POLICY_MODE
+    if mode not in {"evidence_only", "soft_warn", "hard_block"}:
+        mode = DEFAULT_PLANNER_RISK_POLICY_MODE
+    blocking_enabled = evidence.get("planner_risk_blocking_enabled") is True and mode == "hard_block"
+    return {
+        "planner_risk_policy_name": _string(evidence.get("planner_risk_policy_name")) or DEFAULT_PLANNER_RISK_POLICY_NAME,
+        "planner_risk_policy_mode": mode,
+        "planner_risk_blocking_enabled": blocking_enabled,
+        "warn_max_joint_delta_rad": (
+            _optional_float(evidence.get("warn_max_joint_delta_rad"))
+            or DEFAULT_WARN_MAX_JOINT_DELTA_RAD
+        ),
+        "warn_max_wrist_joint_delta_rad": (
+            _optional_float(evidence.get("warn_max_wrist_joint_delta_rad"))
+            or DEFAULT_WARN_MAX_WRIST_JOINT_DELTA_RAD
+        ),
+        "warn_path_length_ratio": (
+            _optional_float(evidence.get("warn_path_length_ratio"))
+            or DEFAULT_WARN_PATH_LENGTH_RATIO
+        ),
+        "warn_joint_wrap_suspected": evidence.get("warn_joint_wrap_suspected", True) is not False,
+    }
+
+
+def _planner_risk_blocks(risk: Dict[str, Any]) -> bool:
+    return (
+        risk.get("planner_risk_status") == "WARN"
+        and risk.get("planner_risk_blocking_enabled") is True
+        and risk.get("planner_risk_blocking_reason") == E_PLANNER_RISK_POLICY_BLOCKED
+    )
 
 
 def _start_state_evidence(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -832,6 +951,14 @@ def _not_requested(*, plan: bool) -> Dict[str, Any]:
         "moveit_plan_called": False,
         "moveit_execute_called": False,
         "real_robot_motion_executed": False,
+        "planner_risk_status": "NOT_APPLICABLE",
+        "planner_risk_reasons": [],
+        "planner_risk_warnings": [],
+        "planner_risk_infos": [],
+        "planner_risk_policy_name": DEFAULT_PLANNER_RISK_POLICY_NAME,
+        "planner_risk_policy_mode": DEFAULT_PLANNER_RISK_POLICY_MODE,
+        "planner_risk_blocking_enabled": False,
+        "planner_risk_blocking_reason": None,
         "blocking_reasons": [],
         "warnings": [],
     }

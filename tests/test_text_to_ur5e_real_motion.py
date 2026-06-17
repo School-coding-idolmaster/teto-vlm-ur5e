@@ -204,6 +204,16 @@ def test_manual_qwen_path_reads_stdin_and_preserves_text(monkeypatch, capsys):
     assert planner["estimated_cartesian_path_length_m"] is None
     assert planner["orientation_change_rad"] is None
     assert planner["trajectory_duration_s"] is None
+    assert planner["planner_risk_status"] == "UNKNOWN"
+    assert planner["planner_risk_reasons"] == []
+    assert planner["planner_risk_policy_name"] == "lab_planner_audit_soft_v1"
+    assert planner["planner_risk_policy_mode"] == "soft_warn"
+    assert planner["planner_risk_blocking_enabled"] is False
+    assert planner["planner_risk_warnings"] == []
+    assert "I_CARTESIAN_PATH_NOT_USED" in planner["planner_risk_infos"]
+    assert "I_START_STATE_IMPLICIT" in planner["planner_risk_infos"]
+    assert evidence["planner_risk_status"] == "UNKNOWN"
+    assert "I_CARTESIAN_PATH_NOT_USED" in evidence["planner_risk_infos"]
     assert planner["reasonableness_check"] == "PASS"
     assert evidence["real_robot_motion_executed"] is False
 
@@ -269,12 +279,47 @@ def test_mocked_plan_audit_fields_are_reported_without_blocking(monkeypatch, cap
     assert planner["planned_joint_path_length_rad"] == 1.28
     assert planner["path_metric_source"] == "joint_trajectory"
     assert planner["planner_audit_warnings"] == []
+    assert planner["planner_risk_status"] == "WARN"
+    assert planner["planner_risk_reasons"] == ["W_PATH_LENGTH_RATIO_HIGH"]
+    assert planner["planner_risk_blocking_enabled"] is False
+    assert planner["planner_risk_blocking_reason"] is None
     assert planner["warnings"] == []
     assert planner["trajectory_sent"] is False
     assert planner["execute_trajectory_called"] is False
     assert planner["real_robot_motion_executed"] is False
     assert evidence["max_wrist_joint_delta_rad"] == 0.95
     assert evidence["joint_delta_audit_status"] == "AVAILABLE"
+    assert evidence["planner_risk_status"] == "WARN"
+    assert evidence["final_status"] == "PASS"
+
+
+def test_mocked_high_wrist_planner_risk_warns_without_blocking(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
+    monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_success)
+    monkeypatch.setattr(cli, "evaluate_cartesian_motion_execution", _fake_high_wrist_risk_execution)
+
+    exit_code = cli.main(
+        [
+            "--acceptance",
+            "--plan-only-smoke",
+            "--warn-max-joint-delta-rad",
+            "2.0",
+            "--cmd",
+            "raise the tcp by 2 millimeters",
+        ]
+    )
+
+    evidence = _final_evidence(capsys.readouterr().out)
+    planner = evidence["planner_acceptance"]
+    assert exit_code == 0
+    assert planner["status"] == "PASS"
+    assert planner["planner_risk_status"] == "WARN"
+    assert planner["planner_risk_reasons"] == ["W_MAX_WRIST_DELTA_HIGH"]
+    assert planner["planner_risk_blocking_enabled"] is False
+    assert planner["blocking_reasons"] == []
+    assert evidence["planner_risk_status"] == "WARN"
+    assert evidence["blocking_reasons"] == []
+    assert evidence["final_status"] == "PASS"
 
 
 def test_manual_qwen_down_command_prints_negative_z_preview(monkeypatch, capsys):
@@ -1584,6 +1629,9 @@ def _fake_plan_only_execution(request):
 def _fake_plan_audit_execution(request):
     assert request.config["enable_moveit_execute"] is False
     assert request.config["enable_real_robot_motion"] is False
+    assert request.config["planner_risk_policy_name"] == "lab_planner_audit_soft_v1"
+    assert request.config["planner_risk_policy_mode"] == "soft_warn"
+    assert request.config["planner_risk_blocking_enabled"] is False
     return {
         "cartesian_motion_execution_status": "PASS",
         "moveit_plan_requested": True,
@@ -1668,6 +1716,24 @@ def _fake_plan_audit_execution(request):
         "blocking_reasons": [],
         "warnings": [],
     }
+
+
+def _fake_high_wrist_risk_execution(request):
+    result = _fake_plan_audit_execution(request)
+    moveit = result["moveit_pose_executor_result"]
+    moveit["per_joint_delta_rad"] = {
+        **moveit["per_joint_delta_rad"],
+        "wrist_2_joint": -1.8,
+    }
+    moveit["wrist_joint_delta_rad"] = {
+        **moveit["wrist_joint_delta_rad"],
+        "wrist_2_joint": -1.8,
+    }
+    moveit["max_joint_delta_rad"] = 0.9
+    moveit["max_wrist_joint_delta_rad"] = 1.8
+    moveit["planned_joint_path_length_rad"] = 0.002
+    moveit["path_length_ratio"] = 1.0
+    return result
 
 
 def _fake_qwen_unsafe_distance(request):
