@@ -34,16 +34,30 @@ DEFAULT_REAL_HARD_SAFETY_LIMIT_M = 0.05
 DEFAULT_REAL_POSITION_TOLERANCE_M = 0.002
 DEFAULT_REAL_ORIENTATION_TOLERANCE_RAD = 0.01
 REAL_MOTION_TOLERANCE_DISTANCE_RATIO = 0.10
-DEFAULT_SAFETY_POLICY_NAME = "lab_bringup_relative_motion_v1"
+DEFAULT_MAX_AXIS_STEP_M = DEFAULT_REAL_MAX_DISTANCE_M
+DEFAULT_SESSION_RADIUS_LIMIT_M = None
+DEFAULT_TCP_POSE_BASE_FRAME = "base_link"
+DEFAULT_TCP_POSE_TOOL_FRAME = "tool0"
+DEFAULT_MOVEIT_PLANNING_FRAME = DEFAULT_TCP_POSE_BASE_FRAME
+DEFAULT_MOVEIT_END_EFFECTOR_LINK = DEFAULT_TCP_POSE_TOOL_FRAME
+DEFAULT_SAFETY_POLICY_NAME = "lab_directional_step_motion_v1"
 DEFAULT_SAFETY_POLICY_SOURCE = "cli_defaults"
 EPS = 1e-9
 CONFIRMATION_REPLY = "y"
-REAL_SMALL_MOTION_ALLOWED_AXES = {"z"}
+BASE_LINK_DIRECTION_MAPPING = {
+    "forward": {"axis": "x", "sign": "+", "delta_index": 0, "base_link_direction": "+X"},
+    "backward": {"axis": "x", "sign": "-", "delta_index": 0, "base_link_direction": "-X"},
+    "left": {"axis": "y", "sign": "+", "delta_index": 1, "base_link_direction": "+Y"},
+    "right": {"axis": "y", "sign": "-", "delta_index": 1, "base_link_direction": "-Y"},
+    "up": {"axis": "z", "sign": "+", "delta_index": 2, "base_link_direction": "+Z"},
+    "down": {"axis": "z", "sign": "-", "delta_index": 2, "base_link_direction": "-Z"},
+}
+REAL_SMALL_MOTION_ALLOWED_AXES = {"x", "y", "z"}
 REAL_SMALL_MOTION_ALLOWED_DIRECTIONS = {"+", "-"}
 REAL_SMALL_MOTION_GATE_POLICY = (
-    "real_small_motion_normalized_contract_v3.0.3:"
-    "intent=relative_cartesian_motion;frame=base_link;axis=z;direction=+|-;"
-    "distance_m<=configured_max_distance_m;must_confirm=true"
+    "lab_directional_step_motion_v1:"
+    "intent=relative_cartesian_motion;frame=base_link;axis=x|y|z;direction=+|-;"
+    "step_delta_m<=max_step_distance_m;axis_delta_m<=max_axis_step_m;must_confirm=true"
 )
 MOCK_CURRENT_TCP_POSE_FOR_DRY_RUN_ONLY = {
     "available": True,
@@ -215,6 +229,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--plan-only-smoke", action="store_true", help="Request MoveIt planning only; ExecuteTrajectory remains disabled.")
     parser.add_argument("--acceptance", action="store_true", help="Emit v3.0.2 unified Qwen manual acceptance workflow evidence.")
     parser.add_argument("--real-small-motion", action="store_true", help="Guarded future real small-motion acceptance path; requires manual confirmation.")
+    parser.add_argument("--check-tcp-pose-readiness", action="store_true", help="Read-only current TCP pose readiness check.")
     parser.add_argument("--mock-current-tcp-pose", action="store_true", help="Use the fixed dry-run-only mock TCP pose; rejected for real motion.")
     parser.add_argument("--current-tcp-pose-json", help="Explicit current TCP pose JSON for dry-run/simulation only; rejected for real motion.")
     parser.add_argument("--cmd", help='One-shot command, for example: --cmd "move up 5 mm".')
@@ -226,19 +241,28 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--max-distance-m",
         "--max-step-m",
+        "--max-step-distance-m",
         dest="max_distance_m",
         type=float,
         default=DEFAULT_REAL_MAX_DISTANCE_M,
-        help="Configured maximum relative TCP translation in meters.",
+        help="Configured maximum per-step relative TCP translation in meters.",
     )
+    parser.add_argument("--max-axis-step-m", type=float, default=DEFAULT_MAX_AXIS_STEP_M)
     parser.add_argument("--hard-safety-limit-m", type=float, default=DEFAULT_REAL_HARD_SAFETY_LIMIT_M)
+    parser.add_argument("--session-radius-limit-m", type=float, default=DEFAULT_SESSION_RADIUS_LIMIT_M)
     parser.add_argument("--position-tolerance-m", type=float, default=DEFAULT_REAL_POSITION_TOLERANCE_M)
     parser.add_argument("--orientation-tolerance-rad", type=float, default=DEFAULT_REAL_ORIENTATION_TOLERANCE_RAD)
     parser.add_argument("--safety-policy-name", default=DEFAULT_SAFETY_POLICY_NAME)
+    parser.add_argument("--previous-verified-tcp-pose-json", help="Previous verified TCP pose JSON for step-policy evidence.")
+    parser.add_argument("--tcp-pose-base-frame", default=DEFAULT_TCP_POSE_BASE_FRAME)
+    parser.add_argument("--tcp-pose-tool-frame", default=DEFAULT_TCP_POSE_TOOL_FRAME)
+    parser.add_argument("--moveit-planning-frame", default=DEFAULT_MOVEIT_PLANNING_FRAME)
+    parser.add_argument("--moveit-end-effector-link", default=DEFAULT_MOVEIT_END_EFFECTOR_LINK)
     parser.add_argument("--speed-scale", type=float, default=0.10)
     parser.add_argument("--acc-scale", type=float, default=0.10)
     args = parser.parse_args(argv)
     safety_policy = _safety_policy_from_args(args)
+    frame_config = _frame_config_from_args(args)
 
     real_requested = bool(args.real or args.real_small_motion)
     acceptance_mode = _acceptance_mode(args)
@@ -255,6 +279,24 @@ def main(argv: list[str] | None = None) -> int:
     if args.acceptance and args.real and not args.real_small_motion:
         print(_json({"final_status": STATUS_BLOCKED, "blocking_reasons": ["E_ACCEPTANCE_REAL_REQUIRES_REAL_SMALL_MOTION"], "real_robot_motion_executed": False, **_post_motion_not_run_fields()}))
         return 2
+    if args.check_tcp_pose_readiness:
+        pose, evidence, blocker = _resolve_current_tcp_pose(args, real_requested=False)
+        readiness_status = STATUS_PASS if pose is not None and blocker is None else STATUS_BLOCKED
+        result = {
+            "final_status": readiness_status,
+            "tcp_pose_readiness_status": readiness_status,
+            "current_tcp_pose": evidence,
+            "blocking_reasons": [blocker or "E_CURRENT_TCP_POSE_MISSING"] if readiness_status != STATUS_PASS else [],
+            "execute_trajectory_called": False,
+            "trajectory_sent": False,
+            "controller_command_sent": False,
+            "real_robot_motion_executed": False,
+            "manual_confirmation_required": False,
+            "moveit_planning_frame": frame_config["moveit_planning_frame"],
+            "moveit_end_effector_link": frame_config["moveit_end_effector_link"],
+        }
+        print(_json(result))
+        return 0 if readiness_status == STATUS_PASS else 2
     if real_requested and (args.mock_current_tcp_pose or args.current_tcp_pose_json):
         print(
             _json(
@@ -376,6 +418,20 @@ def main(argv: list[str] | None = None) -> int:
     print("Parsed TETO task contract:")
     print(_json(printed_contract))
 
+    direction_guard = _direction_parse_guard(parser_metadata=parser_metadata, parsed=parsed)
+    if direction_guard is not None:
+        result = _blocked_result(
+            "E_DIRECTION_PARSE_MISMATCH",
+            printed_contract,
+            parser_metadata,
+            acceptance_mode=acceptance_mode,
+        )
+        result.update(direction_guard)
+        result["direction_parse_guard"] = direction_guard
+        print("Final execution evidence:")
+        print(_json(result))
+        return 2
+
     current_pose, current_pose_evidence, current_pose_blocker = _resolve_current_tcp_pose(args, real_requested=real_requested)
     if current_pose_blocker:
         result = _blocked_result(
@@ -399,10 +455,24 @@ def main(argv: list[str] | None = None) -> int:
         print("Final execution evidence:")
         print(_json(result))
         return 2
+    previous_verified_pose, previous_verified_pose_blocker = _previous_verified_tcp_pose_from_args(args)
+    if previous_verified_pose_blocker:
+        result = _blocked_result(
+            previous_verified_pose_blocker,
+            printed_contract,
+            parser_metadata,
+            acceptance_mode=acceptance_mode,
+            current_tcp_pose=current_pose_evidence,
+        )
+        print("Final execution evidence:")
+        print(_json(result))
+        return 2
 
     config = _build_gateway_config(
         current_pose=current_pose,
+        previous_verified_tcp_pose=previous_verified_pose,
         safety_policy=safety_policy,
+        frame_config=frame_config,
         speed_scale=float(args.speed_scale),
         acc_scale=float(args.acc_scale),
         real=real_requested,
@@ -461,7 +531,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.plan_only_smoke:
         plan_only_config = _build_plan_only_smoke_config(
             current_pose=current_pose,
+            previous_verified_tcp_pose=previous_verified_pose,
             safety_policy=safety_policy,
+            frame_config=frame_config,
             speed_scale=float(args.speed_scale),
             acc_scale=float(args.acc_scale),
             requested_distance_m=parsed.distance_m,
@@ -604,6 +676,8 @@ def main(argv: list[str] | None = None) -> int:
             timeout_s=3.0,
             settle_s=POST_EXECUTE_TCP_SETTLE_S,
             attempts=POST_EXECUTE_TCP_SAMPLE_ATTEMPTS,
+            base_frame=frame_config["tcp_pose_base_frame"],
+            tool_frame=frame_config["tcp_pose_tool_frame"],
         )
 
     status = STATUS_PASS if execution.get("real_robot_motion_executed") is True else STATUS_BLOCKED
@@ -789,6 +863,47 @@ def _metadata_from_parser_result(
     )
 
 
+def _direction_parse_guard(
+    *,
+    parser_metadata: dict[str, Any],
+    parsed: ParsedMotionCommand,
+) -> dict[str, Any] | None:
+    if parser_metadata.get("parser_source") != "qwen_llm":
+        return None
+    expected = _lexical_direction_expectation(str(parser_metadata.get("original_user_text") or ""))
+    if expected is None:
+        return None
+    qwen_axis, qwen_direction = _axis_direction_from_delta(parsed.delta_m)
+    if qwen_axis == expected["expected_axis"] and qwen_direction == expected["expected_direction"]:
+        return None
+    return {
+        "expected_axis": expected["expected_axis"],
+        "expected_direction": expected["expected_direction"],
+        "expected_direction_word": expected["direction_word"],
+        "qwen_axis": qwen_axis,
+        "qwen_direction": qwen_direction,
+        "direction_parse_mismatch": True,
+    }
+
+
+def _lexical_direction_expectation(command: str) -> dict[str, str] | None:
+    normalized = _normalize(command)
+    expectations = [
+        ("forward", "x", "+", [r"\bforward\b", r"\bforwards\b"]),
+        ("backward", "x", "-", [r"\bbackward\b", r"\bbackwards\b", r"\bback\b"]),
+        ("left", "y", "+", [r"\bleft\b"]),
+        ("right", "y", "-", [r"\bright\b"]),
+        ("up", "z", "+", [r"\bup\b", r"\bhigher\b", r"\braise\b"]),
+        ("down", "z", "-", [r"\bdown\b", r"\blower\b", r"\blowering\b"]),
+    ]
+    matches = [
+        {"direction_word": word, "expected_axis": axis, "expected_direction": sign}
+        for word, axis, sign, patterns in expectations
+        if any(re.search(pattern, normalized) for pattern in patterns)
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
 def _parser_metadata(
     *,
     input_mode: str,
@@ -902,15 +1017,59 @@ def _extract_direction_delta(normalized: str, distance_m: float) -> tuple[str, l
     return matches[0]
 
 
-def _lookup_current_tcp_pose(*, timeout_s: float) -> dict[str, Any] | None:
+def _lookup_current_tcp_pose(
+    *,
+    timeout_s: float,
+    base_frame: str = DEFAULT_TCP_POSE_BASE_FRAME,
+    tool_frame: str = DEFAULT_TCP_POSE_TOOL_FRAME,
+) -> dict[str, Any] | None:
+    readiness = _lookup_current_tcp_pose_readiness(
+        timeout_s=timeout_s,
+        base_frame=base_frame,
+        tool_frame=tool_frame,
+    )
+    if readiness.get("tcp_pose_lookup_success") is not True:
+        return None
+    return readiness.get("current_tcp_pose")
+
+
+def _lookup_current_tcp_pose_readiness(
+    *,
+    timeout_s: float,
+    base_frame: str,
+    tool_frame: str,
+) -> dict[str, Any]:
+    base_frame = base_frame or DEFAULT_TCP_POSE_BASE_FRAME
+    tool_frame = tool_frame or DEFAULT_TCP_POSE_TOOL_FRAME
+    evidence: dict[str, Any] = {
+        "tcp_pose_readiness_status": STATUS_BLOCKED,
+        "tcp_pose_source": "tf2",
+        "tcp_pose_base_frame": base_frame,
+        "tcp_pose_tool_frame": tool_frame,
+        "tcp_pose_lookup_success": False,
+        "tcp_pose_lookup_error": None,
+        "tcp_pose_available": False,
+        "tcp_pose_stamp": None,
+        "tcp_pose_age_s": None,
+        "tcp_pose_stale_after_s": TCP_POSE_STALE_AFTER_S,
+        "tf_available": False,
+        "tf_static_available": None,
+        "available_frames_sample": None,
+        "robot_state_readiness_status": "UNKNOWN",
+        "current_tcp_pose_blocking_reason": "E_CURRENT_TCP_POSE_MISSING",
+        "current_tcp_pose": None,
+    }
     try:
         import rclpy
         from rclpy.duration import Duration
         from tf2_ros import Buffer, TransformListener
-    except Exception:
-        return None
+    except Exception as exc:
+        evidence["tcp_pose_lookup_error"] = f"E_ROS2_TF_IMPORT_FAILED:{exc}"
+        evidence["robot_state_readiness_status"] = STATUS_BLOCKED
+        return evidence
 
     initialized_here = False
+    node = None
     try:
         if not rclpy.ok():
             rclpy.init(args=None)
@@ -919,32 +1078,64 @@ def _lookup_current_tcp_pose(*, timeout_s: float) -> dict[str, Any] | None:
         buffer = Buffer()
         listener = TransformListener(buffer, node)
         end = node.get_clock().now() + Duration(seconds=float(timeout_s))
+        last_error = None
         while rclpy.ok() and node.get_clock().now() < end:
             rclpy.spin_once(node, timeout_sec=0.1)
             try:
-                tf = buffer.lookup_transform("base_link", "tool0", rclpy.time.Time())
+                frames = buffer.all_frames_as_string()
+                if frames:
+                    evidence["available_frames_sample"] = str(frames)[:1000]
+                    evidence["tf_available"] = True
+            except Exception:
+                pass
+            try:
+                tf = buffer.lookup_transform(base_frame, tool_frame, rclpy.time.Time())
                 t = tf.transform.translation
                 q = tf.transform.rotation
                 stamp = _stamp_seconds(getattr(tf, "header", None))
                 now_s = _clock_seconds(node)
                 age_s = round(now_s - stamp, 6) if stamp is not None and now_s is not None else None
-                return {
-                    "frame": "base_link",
+                pose = {
+                    "frame": base_frame,
                     "position_m": [t.x, t.y, t.z],
                     "orientation_xyzw": [q.x, q.y, q.z, q.w],
                     "tcp_pose_stamp": stamp,
                     "tcp_pose_age_s": age_s,
+                    "tcp_pose_base_frame": base_frame,
+                    "tcp_pose_tool_frame": tool_frame,
+                    "source": "tf2_lookup",
                 }
+                evidence.update(
+                    {
+                        "tcp_pose_readiness_status": STATUS_PASS,
+                        "tcp_pose_lookup_success": True,
+                        "tcp_pose_lookup_error": None,
+                        "tcp_pose_available": True,
+                        "tcp_pose_stamp": stamp,
+                        "tcp_pose_age_s": age_s,
+                        "tf_available": True,
+                        "robot_state_readiness_status": STATUS_PASS,
+                        "current_tcp_pose_blocking_reason": None,
+                        "current_tcp_pose": pose,
+                    }
+                )
+                return evidence
+            except Exception as exc:
+                last_error = exc
+                pass
+        evidence["tcp_pose_lookup_error"] = f"E_TF_LOOKUP_FAILED:{last_error}" if last_error else "E_TF_LOOKUP_TIMEOUT"
+        evidence["robot_state_readiness_status"] = STATUS_BLOCKED
+        return evidence
+    except Exception as exc:
+        evidence["tcp_pose_lookup_error"] = f"E_TCP_POSE_LOOKUP_FAILED:{exc}"
+        evidence["robot_state_readiness_status"] = STATUS_BLOCKED
+        return evidence
+    finally:
+        if node is not None:
+            try:
+                node.destroy_node()
             except Exception:
                 pass
-        return None
-    except Exception:
-        return None
-    finally:
-        try:
-            node.destroy_node()
-        except Exception:
-            pass
         if initialized_here:
             try:
                 rclpy.shutdown()
@@ -952,14 +1143,28 @@ def _lookup_current_tcp_pose(*, timeout_s: float) -> dict[str, Any] | None:
                 pass
 
 
-def _sample_tcp_pose_after_execution(*, timeout_s: float, settle_s: float, attempts: int) -> dict[str, Any] | None:
+def _sample_tcp_pose_after_execution(
+    *,
+    timeout_s: float,
+    settle_s: float,
+    attempts: int,
+    base_frame: str = DEFAULT_TCP_POSE_BASE_FRAME,
+    tool_frame: str = DEFAULT_TCP_POSE_TOOL_FRAME,
+) -> dict[str, Any] | None:
     settle_s = max(0.0, float(settle_s))
     attempts = max(1, int(attempts))
     if settle_s > 0.0:
         time.sleep(settle_s)
     last_pose = None
     for attempt in range(1, attempts + 1):
-        last_pose = _lookup_current_tcp_pose(timeout_s=timeout_s)
+        if base_frame == DEFAULT_TCP_POSE_BASE_FRAME and tool_frame == DEFAULT_TCP_POSE_TOOL_FRAME:
+            last_pose = _lookup_current_tcp_pose(timeout_s=timeout_s)
+        else:
+            last_pose = _lookup_current_tcp_pose(
+                timeout_s=timeout_s,
+                base_frame=base_frame,
+                tool_frame=tool_frame,
+            )
         if last_pose is not None:
             pose = dict(last_pose)
             pose["tcp_pose_sample_settle_s"] = round(settle_s, 6)
@@ -1006,32 +1211,66 @@ def _clock_seconds(node: Any) -> float | None:
 
 
 def _resolve_current_tcp_pose(args: argparse.Namespace, *, real_requested: bool) -> tuple[dict[str, Any] | None, dict[str, Any], str | None]:
+    frame_config = _frame_config_from_args(args)
+    base_frame = frame_config["tcp_pose_base_frame"]
+    tool_frame = frame_config["tcp_pose_tool_frame"]
     if args.mock_current_tcp_pose:
         pose = dict(MOCK_CURRENT_TCP_POSE_FOR_DRY_RUN_ONLY)
+        pose["frame"] = base_frame
+        pose["tcp_pose_base_frame"] = base_frame
+        pose["tcp_pose_tool_frame"] = tool_frame
+        pose["tcp_pose_readiness_status"] = STATUS_PASS
+        pose["tcp_pose_lookup_success"] = True
+        pose["tcp_pose_available"] = True
+        pose["tcp_pose_source"] = pose.get("source")
         return _pose_for_gateway(pose), pose, None
 
     if args.current_tcp_pose_json:
         try:
             raw_pose = json.loads(args.current_tcp_pose_json)
         except json.JSONDecodeError:
-            return None, _current_tcp_pose_unavailable(real_required=real_requested), "E_INVALID_CURRENT_TCP_POSE_JSON"
-        pose = _current_tcp_pose_evidence(raw_pose, source="provided_current_tcp_pose_for_dry_run_only", allowed_for_real_execution=False)
+            return None, _current_tcp_pose_unavailable(real_required=real_requested, base_frame=base_frame, tool_frame=tool_frame, lookup_error="E_INVALID_CURRENT_TCP_POSE_JSON"), "E_INVALID_CURRENT_TCP_POSE_JSON"
+        pose = _current_tcp_pose_evidence(
+            raw_pose,
+            source="provided_current_tcp_pose_for_dry_run_only",
+            allowed_for_real_execution=False,
+            base_frame=base_frame,
+            tool_frame=tool_frame,
+        )
         if pose is None:
-            return None, _current_tcp_pose_unavailable(real_required=real_requested), "E_INVALID_CURRENT_TCP_POSE"
+            return None, _current_tcp_pose_unavailable(real_required=real_requested, base_frame=base_frame, tool_frame=tool_frame, lookup_error="E_INVALID_CURRENT_TCP_POSE"), "E_INVALID_CURRENT_TCP_POSE"
         return _pose_for_gateway(pose), pose, None
 
-    pose = _lookup_current_tcp_pose(timeout_s=3.0)
+    if base_frame == DEFAULT_TCP_POSE_BASE_FRAME and tool_frame == DEFAULT_TCP_POSE_TOOL_FRAME:
+        pose = _lookup_current_tcp_pose(timeout_s=3.0)
+    else:
+        pose = _lookup_current_tcp_pose(
+            timeout_s=3.0,
+            base_frame=base_frame,
+            tool_frame=tool_frame,
+        )
     if pose is None:
-        return None, _current_tcp_pose_unavailable(real_required=real_requested), None
-    evidence = _current_tcp_pose_evidence(pose, source=pose.get("source") or "real_robot_state", allowed_for_real_execution=True)
+        return None, _current_tcp_pose_unavailable(
+            real_required=real_requested,
+            base_frame=base_frame,
+            tool_frame=tool_frame,
+            lookup_error="E_TF_LOOKUP_UNAVAILABLE",
+        ), None
+    evidence = _current_tcp_pose_evidence(
+        pose,
+        source=pose.get("source") or "real_robot_state",
+        allowed_for_real_execution=True,
+        base_frame=base_frame,
+        tool_frame=tool_frame,
+    )
     if evidence is None:
-        return None, _current_tcp_pose_unavailable(real_required=real_requested), "E_INVALID_CURRENT_TCP_POSE"
+        return None, _current_tcp_pose_unavailable(real_required=real_requested, base_frame=base_frame, tool_frame=tool_frame, lookup_error="E_INVALID_CURRENT_TCP_POSE"), "E_INVALID_CURRENT_TCP_POSE"
     return _pose_for_gateway(evidence), evidence, None
 
 
 def _pose_for_gateway(pose: dict[str, Any]) -> dict[str, Any]:
     return {
-        "frame": pose.get("frame") or "base_link",
+        "frame": pose.get("frame") or pose.get("tcp_pose_base_frame") or DEFAULT_TCP_POSE_BASE_FRAME,
         "position_m": list(pose.get("position_m") or []),
         "orientation_xyzw": list(pose.get("orientation_xyzw") or []),
     }
@@ -1042,22 +1281,43 @@ def _current_tcp_pose_evidence(
     *,
     source: str,
     allowed_for_real_execution: bool,
+    base_frame: str = DEFAULT_TCP_POSE_BASE_FRAME,
+    tool_frame: str = DEFAULT_TCP_POSE_TOOL_FRAME,
+    readiness: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     if not isinstance(pose, dict):
         return None
+    base_frame = str(pose.get("tcp_pose_base_frame") or base_frame or DEFAULT_TCP_POSE_BASE_FRAME)
+    tool_frame = str(pose.get("tcp_pose_tool_frame") or tool_frame or DEFAULT_TCP_POSE_TOOL_FRAME)
     position = pose.get("position_m")
     orientation = pose.get("orientation_xyzw")
     if not _vector3(position) or not _quaternion(orientation):
         return None
+    readiness = readiness if isinstance(readiness, dict) else {}
+    stamp = _optional_number(pose.get("tcp_pose_stamp"))
+    age_s = _optional_number(pose.get("tcp_pose_age_s"))
     return {
         "available": True,
-        "frame": pose.get("frame") or "base_link",
+        "frame": pose.get("frame") or base_frame,
         "position_m": [round(float(value), 12) for value in position],
         "orientation_xyzw": [round(float(value), 15) for value in orientation],
         "source": source,
+        "tcp_pose_readiness_status": STATUS_PASS,
+        "tcp_pose_source": source,
+        "tcp_pose_base_frame": base_frame,
+        "tcp_pose_tool_frame": tool_frame,
+        "tcp_pose_lookup_success": True,
+        "tcp_pose_lookup_error": None,
+        "tcp_pose_available": True,
+        "tcp_pose_stamp": stamp,
+        "tcp_pose_age_s": age_s,
+        "tcp_pose_stale_after_s": TCP_POSE_STALE_AFTER_S,
+        "tf_available": readiness.get("tf_available"),
+        "tf_static_available": readiness.get("tf_static_available"),
+        "available_frames_sample": readiness.get("available_frames_sample"),
+        "robot_state_readiness_status": readiness.get("robot_state_readiness_status", STATUS_PASS),
+        "current_tcp_pose_blocking_reason": None,
         "allowed_for_real_execution": allowed_for_real_execution,
-        "tcp_pose_stamp": _optional_number(pose.get("tcp_pose_stamp")),
-        "tcp_pose_age_s": _optional_number(pose.get("tcp_pose_age_s")),
         "tcp_pose_sample_settle_s": _optional_number(pose.get("tcp_pose_sample_settle_s")),
         "tcp_pose_sample_attempts": int(pose["tcp_pose_sample_attempts"])
         if isinstance(pose.get("tcp_pose_sample_attempts"), int)
@@ -1066,27 +1326,56 @@ def _current_tcp_pose_evidence(
     }
 
 
-def _current_tcp_pose_unavailable(*, real_required: bool) -> dict[str, Any]:
+def _current_tcp_pose_unavailable(
+    *,
+    real_required: bool,
+    base_frame: str = DEFAULT_TCP_POSE_BASE_FRAME,
+    tool_frame: str = DEFAULT_TCP_POSE_TOOL_FRAME,
+    lookup_error: Any = None,
+    readiness: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    readiness = readiness if isinstance(readiness, dict) else {}
     return {
         "available": False,
         "frame": None,
         "position_m": None,
         "orientation_xyzw": None,
         "source": "real_robot_state_required" if real_required else "current_tcp_pose_not_provided_or_available",
+        "tcp_pose_readiness_status": STATUS_BLOCKED,
+        "tcp_pose_source": readiness.get("tcp_pose_source", "tf2"),
+        "tcp_pose_base_frame": base_frame,
+        "tcp_pose_tool_frame": tool_frame,
+        "tcp_pose_lookup_success": False,
+        "tcp_pose_lookup_error": lookup_error,
+        "tcp_pose_available": False,
+        "tcp_pose_stamp": None,
+        "tcp_pose_age_s": None,
+        "tcp_pose_stale_after_s": TCP_POSE_STALE_AFTER_S,
+        "tf_available": readiness.get("tf_available", False),
+        "tf_static_available": readiness.get("tf_static_available"),
+        "available_frames_sample": readiness.get("available_frames_sample"),
+        "robot_state_readiness_status": readiness.get("robot_state_readiness_status", STATUS_BLOCKED),
+        "current_tcp_pose_blocking_reason": "E_CURRENT_TCP_POSE_MISSING",
         "allowed_for_real_execution": True if real_required else False,
     }
 
 
 def _safety_policy_from_args(args: argparse.Namespace) -> dict[str, Any]:
     configured_max = _optional_number(getattr(args, "max_distance_m", None))
+    max_axis_step = _optional_number(getattr(args, "max_axis_step_m", None))
     hard_limit = _optional_number(getattr(args, "hard_safety_limit_m", None))
+    session_radius_limit = _optional_number(getattr(args, "session_radius_limit_m", None))
     configured_position_tolerance = _optional_number(getattr(args, "position_tolerance_m", None))
     orientation_tolerance = _optional_number(getattr(args, "orientation_tolerance_rad", None))
+    max_step_distance = configured_max if configured_max is not None else DEFAULT_REAL_MAX_DISTANCE_M
     return {
         "safety_policy_name": str(getattr(args, "safety_policy_name", None) or DEFAULT_SAFETY_POLICY_NAME),
         "safety_policy_source": DEFAULT_SAFETY_POLICY_SOURCE,
-        "configured_max_distance_m": configured_max if configured_max is not None else DEFAULT_REAL_MAX_DISTANCE_M,
+        "configured_max_distance_m": max_step_distance,
+        "max_step_distance_m": max_step_distance,
+        "max_axis_step_m": max_axis_step if max_axis_step is not None else DEFAULT_MAX_AXIS_STEP_M,
         "hard_safety_limit_m": hard_limit if hard_limit is not None else DEFAULT_REAL_HARD_SAFETY_LIMIT_M,
+        "session_radius_limit_m": session_radius_limit,
         "configured_position_tolerance_m": (
             configured_position_tolerance
             if configured_position_tolerance is not None
@@ -1098,6 +1387,33 @@ def _safety_policy_from_args(args: argparse.Namespace) -> dict[str, Any]:
             else DEFAULT_REAL_ORIENTATION_TOLERANCE_RAD
         ),
     }
+
+
+def _frame_config_from_args(args: argparse.Namespace) -> dict[str, str]:
+    return {
+        "tcp_pose_base_frame": str(getattr(args, "tcp_pose_base_frame", None) or DEFAULT_TCP_POSE_BASE_FRAME),
+        "tcp_pose_tool_frame": str(getattr(args, "tcp_pose_tool_frame", None) or DEFAULT_TCP_POSE_TOOL_FRAME),
+        "moveit_planning_frame": str(getattr(args, "moveit_planning_frame", None) or DEFAULT_MOVEIT_PLANNING_FRAME),
+        "moveit_end_effector_link": str(getattr(args, "moveit_end_effector_link", None) or DEFAULT_MOVEIT_END_EFFECTOR_LINK),
+    }
+
+
+def _previous_verified_tcp_pose_from_args(args: argparse.Namespace) -> tuple[dict[str, Any] | None, str | None]:
+    raw = getattr(args, "previous_verified_tcp_pose_json", None)
+    if not raw:
+        return None, None
+    try:
+        pose = json.loads(raw)
+    except json.JSONDecodeError:
+        return None, "E_INVALID_PREVIOUS_VERIFIED_TCP_POSE_JSON"
+    evidence = _current_tcp_pose_evidence(
+        pose if isinstance(pose, dict) else {},
+        source="previous_verified_tcp_pose_json",
+        allowed_for_real_execution=True,
+    )
+    if evidence.get("available") is not True:
+        return None, "E_INVALID_PREVIOUS_VERIFIED_TCP_POSE"
+    return evidence, None
 
 
 def _execution_prereq_blockers(*, timeout_s: float) -> list[str]:
@@ -1153,7 +1469,9 @@ def _execution_prereq_blockers(*, timeout_s: float) -> list[str]:
 def _build_gateway_config(
     *,
     current_pose: dict[str, Any],
+    previous_verified_tcp_pose: dict[str, Any] | None,
     safety_policy: dict[str, Any],
+    frame_config: dict[str, str],
     speed_scale: float,
     acc_scale: float,
     real: bool,
@@ -1172,16 +1490,19 @@ def _build_gateway_config(
         "enable_real_robot_motion": bool(real and not dry_run),
         "manual_confirmation_required": True,
         "planning_group": "ur_manipulator",
-        "planning_frame": "base_link",
-        "end_effector_frame": "tool0",
-        "end_effector_link": "tool0",
+        "planning_frame": frame_config["moveit_planning_frame"],
+        "end_effector_frame": frame_config["moveit_end_effector_link"],
+        "end_effector_link": frame_config["moveit_end_effector_link"],
         "move_group_action_name": "/move_action",
         "execute_trajectory_action_name": "/execute_trajectory",
         "pipeline_id": "move_group",
         "planner_id": "ur_manipulator[RRTConnectkConfigDefault]",
-        "allowed_frames": ["base_link"],
+        "allowed_frames": [frame_config["tcp_pose_base_frame"], frame_config["moveit_planning_frame"]],
         "max_translation_m": safety_policy["configured_max_distance_m"],
+        "max_step_distance_m": safety_policy["max_step_distance_m"],
+        "max_axis_step_m": safety_policy["max_axis_step_m"],
         "hard_safety_limit_m": safety_policy["hard_safety_limit_m"],
+        "session_radius_limit_m": safety_policy["session_radius_limit_m"],
         "configured_max_distance_m": safety_policy["configured_max_distance_m"],
         "safety_policy_name": safety_policy["safety_policy_name"],
         "safety_policy_source": safety_policy["safety_policy_source"],
@@ -1194,6 +1515,10 @@ def _build_gateway_config(
         "max_speed_scale": min(float(speed_scale), 0.10),
         "max_acc_scale": min(float(acc_scale), 0.10),
         "current_tcp_pose": current_pose,
+        "previous_verified_tcp_pose": previous_verified_tcp_pose,
+        "tcp_pose_base_frame": frame_config["tcp_pose_base_frame"],
+        "tcp_pose_tool_frame": frame_config["tcp_pose_tool_frame"],
+        "base_link_direction_mapping": BASE_LINK_DIRECTION_MAPPING,
         "robot_state_ok": True,
         "safety_status_ok": True,
         "protective_stop": False,
@@ -1205,7 +1530,9 @@ def _build_gateway_config(
 def _build_plan_only_smoke_config(
     *,
     current_pose: dict[str, Any],
+    previous_verified_tcp_pose: dict[str, Any] | None,
     safety_policy: dict[str, Any],
+    frame_config: dict[str, str],
     speed_scale: float,
     acc_scale: float,
     requested_distance_m: float | None = None,
@@ -1213,7 +1540,9 @@ def _build_plan_only_smoke_config(
     return {
         **_build_gateway_config(
             current_pose=current_pose,
+            previous_verified_tcp_pose=previous_verified_tcp_pose,
             safety_policy=safety_policy,
+            frame_config=frame_config,
             speed_scale=speed_scale,
             acc_scale=acc_scale,
             real=True,
@@ -1385,7 +1714,23 @@ def _planner_acceptance(
             _optional_number(motion.get("configured_max_distance_m")),
             _optional_number(moveit_result.get("configured_max_distance_m")),
         ),
+        "motion_frame": motion.get("motion_frame") or execution_preview.get("frame"),
+        "direction_axis": motion.get("direction_axis") or execution_preview.get("axis"),
+        "direction_sign": motion.get("direction_sign") or execution_preview.get("direction"),
+        "first_move_bootstrap_used": motion.get("first_move_bootstrap_used"),
+        "previous_verified_tcp_pose": motion.get("previous_verified_tcp_pose"),
+        "current_measured_tcp_pose": motion.get("current_measured_tcp_pose"),
+        "requested_target_tcp_pose": motion.get("requested_target_tcp_pose"),
+        "delta_from_current_tcp_m": motion.get("delta_from_current_tcp_m"),
+        "delta_from_previous_verified_tcp_m": motion.get("delta_from_previous_verified_tcp_m"),
+        "max_step_distance_m": motion.get("max_step_distance_m"),
+        "max_axis_step_m": motion.get("max_axis_step_m"),
         "hard_safety_limit_m": hard_safety_limit,
+        "session_radius_limit_m": motion.get("session_radius_limit_m"),
+        "step_delta_within_limit": motion.get("step_delta_within_limit"),
+        "axis_delta_within_limit": motion.get("axis_delta_within_limit"),
+        "workspace_envelope_within_limit": motion.get("workspace_envelope_within_limit"),
+        "base_link_direction_mapping": motion.get("base_link_direction_mapping"),
         "requested_distance_within_configured_limit": _first_not_none(
             motion.get("requested_distance_within_configured_limit"),
             moveit_result.get("requested_distance_within_configured_limit"),
@@ -1468,6 +1813,7 @@ def _real_small_motion_gate(
     blockers: list[str] = []
     axis, sign = _axis_direction_from_delta(parsed.delta_m)
     configured_max_distance = _optional_number(execution_preview.get("max_distance_m")) or DEFAULT_REAL_MAX_DISTANCE_M
+    max_axis_step = _optional_number(planner_acceptance.get("max_axis_step_m")) or configured_max_distance
     hard_safety_limit = _optional_number(execution_preview.get("hard_safety_limit_m")) or DEFAULT_REAL_HARD_SAFETY_LIMIT_M
     requested_distance_within_configured_limit = parsed.distance_m <= configured_max_distance + EPS
     requested_distance_within_hard_limit = parsed.distance_m <= hard_safety_limit + EPS
@@ -1508,8 +1854,14 @@ def _real_small_motion_gate(
         "allowed_direction": sign if direction_allowed else None,
         "allowed_distance_m": parsed.distance_m if distance_allowed else None,
         "configured_max_distance_m": configured_max_distance,
+        "max_step_distance_m": configured_max_distance,
+        "max_axis_step_m": max_axis_step,
         "hard_safety_limit_m": hard_safety_limit,
         "requested_distance_within_configured_limit": requested_distance_within_configured_limit,
+        "motion_frame": parsed.frame,
+        "direction_axis": axis,
+        "direction_sign": sign,
+        "base_link_direction_mapping": BASE_LINK_DIRECTION_MAPPING,
         "real_small_motion_command_allowed": not blockers,
         "normalized_intent": execution_preview.get("intent"),
         "normalized_frame": parsed.frame,
@@ -1829,7 +2181,23 @@ def _evidence(
         **_real_small_motion_gate_fields(real_small_motion_gate),
         "requested_distance_m": planner_acceptance.get("requested_distance_m") if isinstance(planner_acceptance, dict) else None,
         "configured_max_distance_m": planner_acceptance.get("configured_max_distance_m") if isinstance(planner_acceptance, dict) else None,
+        "motion_frame": planner_acceptance.get("motion_frame") if isinstance(planner_acceptance, dict) else None,
+        "direction_axis": planner_acceptance.get("direction_axis") if isinstance(planner_acceptance, dict) else None,
+        "direction_sign": planner_acceptance.get("direction_sign") if isinstance(planner_acceptance, dict) else None,
+        "first_move_bootstrap_used": planner_acceptance.get("first_move_bootstrap_used") if isinstance(planner_acceptance, dict) else None,
+        "previous_verified_tcp_pose": planner_acceptance.get("previous_verified_tcp_pose") if isinstance(planner_acceptance, dict) else None,
+        "current_measured_tcp_pose": planner_acceptance.get("current_measured_tcp_pose") if isinstance(planner_acceptance, dict) else None,
+        "requested_target_tcp_pose": planner_acceptance.get("requested_target_tcp_pose") if isinstance(planner_acceptance, dict) else None,
+        "delta_from_current_tcp_m": planner_acceptance.get("delta_from_current_tcp_m") if isinstance(planner_acceptance, dict) else None,
+        "delta_from_previous_verified_tcp_m": planner_acceptance.get("delta_from_previous_verified_tcp_m") if isinstance(planner_acceptance, dict) else None,
+        "max_step_distance_m": planner_acceptance.get("max_step_distance_m") if isinstance(planner_acceptance, dict) else None,
+        "max_axis_step_m": planner_acceptance.get("max_axis_step_m") if isinstance(planner_acceptance, dict) else None,
         "hard_safety_limit_m": planner_acceptance.get("hard_safety_limit_m") if isinstance(planner_acceptance, dict) else None,
+        "session_radius_limit_m": planner_acceptance.get("session_radius_limit_m") if isinstance(planner_acceptance, dict) else None,
+        "step_delta_within_limit": planner_acceptance.get("step_delta_within_limit") if isinstance(planner_acceptance, dict) else None,
+        "axis_delta_within_limit": planner_acceptance.get("axis_delta_within_limit") if isinstance(planner_acceptance, dict) else None,
+        "workspace_envelope_within_limit": planner_acceptance.get("workspace_envelope_within_limit") if isinstance(planner_acceptance, dict) else None,
+        "base_link_direction_mapping": planner_acceptance.get("base_link_direction_mapping") if isinstance(planner_acceptance, dict) else None,
         "requested_distance_within_configured_limit": planner_acceptance.get("requested_distance_within_configured_limit") if isinstance(planner_acceptance, dict) else None,
         "safety_policy_source": planner_acceptance.get("safety_policy_source") if isinstance(planner_acceptance, dict) else None,
         "safety_policy_name": planner_acceptance.get("safety_policy_name") if isinstance(planner_acceptance, dict) else None,
@@ -1861,6 +2229,12 @@ def _real_small_motion_gate_fields(gate: dict[str, Any] | None) -> dict[str, Any
         "allowed_axis": gate.get("allowed_axis"),
         "allowed_direction": gate.get("allowed_direction"),
         "allowed_distance_m": gate.get("allowed_distance_m"),
+        "motion_frame": gate.get("motion_frame"),
+        "direction_axis": gate.get("direction_axis"),
+        "direction_sign": gate.get("direction_sign"),
+        "max_step_distance_m": gate.get("max_step_distance_m"),
+        "max_axis_step_m": gate.get("max_axis_step_m"),
+        "base_link_direction_mapping": gate.get("base_link_direction_mapping"),
         "real_small_motion_command_allowed": gate.get("real_small_motion_command_allowed") is True,
     }
 
@@ -2047,8 +2421,13 @@ def _tcp_pose_for_evidence(pose: dict[str, Any] | None) -> dict[str, Any] | None
             "orientation_xyzw": [round(float(value), 15) for value in pose["orientation_xyzw"]],
             "source": pose.get("source"),
             "allowed_for_real_execution": pose.get("allowed_for_real_execution"),
+            "tcp_pose_base_frame": pose.get("tcp_pose_base_frame"),
+            "tcp_pose_tool_frame": pose.get("tcp_pose_tool_frame"),
+            "tcp_pose_source": pose.get("tcp_pose_source"),
+            "tcp_pose_readiness_status": pose.get("tcp_pose_readiness_status"),
             "tcp_pose_stamp": _optional_number(pose.get("tcp_pose_stamp")),
             "tcp_pose_age_s": _optional_number(pose.get("tcp_pose_age_s")),
+            "tcp_pose_stale_after_s": _optional_number(pose.get("tcp_pose_stale_after_s")),
             "tcp_pose_sample_settle_s": _optional_number(pose.get("tcp_pose_sample_settle_s")),
             "tcp_pose_sample_attempts": int(pose["tcp_pose_sample_attempts"])
             if isinstance(pose.get("tcp_pose_sample_attempts"), int)

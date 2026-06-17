@@ -130,7 +130,7 @@ def test_real_motion_policy_tightens_two_mm_tolerance(monkeypatch):
                 "requested_distance_m": 0.002,
                 "configured_max_distance_m": 0.05,
                 "safety_policy_source": "cli_defaults",
-                "safety_policy_name": "lab_bringup_relative_motion_v1",
+                "safety_policy_name": "lab_directional_step_motion_v1",
                 "position_tolerance_m": 0.002,
                 "orientation_tolerance_rad": 0.01,
                 "small_motion_tolerance_policy": "real_motion_safety_policy_v1",
@@ -149,7 +149,7 @@ def test_real_motion_policy_tightens_two_mm_tolerance(monkeypatch):
     assert result["configured_max_distance_m"] == 0.05
     assert result["requested_distance_within_configured_limit"] is True
     assert result["safety_policy_source"] == "cli_defaults"
-    assert result["safety_policy_name"] == "lab_bringup_relative_motion_v1"
+    assert result["safety_policy_name"] == "lab_directional_step_motion_v1"
     assert result["target_frame"] == "base_link"
     assert result["current_tcp_frame"] == "base_link"
     assert result["moveit_end_effector_link"] == "tool0"

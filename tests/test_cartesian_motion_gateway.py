@@ -1,8 +1,12 @@
+import pytest
+
 from src.cartesian_motion_gateway import (
     DEFAULT_CONFIRMATION_TOKEN,
+    E_AXIS_STEP_EXCEEDS_LIMIT,
     E_EXCESSIVE_CARTESIAN_MOTION,
     E_MANUAL_CONFIRMATION_REQUIRED,
     E_OUT_OF_WORKSPACE,
+    E_STEP_DELTA_EXCEEDS_LIMIT,
     CartesianMotionExecutionRequest,
     CartesianMotionGatewayRequest,
     CartesianMotionPipelineRequest,
@@ -81,6 +85,144 @@ def test_gateway_allows_exact_relative_max_motion_from_nonzero_tcp_pose():
     assert result["cartesian_motion_gateway_status"] == "PASS"
     assert E_EXCESSIVE_CARTESIAN_MOTION not in result["blocking_reasons"]
     assert result["translation_distance_m"] == 0.005
+
+
+def test_directional_step_policy_first_move_bootstraps_from_current_tcp_pose():
+    result = evaluate_cartesian_motion_gateway(
+        CartesianMotionGatewayRequest(
+            requested=True,
+            config=_step_policy_config(),
+            command_to_task_result=_task([0.05, 0.0, 0.0]),
+            current_tcp_pose=_pose([0.40, 0.0, 0.30]),
+        )
+    )
+
+    assert result["cartesian_motion_gateway_status"] == "PASS"
+    assert result["safety_policy_name"] == "lab_directional_step_motion_v1"
+    assert result["motion_frame"] == "base_link"
+    assert result["direction_axis"] == "x"
+    assert result["direction_sign"] == "+"
+    assert result["first_move_bootstrap_used"] is True
+    assert result["previous_verified_tcp_pose"] is None
+    assert result["current_measured_tcp_pose"]["position_m"] == [0.4, 0.0, 0.3]
+    assert result["requested_target_tcp_pose"]["position_m"] == [0.45, 0.0, 0.3]
+    assert result["delta_from_current_tcp_m"] == [0.05, 0.0, 0.0]
+    assert result["delta_from_previous_verified_tcp_m"] is None
+    assert result["max_step_distance_m"] == 0.05
+    assert result["max_axis_step_m"] == 0.05
+    assert result["hard_safety_limit_m"] == 0.1
+    assert result["session_radius_limit_m"] is None
+    assert result["step_delta_within_limit"] is True
+    assert result["axis_delta_within_limit"] is True
+    assert result["workspace_envelope_within_limit"] is True
+
+
+def test_directional_step_policy_second_move_uses_previous_verified_tcp_pose():
+    result = evaluate_cartesian_motion_gateway(
+        CartesianMotionGatewayRequest(
+            requested=True,
+            config={
+                **_step_policy_config(),
+                "previous_verified_tcp_pose": _pose([0.40, 0.0, 0.30]),
+            },
+            command_to_task_result=_task([0.01, 0.0, 0.0]),
+            current_tcp_pose=_pose([0.44, 0.0, 0.30]),
+        )
+    )
+
+    assert result["cartesian_motion_gateway_status"] == "PASS"
+    assert result["first_move_bootstrap_used"] is False
+    assert result["requested_target_tcp_pose"]["position_m"] == [0.45, 0.0, 0.3]
+    assert result["delta_from_current_tcp_m"] == [0.01, 0.0, 0.0]
+    assert result["delta_from_previous_verified_tcp_m"] == [0.05, 0.0, 0.0]
+    assert result["step_delta_within_limit"] is True
+
+
+@pytest.mark.parametrize(
+    ("offset", "axis", "sign"),
+    [
+        ([0.01, 0.0, 0.0], "x", "+"),
+        ([-0.01, 0.0, 0.0], "x", "-"),
+        ([0.0, 0.01, 0.0], "y", "+"),
+        ([0.0, -0.01, 0.0], "y", "-"),
+        ([0.0, 0.0, 0.01], "z", "+"),
+        ([0.0, 0.0, -0.01], "z", "-"),
+    ],
+)
+def test_directional_step_policy_reports_axis_and_sign(offset, axis, sign):
+    result = evaluate_cartesian_motion_gateway(
+        CartesianMotionGatewayRequest(
+            requested=True,
+            config=_step_policy_config(),
+            command_to_task_result=_task(offset),
+            current_tcp_pose=_pose([0.40, 0.0, 0.30]),
+        )
+    )
+
+    assert result["cartesian_motion_gateway_status"] == "PASS"
+    assert result["direction_axis"] == axis
+    assert result["direction_sign"] == sign
+
+
+def test_directional_step_policy_rejects_over_step_delta():
+    result = evaluate_cartesian_motion_gateway(
+        CartesianMotionGatewayRequest(
+            requested=True,
+            config=_step_policy_config(),
+            command_to_task_result=_task([0.051, 0.0, 0.0]),
+            current_tcp_pose=_pose([0.40, 0.0, 0.30]),
+        )
+    )
+
+    assert result["cartesian_motion_gateway_status"] == "BLOCKED"
+    assert E_STEP_DELTA_EXCEEDS_LIMIT in result["blocking_reasons"]
+    assert E_EXCESSIVE_CARTESIAN_MOTION in result["blocking_reasons"]
+    assert result["step_delta_within_limit"] is False
+
+
+def test_directional_step_policy_rejects_axis_step_delta():
+    result = evaluate_cartesian_motion_gateway(
+        CartesianMotionGatewayRequest(
+            requested=True,
+            config={**_step_policy_config(), "max_axis_step_m": 0.01},
+            command_to_task_result=_task([0.02, 0.0, 0.0]),
+            current_tcp_pose=_pose([0.40, 0.0, 0.30]),
+        )
+    )
+
+    assert result["cartesian_motion_gateway_status"] == "BLOCKED"
+    assert E_AXIS_STEP_EXCEEDS_LIMIT in result["blocking_reasons"]
+    assert result["axis_delta_within_limit"] is False
+
+
+def test_directional_step_policy_rejects_workspace_envelope_violation():
+    result = evaluate_cartesian_motion_gateway(
+        CartesianMotionGatewayRequest(
+            requested=True,
+            config={**_step_policy_config(), "workspace_bounds": {"x": [0.0, 0.42], "y": [-1.0, 1.0], "z": [0.0, 2.0]}},
+            command_to_task_result=_task([0.03, 0.0, 0.0]),
+            current_tcp_pose=_pose([0.40, 0.0, 0.30]),
+        )
+    )
+
+    assert result["cartesian_motion_gateway_status"] == "BLOCKED"
+    assert E_OUT_OF_WORKSPACE in result["blocking_reasons"]
+    assert result["workspace_envelope_within_limit"] is False
+
+
+def test_directional_step_policy_rejects_hard_safety_limit_violation():
+    result = evaluate_cartesian_motion_gateway(
+        CartesianMotionGatewayRequest(
+            requested=True,
+            config={**_step_policy_config(), "max_step_distance_m": 0.10, "max_translation_m": 0.10, "hard_safety_limit_m": 0.05},
+            command_to_task_result=_task([0.06, 0.0, 0.0]),
+            current_tcp_pose=_pose([0.40, 0.0, 0.30]),
+        )
+    )
+
+    assert result["cartesian_motion_gateway_status"] == "BLOCKED"
+    assert E_EXCESSIVE_CARTESIAN_MOTION in result["blocking_reasons"]
+    assert result["hard_safety_limit_m"] == 0.05
 
 
 def test_execution_requires_manual_confirmation_before_moveit_execute():
@@ -234,6 +376,26 @@ def _task(offset):
         },
         "blocking_reasons": [],
         "warnings": [],
+    }
+
+
+def _pose(position):
+    return {
+        "frame": "base_link",
+        "position_m": list(position),
+        "orientation_xyzw": [0.0, 0.0, 0.0, 1.0],
+    }
+
+
+def _step_policy_config():
+    return {
+        "safety_policy_name": "lab_directional_step_motion_v1",
+        "max_translation_m": 0.05,
+        "configured_max_distance_m": 0.05,
+        "max_step_distance_m": 0.05,
+        "max_axis_step_m": 0.05,
+        "hard_safety_limit_m": 0.1,
+        "workspace_bounds": {"x": [-1.0, 1.0], "y": [-1.0, 1.0], "z": [0.0, 2.0]},
     }
 
 

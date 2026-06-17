@@ -163,8 +163,17 @@ def test_manual_qwen_path_reads_stdin_and_preserves_text(monkeypatch, capsys):
     assert planner["configured_max_distance_m"] == 0.05
     assert planner["hard_safety_limit_m"] == 0.05
     assert planner["requested_distance_within_configured_limit"] is True
-    assert planner["safety_policy_name"] == "lab_bringup_relative_motion_v1"
+    assert planner["safety_policy_name"] == "lab_directional_step_motion_v1"
     assert planner["safety_policy_source"] == "cli_defaults"
+    assert planner["motion_frame"] == "base_link"
+    assert planner["direction_axis"] == "z"
+    assert planner["direction_sign"] == "+"
+    assert planner["base_link_direction_mapping"]["forward"]["base_link_direction"] == "+X"
+    assert planner["base_link_direction_mapping"]["backward"]["base_link_direction"] == "-X"
+    assert planner["base_link_direction_mapping"]["left"]["base_link_direction"] == "+Y"
+    assert planner["base_link_direction_mapping"]["right"]["base_link_direction"] == "-Y"
+    assert planner["base_link_direction_mapping"]["up"]["base_link_direction"] == "+Z"
+    assert planner["base_link_direction_mapping"]["down"]["base_link_direction"] == "-Z"
     assert planner["requested_delta_m"] == [0.0, 0.0, 0.005]
     assert planner["plan_only"] is True
     assert planner["execution_allowed"] is False
@@ -526,6 +535,11 @@ def test_acceptance_dry_run_without_current_tcp_pose_remains_blocked(monkeypatch
     assert evidence["final_status"] == "BLOCKED"
     assert evidence["current_tcp_pose"]["available"] is False
     assert evidence["current_tcp_pose"]["source"] == "current_tcp_pose_not_provided_or_available"
+    assert evidence["current_tcp_pose"]["tcp_pose_readiness_status"] == "BLOCKED"
+    assert evidence["current_tcp_pose"]["tcp_pose_base_frame"] == "base_link"
+    assert evidence["current_tcp_pose"]["tcp_pose_tool_frame"] == "tool0"
+    assert evidence["current_tcp_pose"]["tcp_pose_lookup_success"] is False
+    assert evidence["current_tcp_pose"]["current_tcp_pose_blocking_reason"] == "E_CURRENT_TCP_POSE_MISSING"
     assert "E_CURRENT_TCP_POSE_MISSING" in evidence["blocking_reasons"]
     assert evidence["trajectory_sent"] is False
     assert evidence["controller_command_sent"] is False
@@ -546,6 +560,74 @@ def test_acceptance_dry_run_two_mm_down_has_workflow_evidence(monkeypatch, capsy
     assert evidence["execution_preview"]["preview_status"] == "PASS"
     assert workflow["real_execution_allowed"] is False
     assert workflow["real_robot_motion_executed"] is False
+
+
+def test_tcp_pose_readiness_check_passes_with_mock_pose(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: pytest.fail("mock readiness should avoid TF lookup"))
+
+    exit_code = cli.main(["--check-tcp-pose-readiness", "--mock-current-tcp-pose"])
+
+    evidence = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert evidence["final_status"] == "PASS"
+    assert evidence["tcp_pose_readiness_status"] == "PASS"
+    assert evidence["current_tcp_pose"]["available"] is True
+    assert evidence["current_tcp_pose"]["tcp_pose_available"] is True
+    assert evidence["current_tcp_pose"]["tcp_pose_base_frame"] == "base_link"
+    assert evidence["current_tcp_pose"]["tcp_pose_tool_frame"] == "tool0"
+    assert evidence["manual_confirmation_required"] is False
+    assert evidence["trajectory_sent"] is False
+    assert evidence["execute_trajectory_called"] is False
+    assert evidence["real_robot_motion_executed"] is False
+
+
+def test_tcp_pose_readiness_check_fails_when_pose_unavailable(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: None)
+
+    exit_code = cli.main(["--check-tcp-pose-readiness"])
+
+    evidence = json.loads(capsys.readouterr().out)
+    assert exit_code == 2
+    assert evidence["final_status"] == "BLOCKED"
+    assert evidence["tcp_pose_readiness_status"] == "BLOCKED"
+    assert "E_CURRENT_TCP_POSE_MISSING" in evidence["blocking_reasons"]
+    assert evidence["current_tcp_pose"]["tcp_pose_lookup_success"] is False
+    assert evidence["trajectory_sent"] is False
+    assert evidence["execute_trajectory_called"] is False
+    assert evidence["real_robot_motion_executed"] is False
+
+
+def test_tcp_pose_readiness_check_records_configured_frames(capsys):
+    pose = json.dumps(
+        {
+            "frame": "base",
+            "position_m": [0.1, 0.2, 0.3],
+            "orientation_xyzw": [0.0, 0.0, 0.0, 1.0],
+        }
+    )
+
+    exit_code = cli.main(
+        [
+            "--check-tcp-pose-readiness",
+            "--current-tcp-pose-json",
+            pose,
+            "--tcp-pose-base-frame",
+            "base",
+            "--tcp-pose-tool-frame",
+            "tcp",
+            "--moveit-planning-frame",
+            "base",
+            "--moveit-end-effector-link",
+            "tcp",
+        ]
+    )
+
+    evidence = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert evidence["current_tcp_pose"]["tcp_pose_base_frame"] == "base"
+    assert evidence["current_tcp_pose"]["tcp_pose_tool_frame"] == "tcp"
+    assert evidence["moveit_planning_frame"] == "base"
+    assert evidence["moveit_end_effector_link"] == "tcp"
 
 
 def test_acceptance_plan_only_mode_has_workflow_evidence(monkeypatch, capsys):
@@ -717,9 +799,33 @@ def test_real_small_motion_without_real_current_tcp_pose_blocks(monkeypatch, cap
     assert evidence["final_status"] == "BLOCKED"
     assert evidence["current_tcp_pose"]["available"] is False
     assert evidence["current_tcp_pose"]["source"] == "real_robot_state_required"
+    assert evidence["current_tcp_pose"]["tcp_pose_readiness_status"] == "BLOCKED"
+    assert evidence["current_tcp_pose"]["tcp_pose_base_frame"] == "base_link"
+    assert evidence["current_tcp_pose"]["tcp_pose_tool_frame"] == "tool0"
+    assert evidence["current_tcp_pose"]["tcp_pose_lookup_success"] is False
+    assert evidence["current_tcp_pose"]["current_tcp_pose_blocking_reason"] == "E_CURRENT_TCP_POSE_MISSING"
     assert "E_CURRENT_TCP_POSE_MISSING" in evidence["blocking_reasons"]
     assert evidence["trajectory_sent"] is False
     assert evidence["controller_command_sent"] is False
+    assert evidence["real_robot_motion_executed"] is False
+
+
+def test_qwen_forward_direction_mismatch_blocks_before_pose_lookup(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: pytest.fail("pose lookup should not run on direction mismatch"))
+    monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_forward_as_z_success)
+
+    exit_code = cli.main(["--dry-run", "--cmd", "move the tcp forward by 5 centimeters"])
+
+    evidence = _final_evidence(capsys.readouterr().out)
+    assert exit_code == 2
+    assert evidence["final_status"] == "BLOCKED"
+    assert "E_DIRECTION_PARSE_MISMATCH" in evidence["blocking_reasons"]
+    assert evidence["expected_axis"] == "x"
+    assert evidence["expected_direction"] == "+"
+    assert evidence["qwen_axis"] == "z"
+    assert evidence["qwen_direction"] == "+"
+    assert evidence["trajectory_sent"] is False
+    assert evidence["execute_trajectory_called"] is False
     assert evidence["real_robot_motion_executed"] is False
 
 
@@ -934,6 +1040,42 @@ def test_recorded_lower_two_mm_evidence_passes_with_cross_axis_drift():
     assert result["post_motion_orientation_tolerance_rad"] == 0.01
 
 
+def test_post_motion_verification_preserves_configured_tcp_frames():
+    result = cli._post_motion_verification(
+        real_robot_motion_executed=True,
+        before_tcp_pose={
+            **_pose(),
+            "frame": "base",
+            "tcp_pose_base_frame": "base",
+            "tcp_pose_tool_frame": "tcp",
+            "position_m": [0.0, 0.0, 0.0],
+            "tcp_pose_age_s": 0.001,
+        },
+        target_tcp_pose={
+            **_pose(),
+            "frame": "base",
+            "tcp_pose_base_frame": "base",
+            "tcp_pose_tool_frame": "tcp",
+            "position_m": [0.0, 0.0, 0.002],
+        },
+        after_tcp_pose={
+            **_pose(),
+            "frame": "base",
+            "tcp_pose_base_frame": "base",
+            "tcp_pose_tool_frame": "tcp",
+            "position_m": [0.0, 0.0, 0.002],
+            "tcp_pose_age_s": 0.001,
+        },
+        intended_delta_m=[0.0, 0.0, 0.002],
+    )
+
+    assert result["post_motion_verification_status"] == "PASS"
+    assert result["tcp_pose_before_execution"]["tcp_pose_base_frame"] == "base"
+    assert result["tcp_pose_before_execution"]["tcp_pose_tool_frame"] == "tcp"
+    assert result["tcp_pose_after_execution"]["tcp_pose_base_frame"] == "base"
+    assert result["tcp_pose_after_execution"]["tcp_pose_tool_frame"] == "tcp"
+
+
 def test_confirmation_mismatch_aborts(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
     monkeypatch.setattr(cli, "evaluate_qwen_motion_parser", _fake_qwen_success)
@@ -1001,10 +1143,13 @@ def _assert_real_small_two_mm_gate_allowed(evidence, *, direction):
     assert "real_motion_safety_policy_v1" in evidence["small_motion_tolerance_policy"]
     assert evidence["configured_max_distance_m"] == 0.05
     assert evidence["requested_distance_within_configured_limit"] is True
-    assert evidence["real_small_motion_gate_policy"].startswith("real_small_motion_normalized_contract_v3.0.3")
+    assert evidence["real_small_motion_gate_policy"].startswith("lab_directional_step_motion_v1")
     assert evidence["real_small_motion_gate_basis"] == "normalized_contract"
     assert evidence["allowed_axis"] == "z"
     assert evidence["allowed_direction"] == direction
+    assert evidence["motion_frame"] == "base_link"
+    assert evidence["direction_axis"] == "z"
+    assert evidence["direction_sign"] == direction
     assert evidence["allowed_distance_m"] == 0.002
     assert evidence["real_small_motion_command_allowed"] is True
     assert evidence["real_small_motion_gate"]["blocking_reasons"] == []
@@ -1269,6 +1414,43 @@ def _fake_qwen_down_six_cm_success(request):
         "distance_m": 0.06,
         "confidence": 0.96,
         "delta_m": [0.0, 0.0, -0.06],
+        "parser_blocking_reasons": [],
+        "blocking_reasons": [],
+    }
+
+
+def _fake_qwen_forward_as_z_success(request):
+    raw = json.dumps(
+        {
+            "intent": "relative_cartesian_motion",
+            "axis": "z",
+            "direction": "+",
+            "distance_m": 0.05,
+            "confidence": 0.96,
+            "reason": "incorrectly mapped forward as upward",
+        }
+    )
+    return {
+        "qwen_motion_parser_status": "PASS",
+        "parser_source": "qwen_llm",
+        "llm_called": True,
+        "model_name": request.model_name or "qwen2.5vl:3b",
+        "qwen_endpoint": request.endpoint,
+        "llm_latency_ms": 1.1,
+        "raw_llm_output": raw,
+        "normalized_contract": {
+            "intent": "relative_cartesian_motion",
+            "frame": "base_link",
+            "delta_m": [0.0, 0.0, 0.05],
+            "max_distance_m": request.max_distance_m,
+            "hard_safety_limit_m": request.hard_safety_limit_m,
+            "must_confirm": True,
+        },
+        "axis": "z",
+        "direction": "+",
+        "distance_m": 0.05,
+        "confidence": 0.96,
+        "delta_m": [0.0, 0.0, 0.05],
         "parser_blocking_reasons": [],
         "blocking_reasons": [],
     }

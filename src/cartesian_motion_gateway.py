@@ -72,6 +72,9 @@ E_EMERGENCY_STOP_ACTIVE = "E_EMERGENCY_STOP_ACTIVE"
 E_SPEED_SCALING_UNSAFE = "E_SPEED_SCALING_UNSAFE"
 E_MANUAL_CONFIRMATION_REQUIRED = "E_MANUAL_CONFIRMATION_REQUIRED"
 E_FORBIDDEN_CONTROL_ARTIFACT = "E_FORBIDDEN_CONTROL_ARTIFACT"
+E_STEP_DELTA_EXCEEDS_LIMIT = "E_STEP_DELTA_EXCEEDS_LIMIT"
+E_AXIS_STEP_EXCEEDS_LIMIT = "E_AXIS_STEP_EXCEEDS_LIMIT"
+E_SESSION_RADIUS_EXCEEDS_LIMIT = "E_SESSION_RADIUS_EXCEEDS_LIMIT"
 
 
 @dataclass(frozen=True)
@@ -130,17 +133,35 @@ def evaluate_cartesian_motion_gateway(request: CartesianMotionGatewayRequest | N
     task = request.command_to_task_result if isinstance(request.command_to_task_result, dict) else {}
     contract = task.get("task_contract") if isinstance(task.get("task_contract"), dict) else task
     current_pose = _normalize_pose(request.current_tcp_pose if request.current_tcp_pose is not None else config.get("current_tcp_pose"))
+    previous_verified_pose = _normalize_pose(config.get("previous_verified_tcp_pose"))
+    session_origin_pose = _normalize_pose(config.get("session_origin_tcp_pose"))
     frame = _string(contract.get("frame")) or DEFAULT_FRAME
     offset = _offset_from_contract(contract)
     max_translation_m = _optional_float(config.get("max_translation_m")) or DEFAULT_MAX_TRANSLATION_M
+    max_step_distance_m = _optional_float(config.get("max_step_distance_m")) or max_translation_m
+    max_axis_step_m = _optional_float(config.get("max_axis_step_m")) or max_step_distance_m
     hard_safety_limit_m = _optional_float(config.get("hard_safety_limit_m")) or DEFAULT_HARD_SAFETY_LIMIT_M
+    session_radius_limit_m = _optional_float(config.get("session_radius_limit_m"))
     workspace_bounds = _workspace_bounds(config)
     allowed_frames = _allowed_frames(config)
     translation_distance_m = round(_distance(offset), 6) if offset else None
     requested_distance_within_configured_limit = (
         translation_distance_m is not None
-        and translation_distance_m <= max_translation_m + MOTION_LIMIT_EPS
+        and translation_distance_m <= max_step_distance_m + MOTION_LIMIT_EPS
     )
+    direction_axis, direction_sign = _axis_direction_from_delta(offset)
+    target_position = None
+    requested_target_pose = None
+    delta_from_current_tcp_m = None
+    delta_from_previous_verified_tcp_m = None
+    step_reference_pose = previous_verified_pose or current_pose
+    first_move_bootstrap_used = previous_verified_pose is None
+    step_delta = None
+    step_distance = None
+    step_delta_within_limit = None
+    axis_delta_within_limit = None
+    session_radius_within_limit = None
+    workspace_envelope_within_limit = None
 
     blocking_reasons: list[str] = []
     warnings = _string_list(config.get("warnings")) + _string_list(task.get("warnings"))
@@ -163,20 +184,50 @@ def evaluate_cartesian_motion_gateway(request: CartesianMotionGatewayRequest | N
         blocking_reasons.append(E_CURRENT_TCP_POSE_MISSING)
     elif not _valid_pose(current_pose):
         blocking_reasons.append(E_INVALID_CURRENT_TCP_POSE)
+    if previous_verified_pose is not None and not _valid_pose(previous_verified_pose):
+        previous_verified_pose = None
+        warnings.append("previous_verified_tcp_pose_invalid_ignored")
 
-    target_pose = None
-    workspace_check_passed = False
-    if not blocking_reasons and current_pose is not None and offset is not None:
+    if current_pose is not None and _valid_pose(current_pose) and offset is not None and _valid_vector3(offset):
         target_position = [round(float(left) + float(right), 6) for left, right in zip(current_pose["position_m"], offset)]
-        workspace_check_passed = _point_in_workspace(target_position, workspace_bounds)
-        if not workspace_check_passed:
+        requested_target_pose = {
+            "frame": frame,
+            "position_m": target_position,
+            "orientation_xyzw": list(current_pose["orientation_xyzw"]),
+        }
+        delta_from_current_tcp_m = [round(float(right) - float(left), 6) for left, right in zip(current_pose["position_m"], target_position)]
+        if previous_verified_pose is not None and _valid_pose(previous_verified_pose):
+            delta_from_previous_verified_tcp_m = [
+                round(float(right) - float(left), 6)
+                for left, right in zip(previous_verified_pose["position_m"], target_position)
+            ]
+        if step_reference_pose is not None and _valid_pose(step_reference_pose):
+            step_delta = [
+                round(float(right) - float(left), 6)
+                for left, right in zip(step_reference_pose["position_m"], target_position)
+            ]
+            step_distance = round(_distance(step_delta), 6)
+            step_delta_within_limit = step_distance <= max_step_distance_m + MOTION_LIMIT_EPS
+            axis_delta_within_limit = max(abs(float(value)) for value in step_delta) <= max_axis_step_m + MOTION_LIMIT_EPS
+            if not step_delta_within_limit:
+                blocking_reasons.extend([E_EXCESSIVE_CARTESIAN_MOTION, E_STEP_DELTA_EXCEEDS_LIMIT])
+            if not axis_delta_within_limit:
+                blocking_reasons.extend([E_EXCESSIVE_CARTESIAN_MOTION, E_AXIS_STEP_EXCEEDS_LIMIT])
+        if session_radius_limit_m is not None:
+            origin_pose = session_origin_pose or previous_verified_pose or current_pose
+            if origin_pose is not None and _valid_pose(origin_pose):
+                session_radius_within_limit = (
+                    _distance_between(origin_pose["position_m"], target_position)
+                    <= session_radius_limit_m + MOTION_LIMIT_EPS
+                )
+                if not session_radius_within_limit:
+                    blocking_reasons.extend([E_EXCESSIVE_CARTESIAN_MOTION, E_SESSION_RADIUS_EXCEEDS_LIMIT])
+        workspace_envelope_within_limit = _point_in_workspace(target_position, workspace_bounds)
+        if not workspace_envelope_within_limit:
             blocking_reasons.append(E_OUT_OF_WORKSPACE)
-        else:
-            target_pose = {
-                "frame": frame,
-                "position_m": target_position,
-                "orientation_xyzw": list(current_pose["orientation_xyzw"]),
-            }
+
+    target_pose = requested_target_pose if not blocking_reasons and requested_target_pose is not None else None
+    workspace_check_passed = workspace_envelope_within_limit is True
 
     blocking_reasons = _unique(blocking_reasons)
     warnings = _unique(warnings)
@@ -196,10 +247,26 @@ def evaluate_cartesian_motion_gateway(request: CartesianMotionGatewayRequest | N
         "translation_distance_m": translation_distance_m,
         "max_translation_m": max_translation_m,
         "configured_max_distance_m": _optional_float(config.get("configured_max_distance_m")) or max_translation_m,
+        "safety_policy_name": _string(config.get("safety_policy_name")),
+        "motion_frame": frame,
+        "direction_axis": direction_axis,
+        "direction_sign": direction_sign,
+        "base_link_direction_mapping": config.get("base_link_direction_mapping") if isinstance(config.get("base_link_direction_mapping"), dict) else None,
+        "first_move_bootstrap_used": first_move_bootstrap_used,
+        "previous_verified_tcp_pose": previous_verified_pose,
+        "current_measured_tcp_pose": current_pose,
+        "requested_target_tcp_pose": requested_target_pose,
+        "delta_from_current_tcp_m": _round_vector(delta_from_current_tcp_m),
+        "delta_from_previous_verified_tcp_m": _round_vector(delta_from_previous_verified_tcp_m),
+        "max_step_distance_m": max_step_distance_m,
+        "max_axis_step_m": max_axis_step_m,
         "hard_safety_limit_m": hard_safety_limit_m,
+        "session_radius_limit_m": session_radius_limit_m,
+        "step_delta_within_limit": step_delta_within_limit,
+        "axis_delta_within_limit": axis_delta_within_limit,
+        "workspace_envelope_within_limit": workspace_envelope_within_limit,
         "requested_distance_within_configured_limit": requested_distance_within_configured_limit,
         "safety_policy_source": _string(config.get("safety_policy_source")),
-        "safety_policy_name": _string(config.get("safety_policy_name")),
         "current_tcp_pose": current_pose,
         "target_pose": target_pose,
         "target_position_m": target_pose.get("position_m") if target_pose else None,
@@ -549,10 +616,14 @@ def _moveit_plan_request(task_id: str, frame: str, target_pose: Dict[str, Any] |
         "requested_distance_m": _optional_float(config.get("requested_distance_m")),
         "configured_max_distance_m": _optional_float(config.get("configured_max_distance_m"))
         or _optional_float(config.get("max_translation_m")),
+        "max_step_distance_m": _optional_float(config.get("max_step_distance_m")),
+        "max_axis_step_m": _optional_float(config.get("max_axis_step_m")),
         "hard_safety_limit_m": _optional_float(config.get("hard_safety_limit_m")),
+        "session_radius_limit_m": _optional_float(config.get("session_radius_limit_m")),
         "requested_distance_within_configured_limit": _requested_distance_within_configured_limit(config),
         "safety_policy_source": _string(config.get("safety_policy_source")),
         "safety_policy_name": _string(config.get("safety_policy_name")),
+        "base_link_direction_mapping": config.get("base_link_direction_mapping") if isinstance(config.get("base_link_direction_mapping"), dict) else None,
         "moveit_position_tolerance_m": _optional_float(config.get("position_tolerance_m")),
         "moveit_orientation_tolerance_rad": _optional_float(config.get("orientation_tolerance_rad")),
         "tolerance_to_requested_distance_ratio": _tolerance_ratio(config),
@@ -575,7 +646,11 @@ def _tolerance_ratio(config: Dict[str, Any]) -> float | None:
 
 def _requested_distance_within_configured_limit(config: Dict[str, Any]) -> bool | None:
     requested_distance = _optional_float(config.get("requested_distance_m"))
-    configured_max = _optional_float(config.get("configured_max_distance_m")) or _optional_float(config.get("max_translation_m"))
+    configured_max = (
+        _optional_float(config.get("max_step_distance_m"))
+        or _optional_float(config.get("configured_max_distance_m"))
+        or _optional_float(config.get("max_translation_m"))
+    )
     if requested_distance is None or configured_max is None:
         return None
     return requested_distance <= configured_max + MOTION_LIMIT_EPS
@@ -656,6 +731,17 @@ def _point_in_workspace(point: list[float], bounds: Dict[str, list[float]]) -> b
     )
 
 
+def _axis_direction_from_delta(delta_m: list[float] | None) -> tuple[str | None, str | None]:
+    if not _valid_vector3(delta_m):
+        return None, None
+    axes = ["x", "y", "z"]
+    active = [(axis, float(value)) for axis, value in zip(axes, delta_m) if abs(float(value)) > MOTION_LIMIT_EPS]
+    if len(active) != 1:
+        return None, None
+    axis, value = active[0]
+    return axis, "+" if value > 0.0 else "-"
+
+
 def _allowed_frames(config: Dict[str, Any]) -> set[str]:
     frames = config.get("allowed_frames") or config.get("allowed_cartesian_frames")
     if isinstance(frames, list):
@@ -667,6 +753,10 @@ def _distance(offset: list[float] | None) -> float:
     if not offset:
         return 0.0
     return sum(float(value) ** 2 for value in offset) ** 0.5
+
+
+def _distance_between(left: list[float], right: list[float]) -> float:
+    return sum((float(lvalue) - float(rvalue)) ** 2 for lvalue, rvalue in zip(left, right)) ** 0.5
 
 
 def _round_vector(value: list[float] | None) -> list[float] | None:
