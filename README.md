@@ -148,6 +148,32 @@ An offline coverage report can be generated with:
 python3 scripts/run_motion_language_coverage.py
 ```
 
+## TETO v3.0.11: LLM-First Motion Semantics Alignment
+
+TETO v3.0.11 changes natural-language motion parsing from an expanding
+hand-written phrase parser into an LLM-first semantic alignment path. Qwen is
+asked to emit a structured `teto_motion_semantics.v1` JSON object describing
+intent status, intent type, semantic direction, distance quality, converted
+meters, language, and confidence. TETO then validates that schema, canonicalizes
+the semantic direction enum into the robot-safe base-link axis/sign convention,
+converts units, generates a relative TCP motion contract, and records replayable
+evidence.
+
+The deterministic rule parser remains available only as a fallback when Qwen is
+missing, malformed, invalid, or below confidence threshold. A valid
+high-confidence Qwen semantic parse is not overridden by raw-text synonym
+matching; disagreements with the fallback parser are recorded as
+`qwen_fallback_conflict` evidence. Parser evidence now includes
+`semantic_alignment_version=teto_v3_0_11_llm_first_motion_semantics_v1`,
+Qwen semantic fields, fallback usage, canonicalization source, and the unchanged
+safety handoff flags `execution_permission_decided_by_parser=false` and
+`safety_gate_still_required=true`.
+
+This release does not expand robot execution permission. Current TCP readiness,
+direction guard, one-shot limits, long-step decomposition contract checks,
+planner audit evidence, planner risk classification, and manual confirmation
+remain downstream safety gates before any real execution path.
+
 ## Project Structure
 
 ```text

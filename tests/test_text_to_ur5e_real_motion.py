@@ -228,7 +228,7 @@ def test_manual_qwen_path_reads_stdin_and_preserves_text(monkeypatch, capsys):
         "manual_confirmation_required": True,
         "preview_status": "PASS",
     }
-    assert evidence["execution_preview"]["natural_language_coverage_version"] == "teto_v3_0_10_nl_motion_coverage_v1"
+    assert evidence["execution_preview"]["natural_language_coverage_version"] == "teto_v3_0_11_llm_first_motion_semantics_v1"
     assert evidence["execution_preview"]["execution_permission_decided_by_parser"] is False
     planner = evidence["planner_acceptance"]
     assert planner["status"] == "PASS"
@@ -1069,7 +1069,7 @@ def test_rule_cli_reports_fuzzy_language_evidence_without_execution_permission(m
     evidence = _final_evidence(capsys.readouterr().out)
     assert exit_code == 0
     assert evidence["final_status"] == "PASS"
-    assert evidence["natural_language_coverage_version"] == "teto_v3_0_10_nl_motion_coverage_v1"
+    assert evidence["natural_language_coverage_version"] == "teto_v3_0_11_llm_first_motion_semantics_v1"
     assert evidence["parse_status"] == "PASS"
     assert evidence["distance_source"] == "inferred_default"
     assert evidence["direction_source"] == "explicit_direction_word"

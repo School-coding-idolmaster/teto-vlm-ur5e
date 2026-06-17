@@ -19,6 +19,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.motion_command_normalizer import normalize_motion_command  # noqa: E402
+from src.qwen_motion_parser import build_qwen_motion_prompt  # noqa: E402
 
 
 DEFAULT_ENDPOINT = "http://127.0.0.1:18080"
@@ -200,7 +201,7 @@ def main(argv: list[str] | None = None) -> int:
     ]
     summary = _summary(results)
     report = {
-        "report_version": "teto_v3_0_10_qwen_motion_language_coverage_report_v1",
+        "report_version": "teto_v3_0_11_llm_first_motion_semantics_coverage_report_v1",
         "generated_at": started_at.isoformat(),
         "repo_root": str(REPO_ROOT),
         "qwen_endpoint": endpoint,
@@ -253,22 +254,22 @@ def _evaluate_case(
             qwen_error = str(exc)
             qwen_status = "ERROR"
     try:
-        normalized = normalize_motion_command(raw_command, default_small_step_m=default_small_step_m)
+        normalized = normalize_motion_command(
+            raw_command,
+            default_small_step_m=default_small_step_m,
+            qwen_semantic=qwen_payload if isinstance(qwen_payload, dict) else None,
+            parser_source="qwen_llm" if isinstance(qwen_payload, dict) else "rule_based",
+        )
+        fallback_normalized = normalize_motion_command(raw_command, default_small_step_m=default_small_step_m, parser_source="rule_based")
         classification = _classification(normalized, qwen_status=qwen_status)
         normalizer_error = None
     except Exception as exc:
         normalized = {}
+        fallback_normalized = {}
         classification = NORMALIZER_ERROR
         normalizer_error = str(exc)
     elapsed_ms = round((time.monotonic() - start) * 1000.0, 3)
-    qwen_axis = qwen_payload.get("axis") if isinstance(qwen_payload, dict) else None
-    qwen_direction = qwen_payload.get("direction") if isinstance(qwen_payload, dict) else None
-    mapping_conflict = (
-        qwen_axis in {"x", "y", "z"}
-        and qwen_direction in {"+", "-"}
-        and normalized.get("direction_axis") is not None
-        and (qwen_axis != normalized.get("direction_axis") or qwen_direction != normalized.get("direction_sign"))
-    )
+    mapping_conflict = normalized.get("qwen_fallback_conflict") is True
     return {
         "case_id": case_id,
         "category": category,
@@ -294,6 +295,24 @@ def _evaluate_case(
         "unsupported_intent_reason": normalized.get("unsupported_intent_reason"),
         "parser_confidence": normalized.get("parser_confidence"),
         "motion_parse_confidence": normalized.get("motion_parse_confidence"),
+        "semantic_alignment_version": normalized.get("semantic_alignment_version"),
+        "qwen_semantic_schema_version": normalized.get("qwen_semantic_schema_version"),
+        "qwen_intent_status": normalized.get("qwen_intent_status"),
+        "qwen_intent_type": normalized.get("qwen_intent_type"),
+        "qwen_direction_semantic": normalized.get("qwen_direction_semantic"),
+        "qwen_distance_quality": normalized.get("qwen_distance_quality"),
+        "qwen_distance_m": normalized.get("qwen_distance_m"),
+        "qwen_language": normalized.get("qwen_language"),
+        "qwen_confidence_overall": normalized.get("qwen_confidence_overall"),
+        "qwen_semantic_parse_used": normalized.get("qwen_semantic_parse_used"),
+        "fallback_parse_used": normalized.get("fallback_parse_used"),
+        "qwen_fallback_conflict": normalized.get("qwen_fallback_conflict"),
+        "qwen_fallback_conflict_reason": normalized.get("qwen_fallback_conflict_reason"),
+        "canonicalization_source": normalized.get("canonicalization_source"),
+        "fallback_parse_status": fallback_normalized.get("parse_status"),
+        "fallback_direction_axis": fallback_normalized.get("direction_axis"),
+        "fallback_direction_sign": fallback_normalized.get("direction_sign"),
+        "fallback_requested_distance_m": fallback_normalized.get("requested_distance_m"),
         "execution_permission_decided_by_parser": normalized.get("execution_permission_decided_by_parser"),
         "safety_gate_still_required": normalized.get("safety_gate_still_required"),
         "elapsed_ms": elapsed_ms,
@@ -325,7 +344,7 @@ def _call_qwen(*, endpoint: str, model: str, command: str, timeout_s: float) -> 
         "model": model,
         "prompt": _qwen_prompt(command),
         "stream": False,
-        "options": {"temperature": 0.0, "num_predict": 128},
+        "options": {"temperature": 0.0, "num_predict": 512},
     }
     request = urllib.request.Request(
         f"{endpoint.rstrip('/')}/api/generate",
@@ -339,20 +358,7 @@ def _call_qwen(*, endpoint: str, model: str, command: str, timeout_s: float) -> 
 
 
 def _qwen_prompt(command: str) -> str:
-    return (
-        "You are evaluating a natural-language robot motion command for TETO.\n"
-        "Return strict JSON only. Do not use markdown.\n"
-        "This is parser evaluation only; do not approve execution.\n"
-        "Map relative TCP directions as: forward=x+, backward=x-, left=y+, right=y-, "
-        "up/raise/lift/higher=z+, down/lower/drop/descend=z-.\n"
-        "If the command is a clear relative Cartesian motion, return:\n"
-        "{\"intent\":\"relative_cartesian_motion\",\"axis\":\"x|y|z\",\"direction\":\"+|-\","
-        "\"distance_m\":number,\"distance_source\":\"explicit|inferred_default\",\"confidence\":number,\"reason\":\"...\"}\n"
-        "Use 0.01 m for fuzzy small-step commands with no explicit distance.\n"
-        "If ambiguous, return {\"intent\":\"needs_clarification\",\"reason\":\"...\",\"confidence\":number}.\n"
-        "If object/vision/manipulation, return {\"intent\":\"unsupported\",\"reason\":\"NEEDS_VISION or UNSUPPORTED_VISION_OR_MANIPULATION_INTENT\",\"confidence\":number}.\n"
-        f"Command: {command}"
-    )
+    return build_qwen_motion_prompt(command)
 
 
 def _parse_json_object(text: str | None) -> dict[str, Any] | None:
@@ -427,10 +433,17 @@ def _summary(results: list[dict[str, Any]]) -> dict[str, Any]:
         "qwen_parsed_but_normalizer_rejected": [
             item["case_id"]
             for item in results
-            if item.get("qwen_parse_status") == "PASS" and item.get("parse_status") != "PASS"
+            if item.get("qwen_parse_status") == "PASS"
+            and item.get("qwen_intent_status") == "ok"
+            and item.get("parse_status") != "PASS"
         ],
         "qwen_malformed_cases": [item["case_id"] for item in results if item.get("qwen_parse_status") == "MALFORMED"],
         "qwen_direction_conflict_cases": [item["case_id"] for item in results if item.get("qwen_direction_mapping_conflict") is True],
+        "qwen_semantic_used_count": sum(1 for item in results if item.get("qwen_semantic_parse_used") is True),
+        "fallback_used_count": sum(1 for item in results if item.get("fallback_parse_used") is True),
+        "qwen_fallback_conflict_cases": [item["case_id"] for item in results if item.get("qwen_fallback_conflict") is True],
+        "qwen_classified_clarification_cases": [item["case_id"] for item in results if item.get("qwen_intent_status") == "needs_clarification"],
+        "qwen_classified_unsupported_cases": [item["case_id"] for item in results if item.get("qwen_intent_status") == "unsupported"],
     }
 
 
@@ -492,19 +505,24 @@ def _markdown_report(report: dict[str, Any]) -> str:
         f"- clarification_count: {summary['clarification_count']}",
         f"- unsupported_vision_manipulation_count: {summary['unsupported_vision_manipulation_count']}",
         f"- parser_normalizer_error_count: {summary['parser_normalizer_error_count']}",
+        f"- qwen_semantic_used_count: {summary.get('qwen_semantic_used_count')}",
+        f"- fallback_used_count: {summary.get('fallback_used_count')}",
+        f"- qwen_fallback_conflict_cases: {summary.get('qwen_fallback_conflict_cases')}",
         f"- average_latency_ms: {summary['average_latency_ms']}",
         f"- p50_latency_ms: {summary['p50_latency_ms']}",
         f"- p90_latency_ms: {summary['p90_latency_ms']}",
         "",
-        "| id | category | classification | command | direction | distance_m | reason |",
-        "| - | - | - | - | - | - | - |",
+        "| id | category | classification | command | qwen_semantic | canonical | distance_m | source | reason |",
+        "| - | - | - | - | - | - | - | - | - |",
     ]
     for item in report["cases"]:
-        direction = f"{item.get('direction_axis') or ''}{item.get('direction_sign') or ''}"
-        reason = item.get("clarification_reason") or item.get("unsupported_intent_reason") or item.get("qwen_error") or ""
+        canonical = f"{item.get('direction_axis') or ''}{item.get('direction_sign') or ''}"
+        semantic = item.get("qwen_direction_semantic") or ""
+        reason = item.get("clarification_reason") or item.get("unsupported_intent_reason") or item.get("qwen_fallback_conflict_reason") or item.get("qwen_error") or ""
         lines.append(
             f"| {item['case_id']} | {item['category']} | {item['classification']} | "
-            f"{_md(item['raw_command'])} | {direction} | {item.get('requested_distance_m') or ''} | {_md(reason)} |"
+            f"{_md(item['raw_command'])} | {semantic} | {canonical} | {item.get('requested_distance_m') or ''} | "
+            f"{item.get('canonicalization_source') or ''} | {_md(reason)} |"
         )
     return "\n".join(lines) + "\n"
 

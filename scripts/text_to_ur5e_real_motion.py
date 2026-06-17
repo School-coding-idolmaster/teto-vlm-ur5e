@@ -919,17 +919,19 @@ def _parsed_from_qwen_result(
     if not _vector3(delta):
         raise MotionParseError("E_INVALID_QWEN_DELTA")
     distance_m = float(result.get("distance_m"))
-    language_evidence = _rule_language_evidence(
-        command=command,
-        normalized=_normalize(command),
-        distance_m=distance_m,
-        unit="qwen_json",
-        delta=[round(float(value), 6) for value in delta],
-        distance_source="explicit",
-        direction_source="explicit_direction_word",
-        confidence=_optional_number(result.get("confidence")) or 0.90,
-        parser_source="qwen_llm",
-    )
+    language_evidence = _language_metadata_fields(result)
+    if not language_evidence.get("parse_status"):
+        language_evidence = _rule_language_evidence(
+            command=command,
+            normalized=_normalize(command),
+            distance_m=distance_m,
+            unit="qwen_json",
+            delta=[round(float(value), 6) for value in delta],
+            distance_source="explicit",
+            direction_source="explicit_direction_word",
+            confidence=_optional_number(result.get("confidence")) or 0.90,
+            parser_source="qwen_llm",
+        )
     return ParsedMotionCommand(
         command=command.strip(),
         frame="base_link",
@@ -985,6 +987,23 @@ def _rule_language_evidence(
         "requires_confirmation": True,
         "safety_gate_still_required": True,
         "execution_permission_decided_by_parser": False,
+        "semantic_alignment_version": MOTION_LANGUAGE_POLICY_VERSION,
+        "qwen_semantic_schema_version": None,
+        "qwen_intent_status": None,
+        "qwen_intent_type": None,
+        "qwen_direction_semantic": None,
+        "qwen_distance_quality": None,
+        "qwen_distance_m": None,
+        "qwen_language": None,
+        "qwen_confidence_intent": None,
+        "qwen_confidence_direction": None,
+        "qwen_confidence_distance": None,
+        "qwen_confidence_overall": None,
+        "qwen_semantic_parse_used": False,
+        "fallback_parse_used": parser_source != "qwen_llm",
+        "qwen_fallback_conflict": False,
+        "qwen_fallback_conflict_reason": None,
+        "canonicalization_source": "qwen_semantic" if parser_source == "qwen_llm" else "fallback_rule",
         "unit": unit,
     }
 
@@ -1000,6 +1019,7 @@ def _language_metadata_fields(language_evidence: dict[str, Any] | None) -> dict[
         return {
             "natural_language_coverage_version": MOTION_LANGUAGE_POLICY_VERSION,
             "motion_language_policy_version": MOTION_LANGUAGE_POLICY_VERSION,
+            "semantic_alignment_version": MOTION_LANGUAGE_POLICY_VERSION,
             "parse_status": None,
             "clarification_required": None,
             "clarification_reason": None,
@@ -1015,12 +1035,29 @@ def _language_metadata_fields(language_evidence: dict[str, Any] | None) -> dict[
             "requires_confirmation": True,
             "safety_gate_still_required": True,
             "execution_permission_decided_by_parser": False,
+            "qwen_semantic_schema_version": None,
+            "qwen_intent_status": None,
+            "qwen_intent_type": None,
+            "qwen_direction_semantic": None,
+            "qwen_distance_quality": None,
+            "qwen_distance_m": None,
+            "qwen_language": None,
+            "qwen_confidence_intent": None,
+            "qwen_confidence_direction": None,
+            "qwen_confidence_distance": None,
+            "qwen_confidence_overall": None,
+            "qwen_semantic_parse_used": False,
+            "fallback_parse_used": None,
+            "qwen_fallback_conflict": False,
+            "qwen_fallback_conflict_reason": None,
+            "canonicalization_source": None,
             "raw_command": None,
             "normalized_command": None,
         }
     keys = [
         "natural_language_coverage_version",
         "motion_language_policy_version",
+        "semantic_alignment_version",
         "raw_command",
         "normalized_command",
         "parse_status",
@@ -1039,6 +1076,22 @@ def _language_metadata_fields(language_evidence: dict[str, Any] | None) -> dict[
         "requires_confirmation",
         "safety_gate_still_required",
         "execution_permission_decided_by_parser",
+        "qwen_semantic_schema_version",
+        "qwen_intent_status",
+        "qwen_intent_type",
+        "qwen_direction_semantic",
+        "qwen_distance_quality",
+        "qwen_distance_m",
+        "qwen_language",
+        "qwen_confidence_intent",
+        "qwen_confidence_direction",
+        "qwen_confidence_distance",
+        "qwen_confidence_overall",
+        "qwen_semantic_parse_used",
+        "fallback_parse_used",
+        "qwen_fallback_conflict",
+        "qwen_fallback_conflict_reason",
+        "canonicalization_source",
     ]
     return {key: language_evidence.get(key) for key in keys}
 

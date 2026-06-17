@@ -380,3 +380,87 @@ def _json_success():
             "reason": "small upward relative motion",
         }
     )
+
+
+def test_qwen_prompt_requests_semantic_schema_and_fuzzy_examples():
+    from src.qwen_motion_parser import build_qwen_motion_prompt
+
+    prompt = build_qwen_motion_prompt("drop the tool a tiny bit")
+
+    assert "teto_motion_semantics.v1" in prompt
+    assert "direction_semantic" in prompt
+    assert "fuzzy_small" in prompt
+    assert "把末端降低 2 厘米" in prompt
+    assert "do not approve execution" in prompt.lower()
+
+
+def test_qwen_semantic_json_produces_canonical_relative_delta():
+    result = evaluate_qwen_motion_parser(
+        QwenMotionParserRequest(
+            user_text="把末端降低 2 厘米",
+            max_distance_m=0.05,
+            hard_safety_limit_m=0.05,
+            llm_callable=lambda _prompt: json.dumps(
+                {
+                    "schema_version": "teto_motion_semantics.v1",
+                    "intent_status": "ok",
+                    "intent_type": "relative_cartesian_motion",
+                    "motion": {
+                        "reference": "end_effector",
+                        "direction_semantic": "down",
+                        "distance": {"value": 2, "unit": "cm", "meters": 0.02, "quality": "explicit"},
+                        "fuzzy_magnitude": "unspecified",
+                        "frame_hint": "base_link",
+                    },
+                    "clarification": {"required": False, "reason": ""},
+                    "unsupported": {"reason": ""},
+                    "confidence": {"intent": 0.96, "direction": 0.96, "distance": 0.96, "overall": 0.96},
+                    "language": "zh",
+                    "notes": "relative lowering",
+                }
+            ),
+        )
+    )
+
+    assert result["qwen_motion_parser_status"] == "PASS"
+    assert result["axis"] == "z"
+    assert result["direction"] == "-"
+    assert result["distance_m"] == 0.02
+    assert result["delta_m"] == [0.0, 0.0, -0.02]
+    assert result["qwen_semantic_parse_used"] is True
+    assert result["execution_permission_decided_by_parser"] is False
+    assert result["safety_gate_still_required"] is True
+
+
+def test_qwen_semantic_fuzzy_small_uses_default_step():
+    result = evaluate_qwen_motion_parser(
+        QwenMotionParserRequest(
+            user_text="drop the tool a tiny bit",
+            max_distance_m=0.05,
+            hard_safety_limit_m=0.05,
+            llm_callable=lambda _prompt: json.dumps(
+                {
+                    "schema_version": "teto_motion_semantics.v1",
+                    "intent_status": "ok",
+                    "intent_type": "relative_cartesian_motion",
+                    "motion": {
+                        "reference": "tool",
+                        "direction_semantic": "down",
+                        "distance": {"value": None, "unit": "unspecified", "meters": None, "quality": "fuzzy_small"},
+                        "fuzzy_magnitude": "tiny",
+                        "frame_hint": "base_link",
+                    },
+                    "clarification": {"required": False, "reason": ""},
+                    "unsupported": {"reason": ""},
+                    "confidence": {"intent": 0.93, "direction": 0.93, "distance": 0.90, "overall": 0.92},
+                    "language": "en",
+                    "notes": "fuzzy small relative lowering",
+                }
+            ),
+        )
+    )
+
+    assert result["qwen_motion_parser_status"] == "PASS"
+    assert result["distance_m"] == 0.01
+    assert result["distance_source"] == "inferred_default"
+    assert result["delta_m"] == [0.0, 0.0, -0.01]

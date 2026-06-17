@@ -5,9 +5,12 @@ import re
 from typing import Any
 
 
-POLICY_VERSION = "teto_v3_0_10_nl_motion_coverage_v1"
+POLICY_VERSION = "teto_v3_0_11_llm_first_motion_semantics_v1"
+SEMANTIC_ALIGNMENT_VERSION = "teto_v3_0_11_llm_first_motion_semantics_v1"
+QWEN_SEMANTIC_SCHEMA_VERSION = "teto_motion_semantics.v1"
 DEFAULT_FRAME = "base_link"
 DEFAULT_SMALL_STEP_M = 0.01
+DEFAULT_QWEN_CONFIDENCE_THRESHOLD = 0.80
 EPS = 1e-9
 
 STATUS_PASS = "PASS"
@@ -16,6 +19,16 @@ STATUS_UNSUPPORTED_INTENT = "UNSUPPORTED_INTENT"
 STATUS_BLOCKED = "BLOCKED"
 
 INTENT_RELATIVE_CARTESIAN_MOTION = "relative_cartesian_motion"
+
+_SEMANTIC_DIRECTION_TO_AXIS_SIGN = {
+    "up": ("z", "+"),
+    "down": ("z", "-"),
+    "left": ("y", "+"),
+    "right": ("y", "-"),
+    "forward": ("x", "+"),
+    "backward": ("x", "-"),
+}
+_AXIS_SIGN_TO_SEMANTIC_DIRECTION = {value: key for key, value in _SEMANTIC_DIRECTION_TO_AXIS_SIGN.items()}
 
 _NUMBER_WORDS = {
     "one": 1.0,
@@ -102,35 +115,67 @@ def normalize_motion_command(
     default_small_step_m: float = DEFAULT_SMALL_STEP_M,
     frame: str = DEFAULT_FRAME,
     parser_source: str = "normalizer",
+    qwen_semantic: dict[str, Any] | None = None,
+    qwen_confidence_threshold: float = DEFAULT_QWEN_CONFIDENCE_THRESHOLD,
+) -> dict[str, Any]:
+    raw_command = command if isinstance(command, str) else ""
+    fallback = _normalize_rule_based(
+        raw_command,
+        default_small_step_m=default_small_step_m,
+        frame=frame,
+        parser_source=parser_source,
+    )
+    if not isinstance(qwen_semantic, dict):
+        return {
+            **fallback,
+            "fallback_parse_used": True,
+            "canonicalization_source": "fallback_rule" if fallback.get("parse_status") == STATUS_PASS else fallback.get("canonicalization_source"),
+        }
+
+    semantic = _normalize_qwen_semantic(
+        raw_command,
+        qwen_semantic,
+        fallback=fallback,
+        default_small_step_m=default_small_step_m,
+        frame=frame,
+        confidence_threshold=qwen_confidence_threshold,
+    )
+    if semantic["decision"] == "use_qwen":
+        result = semantic["result"]
+        conflict, reason = _qwen_fallback_conflict(result, fallback)
+        return {
+            **result,
+            "qwen_fallback_conflict": conflict,
+            "qwen_fallback_conflict_reason": reason,
+        }
+
+    result = {
+        **fallback,
+        **semantic["qwen_fields"],
+        "parser_source": "rule_based" if parser_source in {"normalizer", "fallback_rule"} else parser_source,
+        "qwen_semantic_parse_used": False,
+        "fallback_parse_used": True,
+        "canonicalization_source": "fallback_rule" if fallback.get("parse_status") == STATUS_PASS else fallback.get("canonicalization_source"),
+    }
+    if semantic["decision"] == "low_confidence":
+        result["qwen_fallback_conflict"] = fallback.get("parse_status") != STATUS_PASS
+        result["qwen_fallback_conflict_reason"] = "qwen_low_confidence" if result["qwen_fallback_conflict"] else None
+    elif semantic["decision"] == "invalid_schema":
+        result["qwen_fallback_conflict"] = fallback.get("parse_status") != STATUS_PASS
+        result["qwen_fallback_conflict_reason"] = semantic.get("invalid_reason")
+    return result
+
+
+def _normalize_rule_based(
+    command: str,
+    *,
+    default_small_step_m: float,
+    frame: str,
+    parser_source: str,
 ) -> dict[str, Any]:
     raw_command = command if isinstance(command, str) else ""
     normalized = _normalize(raw_command)
-    base = {
-        "natural_language_coverage_version": POLICY_VERSION,
-        "motion_language_policy_version": POLICY_VERSION,
-        "raw_command": raw_command.strip(),
-        "normalized_command": normalized,
-        "parser_source": parser_source,
-        "parser_confidence": None,
-        "motion_parse_confidence": None,
-        "parse_status": STATUS_BLOCKED,
-        "clarification_required": False,
-        "clarification_reason": None,
-        "unsupported_intent_reason": None,
-        "distance_source": "missing",
-        "direction_source": "missing",
-        "inferred_default_distance_m": None,
-        "requested_distance_m": None,
-        "direction_axis": None,
-        "direction_sign": None,
-        "motion_frame": frame,
-        "intent": None,
-        "delta_m": None,
-        "unit": None,
-        "requires_confirmation": True,
-        "safety_gate_still_required": True,
-        "execution_permission_decided_by_parser": False,
-    }
+    base = _base_evidence(raw_command, normalized, frame=frame, parser_source=parser_source)
     if not normalized:
         return _blocked(base, STATUS_NEEDS_CLARIFICATION, clarification="E_EMPTY_COMMAND")
     if _matches_any(normalized, _FORBIDDEN_CONTROL_PATTERNS):
@@ -185,6 +230,178 @@ def normalize_motion_command(
         "direction_sign": direction["sign"],
         "delta_m": delta,
         "unit": distance["unit"],
+        "fallback_parse_used": True,
+        "canonicalization_source": "fallback_rule",
+    }
+
+
+def _normalize_qwen_semantic(
+    command: str,
+    payload: dict[str, Any],
+    *,
+    fallback: dict[str, Any],
+    default_small_step_m: float,
+    frame: str,
+    confidence_threshold: float,
+) -> dict[str, Any]:
+    semantic, invalid_reason = _coerce_qwen_semantic(payload)
+    qwen_fields = _qwen_evidence_fields(semantic, invalid_reason=invalid_reason)
+    if invalid_reason:
+        return {"decision": "invalid_schema", "qwen_fields": qwen_fields, "invalid_reason": invalid_reason}
+
+    confidence_overall = qwen_fields.get("qwen_confidence_overall")
+    if confidence_overall is not None and confidence_overall < float(confidence_threshold):
+        return {"decision": "low_confidence", "qwen_fields": qwen_fields}
+
+    raw_command = command if isinstance(command, str) else ""
+    normalized = _normalize(raw_command)
+    base = {
+        **_base_evidence(raw_command, normalized, frame=frame, parser_source="qwen_llm"),
+        **qwen_fields,
+        "qwen_semantic_parse_used": True,
+        "fallback_parse_used": False,
+    }
+    intent_status = str(semantic.get("intent_status") or "").strip().lower()
+    intent_type = str(semantic.get("intent_type") or "").strip().lower()
+    motion = semantic.get("motion") if isinstance(semantic.get("motion"), dict) else {}
+    direction_semantic = str(motion.get("direction_semantic") or "").strip().lower()
+    distance = motion.get("distance") if isinstance(motion.get("distance"), dict) else {}
+    distance_quality = str(distance.get("quality") or "").strip().lower()
+
+    if intent_status == "unsupported" or intent_type in {"vision_target_motion", "manipulation", "speed_control"}:
+        return {
+            "decision": "use_qwen",
+            "result": _blocked(
+                {**base, "canonicalization_source": "unsupported"},
+                STATUS_UNSUPPORTED_INTENT,
+                unsupported=_unsupported_reason(intent_type, semantic),
+            ),
+        }
+    if intent_status == "needs_clarification":
+        return {
+            "decision": "use_qwen",
+            "result": _blocked(
+                {**base, "canonicalization_source": "clarification"},
+                STATUS_NEEDS_CLARIFICATION,
+                clarification=_clarification_reason(direction_semantic, distance_quality, semantic),
+            ),
+        }
+    if intent_status != "ok" or intent_type != INTENT_RELATIVE_CARTESIAN_MOTION:
+        return {
+            "decision": "use_qwen",
+            "result": _blocked(
+                {**base, "canonicalization_source": "clarification"},
+                STATUS_NEEDS_CLARIFICATION,
+                clarification="E_QWEN_SEMANTIC_INTENT_UNCLEAR",
+            ),
+        }
+    if direction_semantic == "conflicting":
+        return {
+            "decision": "use_qwen",
+            "result": _blocked(
+                {**base, "canonicalization_source": "clarification"},
+                STATUS_NEEDS_CLARIFICATION,
+                clarification="E_CONFLICTING_DIRECTIONS",
+            ),
+        }
+    if direction_semantic in {"", "missing", "unknown"} or direction_semantic not in _SEMANTIC_DIRECTION_TO_AXIS_SIGN:
+        return {
+            "decision": "use_qwen",
+            "result": _blocked(
+                {**base, "canonicalization_source": "clarification"},
+                STATUS_NEEDS_CLARIFICATION,
+                clarification="E_DIRECTION_MISSING",
+            ),
+        }
+
+    distance_m, distance_source, unit = _semantic_distance_m(distance, default_small_step_m=default_small_step_m)
+    if distance_m is None:
+        clarification = "E_DISTANCE_MISSING" if distance_quality in {"", "missing"} else "E_INVALID_DISTANCE"
+        return {
+            "decision": "use_qwen",
+            "result": _blocked(
+                {**base, "canonicalization_source": "clarification"},
+                STATUS_NEEDS_CLARIFICATION,
+                clarification=clarification,
+            ),
+        }
+    if distance_m <= 0.0 or not math.isfinite(distance_m):
+        return {
+            "decision": "use_qwen",
+            "result": _blocked(
+                {**base, "canonicalization_source": "clarification"},
+                STATUS_NEEDS_CLARIFICATION,
+                clarification="E_INVALID_DISTANCE",
+            ),
+        }
+
+    axis, sign = _SEMANTIC_DIRECTION_TO_AXIS_SIGN[direction_semantic]
+    delta = _delta_from_axis_direction(axis, sign, distance_m)
+    confidence = confidence_overall if confidence_overall is not None else 0.90
+    return {
+        "decision": "use_qwen",
+        "result": {
+            **base,
+            "parse_status": STATUS_PASS,
+            "intent": INTENT_RELATIVE_CARTESIAN_MOTION,
+            "parser_confidence": round(float(confidence), 6),
+            "motion_parse_confidence": round(float(confidence), 6),
+            "distance_source": distance_source,
+            "direction_source": "qwen_semantic_direction",
+            "inferred_default_distance_m": round(float(default_small_step_m), 6) if distance_source == "inferred_default" else None,
+            "requested_distance_m": round(float(distance_m), 6),
+            "direction_axis": axis,
+            "direction_sign": sign,
+            "delta_m": delta,
+            "unit": unit,
+            "canonicalization_source": "qwen_semantic",
+        },
+    }
+
+
+def _base_evidence(raw_command: str, normalized: str, *, frame: str, parser_source: str) -> dict[str, Any]:
+    return {
+        "natural_language_coverage_version": POLICY_VERSION,
+        "motion_language_policy_version": POLICY_VERSION,
+        "semantic_alignment_version": SEMANTIC_ALIGNMENT_VERSION,
+        "raw_command": raw_command.strip(),
+        "normalized_command": normalized,
+        "parser_source": parser_source,
+        "parser_confidence": None,
+        "motion_parse_confidence": None,
+        "parse_status": STATUS_BLOCKED,
+        "clarification_required": False,
+        "clarification_reason": None,
+        "unsupported_intent_reason": None,
+        "distance_source": "missing",
+        "direction_source": "missing",
+        "inferred_default_distance_m": None,
+        "requested_distance_m": None,
+        "direction_axis": None,
+        "direction_sign": None,
+        "motion_frame": frame,
+        "intent": None,
+        "delta_m": None,
+        "unit": None,
+        "requires_confirmation": True,
+        "safety_gate_still_required": True,
+        "execution_permission_decided_by_parser": False,
+        "qwen_semantic_schema_version": None,
+        "qwen_intent_status": None,
+        "qwen_intent_type": None,
+        "qwen_direction_semantic": None,
+        "qwen_distance_quality": None,
+        "qwen_distance_m": None,
+        "qwen_language": None,
+        "qwen_confidence_intent": None,
+        "qwen_confidence_direction": None,
+        "qwen_confidence_distance": None,
+        "qwen_confidence_overall": None,
+        "qwen_semantic_parse_used": False,
+        "fallback_parse_used": False,
+        "qwen_fallback_conflict": False,
+        "qwen_fallback_conflict_reason": None,
+        "canonicalization_source": None,
     }
 
 
@@ -198,6 +415,172 @@ def _blocked(base: dict[str, Any], status: str, *, clarification: str | None = N
         "parser_confidence": 0.0,
         "motion_parse_confidence": 0.0,
     }
+
+
+def _coerce_qwen_semantic(payload: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
+    if not isinstance(payload, dict):
+        return {}, "E_QWEN_SCHEMA_NOT_OBJECT"
+    if payload.get("schema_version") == QWEN_SEMANTIC_SCHEMA_VERSION or "intent_status" in payload or "motion" in payload:
+        semantic = dict(payload)
+        if not isinstance(semantic.get("motion"), dict):
+            semantic["motion"] = {}
+        if not isinstance(semantic.get("confidence"), dict):
+            confidence = _optional_float(semantic.get("confidence"))
+            semantic["confidence"] = {"overall": confidence} if confidence is not None else {}
+        return semantic, None
+    if "intent" in payload:
+        return _legacy_payload_to_semantic(payload), None
+    return {}, "E_QWEN_SCHEMA_UNRECOGNIZED"
+
+
+def _legacy_payload_to_semantic(payload: dict[str, Any]) -> dict[str, Any]:
+    intent = str(payload.get("intent") or "").strip().lower()
+    axis = str(payload.get("axis") or "").strip().lower()
+    direction = str(payload.get("direction") or "").strip()
+    distance_m = _optional_float(payload.get("distance_m"))
+    confidence = _optional_float(payload.get("confidence"))
+    if intent == INTENT_RELATIVE_CARTESIAN_MOTION:
+        direction_semantic = _AXIS_SIGN_TO_SEMANTIC_DIRECTION.get((axis, direction), "unknown")
+        intent_status = "ok"
+        intent_type = INTENT_RELATIVE_CARTESIAN_MOTION
+        distance_quality = "explicit" if distance_m is not None else "missing"
+    elif intent == "needs_clarification":
+        direction_semantic = "missing"
+        intent_status = "needs_clarification"
+        intent_type = "unknown"
+        distance_quality = "missing"
+    else:
+        direction_semantic = "unknown"
+        intent_status = "unsupported"
+        intent_type = "unknown"
+        distance_quality = "missing"
+    return {
+        "schema_version": "legacy_axis_direction.v1",
+        "intent_status": intent_status,
+        "intent_type": intent_type,
+        "motion": {
+            "reference": "tcp",
+            "direction_semantic": direction_semantic,
+            "distance": {
+                "value": distance_m,
+                "unit": "m",
+                "meters": distance_m,
+                "quality": distance_quality,
+            },
+            "fuzzy_magnitude": "unspecified",
+            "frame_hint": DEFAULT_FRAME,
+        },
+        "clarification": {"required": intent_status == "needs_clarification", "reason": payload.get("reason")},
+        "unsupported": {"reason": payload.get("reason")},
+        "confidence": {
+            "intent": confidence,
+            "direction": confidence,
+            "distance": confidence,
+            "overall": confidence,
+        },
+        "language": "unknown",
+        "notes": "legacy_qwen_axis_direction_schema",
+    }
+
+
+def _qwen_evidence_fields(semantic: dict[str, Any], *, invalid_reason: str | None = None) -> dict[str, Any]:
+    motion = semantic.get("motion") if isinstance(semantic.get("motion"), dict) else {}
+    distance = motion.get("distance") if isinstance(motion.get("distance"), dict) else {}
+    confidence = semantic.get("confidence") if isinstance(semantic.get("confidence"), dict) else {}
+    return {
+        "qwen_semantic_schema_version": semantic.get("schema_version") if semantic else None,
+        "qwen_intent_status": semantic.get("intent_status") if semantic else None,
+        "qwen_intent_type": semantic.get("intent_type") if semantic else None,
+        "qwen_direction_semantic": motion.get("direction_semantic"),
+        "qwen_distance_quality": distance.get("quality"),
+        "qwen_distance_m": _semantic_distance_value(distance),
+        "qwen_language": semantic.get("language") if semantic else None,
+        "qwen_confidence_intent": _optional_float(confidence.get("intent")),
+        "qwen_confidence_direction": _optional_float(confidence.get("direction")),
+        "qwen_confidence_distance": _optional_float(confidence.get("distance")),
+        "qwen_confidence_overall": _optional_float(confidence.get("overall")),
+        "qwen_semantic_parse_used": False,
+        "fallback_parse_used": False,
+        "qwen_fallback_conflict": False,
+        "qwen_fallback_conflict_reason": invalid_reason,
+    }
+
+
+def _semantic_distance_m(distance: dict[str, Any], *, default_small_step_m: float) -> tuple[float | None, str, str | None]:
+    quality = str(distance.get("quality") or "").strip().lower()
+    if quality == "fuzzy_small":
+        return round(float(default_small_step_m), 6), "inferred_default", "default_small_step"
+    if quality == "explicit":
+        distance_m = _semantic_distance_value(distance)
+        return (round(float(distance_m), 6), "explicit", _string(distance.get("unit")) or "m") if distance_m is not None else (None, "missing", None)
+    if quality in {"missing", "ambiguous", ""}:
+        return None, "missing", None
+    distance_m = _semantic_distance_value(distance)
+    if distance_m is not None:
+        return round(float(distance_m), 6), "explicit", _string(distance.get("unit")) or "m"
+    return None, "missing", None
+
+
+def _semantic_distance_value(distance: dict[str, Any]) -> float | None:
+    meters = _optional_float(distance.get("meters"))
+    if meters is not None:
+        return meters
+    value = _optional_float(distance.get("value"))
+    unit = str(distance.get("unit") or "").strip().lower()
+    if value is None:
+        return None
+    if unit in {"m", "meter", "meters"}:
+        return value
+    if unit in {"cm", "centimeter", "centimeters", "厘米", "公分"}:
+        return value / 100.0
+    if unit in {"mm", "millimeter", "millimeters", "毫米"}:
+        return value / 1000.0
+    return None
+
+
+def _clarification_reason(direction_semantic: str, distance_quality: str, semantic: dict[str, Any]) -> str:
+    clarification = semantic.get("clarification") if isinstance(semantic.get("clarification"), dict) else {}
+    raw_reason = _string(clarification.get("reason"))
+    if raw_reason:
+        return raw_reason
+    if direction_semantic == "conflicting":
+        return "E_CONFLICTING_DIRECTIONS"
+    if direction_semantic in {"", "missing", "unknown"}:
+        return "E_DIRECTION_MISSING"
+    if distance_quality in {"", "missing"}:
+        return "E_DISTANCE_MISSING"
+    return "E_COMMAND_NEEDS_CLARIFICATION"
+
+
+def _unsupported_reason(intent_type: str, semantic: dict[str, Any]) -> str:
+    unsupported = semantic.get("unsupported") if isinstance(semantic.get("unsupported"), dict) else {}
+    raw_reason = _string(unsupported.get("reason"))
+    if raw_reason:
+        return raw_reason
+    if intent_type == "vision_target_motion":
+        return "NEEDS_VISION"
+    if intent_type == "manipulation":
+        return "UNSUPPORTED_VISION_OR_MANIPULATION_INTENT"
+    if intent_type == "speed_control":
+        return "UNSUPPORTED_SPEED_INTENT"
+    return "E_UNSUPPORTED_INTENT"
+
+
+def _qwen_fallback_conflict(qwen_result: dict[str, Any], fallback: dict[str, Any]) -> tuple[bool, str | None]:
+    if fallback.get("parse_status") != STATUS_PASS:
+        reason = fallback.get("clarification_reason") or fallback.get("unsupported_intent_reason") or fallback.get("parse_status")
+        return True, f"fallback_rejected:{reason}"
+    if qwen_result.get("parse_status") != STATUS_PASS:
+        return False, None
+    mismatches = []
+    for key in ("direction_axis", "direction_sign"):
+        if qwen_result.get(key) != fallback.get(key):
+            mismatches.append(key)
+    qwen_distance = _optional_float(qwen_result.get("requested_distance_m"))
+    fallback_distance = _optional_float(fallback.get("requested_distance_m"))
+    if qwen_distance is not None and fallback_distance is not None and abs(qwen_distance - fallback_distance) > EPS:
+        mismatches.append("requested_distance_m")
+    return (bool(mismatches), ",".join(mismatches) if mismatches else None)
 
 
 def _normalize(command: str) -> str:
@@ -281,3 +664,22 @@ def _delta_from_axis_direction(axis: str, sign: str, distance_m: float) -> list[
     if axis == "y":
         return [0.0, round(signed, 6), 0.0]
     return [0.0, 0.0, round(signed, 6)]
+
+
+def _optional_float(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        number = float(value)
+        return number if math.isfinite(number) else None
+    if isinstance(value, str) and value.strip():
+        try:
+            number = float(value)
+        except ValueError:
+            return None
+        return number if math.isfinite(number) else None
+    return None
+
+
+def _string(value: Any) -> str | None:
+    return value.strip() if isinstance(value, str) and value.strip() else None

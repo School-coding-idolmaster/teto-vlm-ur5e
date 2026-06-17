@@ -10,8 +10,17 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Callable, Dict
 
+from src.motion_command_normalizer import (
+    DEFAULT_SMALL_STEP_M,
+    QWEN_SEMANTIC_SCHEMA_VERSION,
+    STATUS_NEEDS_CLARIFICATION,
+    STATUS_PASS as NORMALIZER_STATUS_PASS,
+    STATUS_UNSUPPORTED_INTENT,
+    normalize_motion_command,
+)
 
-CONTRACT_VERSION = "teto_qwen_motion_parser.v1"
+
+CONTRACT_VERSION = "teto_qwen_motion_parser.v2"
 
 STATUS_PASS = "PASS"
 STATUS_BLOCKED = "BLOCKED"
@@ -87,7 +96,7 @@ class QwenMotionParserRequest:
 
 
 def evaluate_qwen_motion_parser(request: QwenMotionParserRequest) -> Dict[str, Any]:
-    user_text = _string(request.user_text)
+    user_text = _string(request.user_text) or ""
     model_name = _string(request.model_name) or os.environ.get("TETO_QWEN_MODEL") or DEFAULT_MODEL_NAME
     endpoint = _string(request.endpoint) or os.environ.get("TETO_QWEN_ENDPOINT") or DEFAULT_ENDPOINT
     timeout_s = _optional_float(request.timeout_s) or _optional_float(os.environ.get("TETO_QWEN_TIMEOUT_S")) or DEFAULT_TIMEOUT_S
@@ -118,6 +127,7 @@ def evaluate_qwen_motion_parser(request: QwenMotionParserRequest) -> Dict[str, A
 
     latency_ms = round((time.monotonic() - start) * 1000.0, 3)
     normalized_contract = None
+    normalized_language: dict[str, Any] | None = None
     delta_m = None
     axis = None
     direction = None
@@ -129,32 +139,49 @@ def evaluate_qwen_motion_parser(request: QwenMotionParserRequest) -> Dict[str, A
 
     if payload is not None:
         blocking_reasons.extend(_forbidden_payload_reasons(payload))
-        intent = _string(payload.get("intent"))
-        axis = _string(payload.get("axis"))
-        direction = _string(payload.get("direction"))
-        distance_m = _optional_float(payload.get("distance_m"))
-        confidence = _optional_float(payload.get("confidence"))
-        if intent != INTENT_RELATIVE_CARTESIAN_MOTION:
+        normalized_language = normalize_motion_command(
+            user_text,
+            qwen_semantic=payload,
+            default_small_step_m=DEFAULT_SMALL_STEP_M,
+            parser_source="qwen_llm",
+            qwen_confidence_threshold=float(request.confidence_threshold),
+        )
+        legacy_reasons = _legacy_payload_blocking_reasons(payload, confidence_threshold=float(request.confidence_threshold))
+        blocking_reasons.extend(legacy_reasons)
+
+        if not normalized_language.get("qwen_semantic_parse_used"):
+            if normalized_language.get("qwen_confidence_overall") is not None:
+                blocking_reasons.append(E_LOW_CONFIDENCE)
+            else:
+                blocking_reasons.append(E_UNSUPPORTED_INTENT)
+        elif normalized_language.get("parse_status") == STATUS_UNSUPPORTED_INTENT:
             blocking_reasons.append(E_UNSUPPORTED_INTENT)
-        if axis not in ALLOWED_AXES:
-            blocking_reasons.append(E_INVALID_AXIS)
-        if direction not in ALLOWED_DIRECTIONS:
-            blocking_reasons.append(E_INVALID_DIRECTION)
-        if confidence is None or confidence < float(request.confidence_threshold):
-            blocking_reasons.append(E_LOW_CONFIDENCE)
-        if distance_m is None or distance_m <= 0.0 or not math.isfinite(distance_m):
-            blocking_reasons.append(E_INVALID_DISTANCE)
-        elif distance_m > float(request.hard_safety_limit_m) + EPS:
+        elif normalized_language.get("parse_status") == STATUS_NEEDS_CLARIFICATION:
+            reason = str(normalized_language.get("clarification_reason") or "")
+            if "DISTANCE" in reason:
+                blocking_reasons.append(E_INVALID_DISTANCE)
+            elif "DIRECTION" in reason or "CONFLICT" in reason:
+                blocking_reasons.append(E_INVALID_DIRECTION)
+            else:
+                blocking_reasons.append(E_UNSUPPORTED_INTENT)
+
+        axis = _string(normalized_language.get("direction_axis"))
+        direction = _string(normalized_language.get("direction_sign"))
+        distance_m = _optional_float(normalized_language.get("requested_distance_m"))
+        confidence = _optional_float(normalized_language.get("motion_parse_confidence"))
+        if distance_m is not None and distance_m > float(request.hard_safety_limit_m) + EPS:
             blocking_reasons.append(E_EXCESSIVE_CARTESIAN_MOTION)
-        elif distance_m > float(request.max_distance_m) + EPS:
+        elif distance_m is not None and distance_m > float(request.max_distance_m) + EPS:
             blocking_reasons.append(E_EXCESSIVE_CARTESIAN_MOTION)
 
-        if not blocking_reasons and axis and direction and distance_m is not None:
-            delta_m = _delta_from_axis_direction(axis, direction, distance_m)
+        if not blocking_reasons and normalized_language.get("parse_status") == NORMALIZER_STATUS_PASS and axis and direction and distance_m is not None:
+            delta_m = normalized_language.get("delta_m")
+            if not _vector3(delta_m):
+                delta_m = _delta_from_axis_direction(axis, direction, distance_m)
             normalized_contract = {
                 "intent": INTENT_RELATIVE_CARTESIAN_MOTION,
                 "frame": DEFAULT_FRAME,
-                "delta_m": [round(value, 6) for value in delta_m],
+                "delta_m": [round(float(value), 6) for value in delta_m],
                 "max_distance_m": float(request.max_distance_m),
                 "hard_safety_limit_m": float(request.hard_safety_limit_m),
                 "must_confirm": True,
@@ -162,7 +189,7 @@ def evaluate_qwen_motion_parser(request: QwenMotionParserRequest) -> Dict[str, A
 
     blocking_reasons = _unique(blocking_reasons)
     status = STATUS_PASS if not blocking_reasons else STATUS_BLOCKED
-    return {
+    result = {
         "contract_version": CONTRACT_VERSION,
         "qwen_motion_parser_status": status,
         "parser_source": "qwen_llm",
@@ -171,48 +198,64 @@ def evaluate_qwen_motion_parser(request: QwenMotionParserRequest) -> Dict[str, A
         "qwen_endpoint": endpoint,
         "llm_latency_ms": latency_ms,
         "raw_llm_output": raw_output,
+        "qwen_payload": payload,
         "normalized_contract": normalized_contract,
         "axis": axis,
         "direction": direction,
         "distance_m": round(float(distance_m), 6) if distance_m is not None else None,
         "confidence": confidence,
-        "delta_m": [round(value, 6) for value in delta_m] if delta_m else None,
+        "delta_m": [round(float(value), 6) for value in delta_m] if delta_m else None,
         "parser_blocking_reasons": blocking_reasons,
         "blocking_reasons": blocking_reasons,
         "warnings": _unique(warnings),
     }
+    if isinstance(normalized_language, dict):
+        result.update(_language_result_fields(normalized_language))
+    return result
 
 
 def build_qwen_motion_prompt(user_text: str) -> str:
     return (
-        "You are a strict motion-command parser for a UR5e robot.\n"
+        "You are a semantic motion-command parser for TETO, a UR5e safety wrapper.\n"
         "Return STRICT JSON ONLY. No markdown, no prose, no code fences.\n"
-        "Supported commands are ONLY small relative Cartesian TCP motions:\n"
-        "- up/down\n"
-        "- left/right\n"
-        "- forward/backward\n"
-        "- +x/-x/+y/-y/+z/-z\n"
-        "Distance must be 5 mm or less. Convert distance_m to meters.\n"
-        "Reject object, vision, grasp, pick, hover-above-object, rotate, joint, velocity, force,\n"
-        "URScript, RTDE, dashboard, trajectories, and ambiguous commands.\n"
+        "You perform semantic parsing only; do not approve execution or decide robot permission.\n"
+        f"Use this schema_version exactly: {QWEN_SEMANTIC_SCHEMA_VERSION}.\n"
         "Valid output schema:\n"
         "{\n"
-        "  \"intent\": \"relative_cartesian_motion\",\n"
-        "  \"axis\": \"x\" | \"y\" | \"z\",\n"
-        "  \"direction\": \"+\" | \"-\",\n"
-        "  \"distance_m\": number,\n"
-        "  \"confidence\": number,\n"
-        "  \"reason\": string\n"
+        "  \"schema_version\": \"teto_motion_semantics.v1\",\n"
+        "  \"intent_status\": \"ok | needs_clarification | unsupported\",\n"
+        "  \"intent_type\": \"relative_cartesian_motion | vision_target_motion | manipulation | speed_control | unknown\",\n"
+        "  \"motion\": {\n"
+        "    \"reference\": \"tcp | tool | end_effector | robot_hand | arm_tip | unspecified\",\n"
+        "    \"direction_semantic\": \"up | down | left | right | forward | backward | conflicting | missing | unknown\",\n"
+        "    \"distance\": {\"value\": number|null, \"unit\": \"mm|cm|m|unspecified\", \"meters\": number|null, \"quality\": \"explicit | fuzzy_small | missing | ambiguous\"},\n"
+        "    \"fuzzy_magnitude\": \"tiny | small | medium | large | unspecified\",\n"
+        "    \"frame_hint\": \"base_link | camera | user_relative | unspecified\"\n"
+        "  },\n"
+        "  \"clarification\": {\"required\": boolean, \"reason\": string},\n"
+        "  \"unsupported\": {\"reason\": string},\n"
+        "  \"confidence\": {\"intent\": number, \"direction\": number, \"distance\": number, \"overall\": number},\n"
+        "  \"language\": \"en | zh | mixed | unknown\",\n"
+        "  \"notes\": string\n"
         "}\n"
-        "If unsafe/unsupported/ambiguous, return:\n"
-        "{\n"
-        "  \"intent\": \"reject\",\n"
-        "  \"axis\": null,\n"
-        "  \"direction\": null,\n"
-        "  \"distance_m\": 0.0,\n"
-        "  \"confidence\": 0.0,\n"
-        "  \"reason\": \"...\"\n"
-        "}\n"
+        "Instructions:\n"
+        "- Relative motion of TCP/tool/end-effector/robot hand/arm tip is relative_cartesian_motion.\n"
+        "- If direction is clear and distance is fuzzy small, set distance.quality=fuzzy_small, not needs_clarification.\n"
+        "- If distance is explicit, convert meters accurately.\n"
+        "- If direction is missing, return needs_clarification with direction_semantic=missing.\n"
+        "- If directions conflict, return needs_clarification with direction_semantic=conflicting.\n"
+        "- Object/location targets such as mug/cup/bottle/object/there are vision_target_motion or needs_clarification, not relative Cartesian motion.\n"
+        "- Grasp/pick/push/touch/manipulation commands are manipulation unsupported for this stage.\n"
+        "- Speed-only changes are speed_control unsupported for this stage.\n"
+        "- Do not invent a target, direction, distance, or execution permission.\n"
+        "Examples:\n"
+        "drop the tool a tiny bit => ok, relative_cartesian_motion, direction_semantic=down, distance.quality=fuzzy_small.\n"
+        "把末端降低 2 厘米 => ok, relative_cartesian_motion, direction_semantic=down, distance.meters=0.02, quality=explicit.\n"
+        "末端往下移动一点 => ok, relative_cartesian_motion, direction_semantic=down, distance.quality=fuzzy_small.\n"
+        "move to the mug => unsupported, vision_target_motion.\n"
+        "grab the cup => unsupported, manipulation.\n"
+        "move 5 cm => needs_clarification, direction_semantic=missing.\n"
+        "move up and down 5 cm => needs_clarification, direction_semantic=conflicting.\n"
         f"User command: {user_text}"
     )
 
@@ -245,7 +288,7 @@ def _call_http_endpoint(*, prompt: str, model_name: str, endpoint: str, timeout_
     body = {
         "model": model_name,
         "stream": False,
-        "options": {"temperature": 0.0, "num_predict": 128},
+        "options": {"temperature": 0.0, "num_predict": 512},
     }
     if generate_style:
         body["prompt"] = prompt
@@ -364,6 +407,78 @@ def _delta_from_axis_direction(axis: str, direction: str, distance_m: float) -> 
     if axis == "y":
         return [0.0, signed, 0.0]
     return [0.0, 0.0, signed]
+
+
+def _legacy_payload_blocking_reasons(payload: Dict[str, Any], *, confidence_threshold: float) -> list[str]:
+    if payload.get("schema_version") == QWEN_SEMANTIC_SCHEMA_VERSION or "intent_status" in payload or "motion" in payload:
+        return []
+    reasons = []
+    intent = _string(payload.get("intent"))
+    axis = _string(payload.get("axis"))
+    direction = _string(payload.get("direction"))
+    distance_m = _optional_float(payload.get("distance_m"))
+    confidence = _optional_float(payload.get("confidence"))
+    if intent != INTENT_RELATIVE_CARTESIAN_MOTION:
+        reasons.append(E_UNSUPPORTED_INTENT)
+    if axis not in ALLOWED_AXES:
+        reasons.append(E_INVALID_AXIS)
+    if direction not in ALLOWED_DIRECTIONS:
+        reasons.append(E_INVALID_DIRECTION)
+    if confidence is None or confidence < float(confidence_threshold):
+        reasons.append(E_LOW_CONFIDENCE)
+    if distance_m is None or distance_m <= 0.0 or not math.isfinite(distance_m):
+        reasons.append(E_INVALID_DISTANCE)
+    return reasons
+
+
+def _language_result_fields(language: dict[str, Any]) -> dict[str, Any]:
+    keys = [
+        "natural_language_coverage_version",
+        "motion_language_policy_version",
+        "semantic_alignment_version",
+        "raw_command",
+        "normalized_command",
+        "parse_status",
+        "clarification_required",
+        "clarification_reason",
+        "unsupported_intent_reason",
+        "distance_source",
+        "direction_source",
+        "inferred_default_distance_m",
+        "requested_distance_m",
+        "direction_axis",
+        "direction_sign",
+        "motion_frame",
+        "parser_confidence",
+        "motion_parse_confidence",
+        "requires_confirmation",
+        "safety_gate_still_required",
+        "execution_permission_decided_by_parser",
+        "qwen_semantic_schema_version",
+        "qwen_intent_status",
+        "qwen_intent_type",
+        "qwen_direction_semantic",
+        "qwen_distance_quality",
+        "qwen_distance_m",
+        "qwen_language",
+        "qwen_confidence_intent",
+        "qwen_confidence_direction",
+        "qwen_confidence_distance",
+        "qwen_confidence_overall",
+        "qwen_semantic_parse_used",
+        "fallback_parse_used",
+        "qwen_fallback_conflict",
+        "qwen_fallback_conflict_reason",
+        "canonicalization_source",
+    ]
+    return {key: language.get(key) for key in keys}
+
+
+def _vector3(value: Any) -> bool:
+    if not isinstance(value, (list, tuple)) or len(value) != 3:
+        return False
+    return all(_optional_float(item) is not None for item in value)
+
 
 
 def _forbidden_payload_reasons(payload: Dict[str, Any]) -> list[str]:
