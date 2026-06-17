@@ -391,6 +391,10 @@ def test_qwen_prompt_requests_semantic_schema_and_fuzzy_examples():
     assert "direction_semantic" in prompt
     assert "fuzzy_small" in prompt
     assert "把末端降低 2 厘米" in prompt
+    assert "移动 5 厘米" in prompt
+    assert "go up 5 cm and right 2 cm" in prompt
+    assert "先上再下 5 厘米" in prompt
+    assert "never infer a direction from distance alone" in prompt
     assert "do not approve execution" in prompt.lower()
 
 

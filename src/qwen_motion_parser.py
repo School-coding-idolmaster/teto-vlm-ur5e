@@ -242,8 +242,9 @@ def build_qwen_motion_prompt(user_text: str) -> str:
         "- Relative motion of TCP/tool/end-effector/robot hand/arm tip is relative_cartesian_motion.\n"
         "- If direction is clear and distance is fuzzy small, set distance.quality=fuzzy_small, not needs_clarification.\n"
         "- If distance is explicit, convert meters accurately.\n"
-        "- If direction is missing, return needs_clarification with direction_semantic=missing.\n"
+        "- If direction is missing, return needs_clarification with direction_semantic=missing; never infer a direction from distance alone.\n"
         "- If directions conflict, return needs_clarification with direction_semantic=conflicting.\n"
+        "- If a command asks for two directions or distances in one request, return needs_clarification with direction_semantic=conflicting unless a clear correction cancels the first direction.\n"
         "- Object/location targets such as mug/cup/bottle/object/there are vision_target_motion or needs_clarification, not relative Cartesian motion.\n"
         "- Grasp/pick/push/touch/manipulation commands are manipulation unsupported for this stage.\n"
         "- Speed-only changes are speed_control unsupported for this stage.\n"
@@ -255,7 +256,11 @@ def build_qwen_motion_prompt(user_text: str) -> str:
         "move to the mug => unsupported, vision_target_motion.\n"
         "grab the cup => unsupported, manipulation.\n"
         "move 5 cm => needs_clarification, direction_semantic=missing.\n"
+        "移动 5 厘米 => needs_clarification, direction_semantic=missing.\n"
         "move up and down 5 cm => needs_clarification, direction_semantic=conflicting.\n"
+        "go up 5 cm and right 2 cm => needs_clarification, direction_semantic=conflicting.\n"
+        "先上再下 5 厘米 => needs_clarification, direction_semantic=conflicting.\n"
+        "move forward, no, actually move backward 5 cm => ok, relative_cartesian_motion, direction_semantic=backward, distance.meters=0.05.\n"
         f"User command: {user_text}"
     )
 
