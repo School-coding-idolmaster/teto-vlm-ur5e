@@ -31,7 +31,7 @@ from src.moveit_pose_executor import (
 
 
 CONTRACT_VERSION = "teto_cartesian_motion_gateway.v1"
-CURRENT_CARTESIAN_MOTION_VERSION = "TETO V3.0.9"
+CURRENT_CARTESIAN_MOTION_VERSION = "TETO V3.0.10"
 
 STATUS_PASS = "PASS"
 STATUS_BLOCKED = "BLOCKED"

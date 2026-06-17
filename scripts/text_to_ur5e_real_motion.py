@@ -31,6 +31,11 @@ from src.moveit_pose_executor import (  # noqa: E402
     DEFAULT_WARN_PATH_LENGTH_RATIO,
     evaluate_planner_audit_risk,
 )
+from src.motion_command_normalizer import (  # noqa: E402
+    DEFAULT_SMALL_STEP_M,
+    POLICY_VERSION as MOTION_LANGUAGE_POLICY_VERSION,
+    normalize_motion_command,
+)
 from src.qwen_motion_parser import (  # noqa: E402
     QwenMotionParserRequest,
     evaluate_qwen_motion_parser,
@@ -110,6 +115,7 @@ class ParsedMotionCommand:
     llm_latency_ms: float | None = None
     raw_llm_output: str | None = None
     parser_blocking_reasons: list[str] | None = None
+    natural_language_evidence: dict[str, Any] | None = None
 
     def task_contract(self, *, real_robot_motion_requested: bool, dry_run: bool) -> dict[str, Any]:
         return {
@@ -137,11 +143,24 @@ class ParsedMotionCommand:
             self.distance_m <= self.max_distance_m + EPS
             and self.distance_m <= self.hard_safety_limit_m + EPS
         )
+        language = self.natural_language_evidence if isinstance(self.natural_language_evidence, dict) else {}
         return {
             "original_command": self.command,
             "input_mode": input_mode,
             "parser_mode": parser_mode,
             "parser_source": self.parser_source,
+            "natural_language_coverage_version": language.get("natural_language_coverage_version"),
+            "motion_language_policy_version": language.get("motion_language_policy_version"),
+            "raw_command": language.get("raw_command", self.command),
+            "normalized_command": language.get("normalized_command"),
+            "parse_status": language.get("parse_status", STATUS_PASS),
+            "distance_source": language.get("distance_source", "explicit"),
+            "direction_source": language.get("direction_source", "explicit_direction_word"),
+            "inferred_default_distance_m": language.get("inferred_default_distance_m"),
+            "motion_parse_confidence": language.get("motion_parse_confidence"),
+            "requires_confirmation": language.get("requires_confirmation", True),
+            "safety_gate_still_required": language.get("safety_gate_still_required", True),
+            "execution_permission_decided_by_parser": language.get("execution_permission_decided_by_parser", False),
             "llm_called": self.llm_called,
             "model_name": self.model_name,
             "endpoint": self.qwen_endpoint,
@@ -189,6 +208,7 @@ def parse_motion_command(
     max_step_m: float | None = None,
     max_distance_m: float | None = None,
     hard_safety_limit_m: float = DEFAULT_REAL_HARD_SAFETY_LIMIT_M,
+    default_small_step_m: float = DEFAULT_SMALL_STEP_M,
 ) -> ParsedMotionCommand:
     configured_max_distance_m = (
         float(max_distance_m)
@@ -207,15 +227,37 @@ def parse_motion_command(
         raise MotionParseError("E_INVALID_MAX_DISTANCE")
 
     normalized = _normalize(command)
-    _reject_forbidden(normalized)
 
-    distance_m, unit = _extract_distance_m(normalized)
+    try:
+        _reject_forbidden(normalized)
+        distance_m, unit = _extract_distance_m(normalized)
+        direction, delta = _extract_direction_delta(normalized, distance_m)
+        language_evidence = _rule_language_evidence(
+            command=command,
+            normalized=normalized,
+            distance_m=distance_m,
+            unit=unit,
+            delta=delta,
+            distance_source="explicit",
+            direction_source="explicit_direction_word",
+            confidence=0.92,
+        )
+    except MotionParseError:
+        language_evidence = normalize_motion_command(
+            command,
+            default_small_step_m=default_small_step_m,
+            parser_source="normalizer",
+        )
+        if language_evidence.get("parse_status") != STATUS_PASS:
+            raise MotionParseError(_motion_parse_error_from_language(language_evidence))
+        distance_m = float(language_evidence["requested_distance_m"])
+        unit = str(language_evidence.get("unit") or language_evidence.get("distance_source") or "normalized")
+        delta = [float(value) for value in language_evidence["delta_m"]]
+        direction = f"{language_evidence.get('direction_axis')}{language_evidence.get('direction_sign')}"
     if distance_m > hard_safety_limit_m + EPS:
         raise MotionParseError("E_EXCEEDS_HARD_SAFETY_LIMIT")
     if distance_m > configured_max_distance_m + EPS:
         raise MotionParseError("E_EXCEEDS_MAX_STEP")
-
-    direction, delta = _extract_direction_delta(normalized, distance_m)
     if not any(abs(value) > 0.0 for value in delta):
         raise MotionParseError("E_INVALID_ZERO_MOTION")
 
@@ -228,6 +270,7 @@ def parse_motion_command(
         hard_safety_limit_m=hard_safety_limit_m,
         direction=direction,
         unit=unit,
+        natural_language_evidence=language_evidence,
     )
 
 
@@ -247,6 +290,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--qwen-model", default=os.environ.get("TETO_QWEN_MODEL"), help="Qwen/Ollama model name.")
     parser.add_argument("--qwen-endpoint", default=os.environ.get("TETO_QWEN_ENDPOINT"), help="Optional Ollama-compatible endpoint.")
     parser.add_argument("--qwen-timeout-s", type=float, default=_env_float("TETO_QWEN_TIMEOUT_S"))
+    parser.add_argument("--default-small-step-m", type=float, default=DEFAULT_SMALL_STEP_M)
     parser.add_argument(
         "--max-distance-m",
         "--max-step-m",
@@ -387,6 +431,7 @@ def main(argv: list[str] | None = None) -> int:
         dry_run=dry_run,
         max_distance_m=parser_max_distance_m,
         hard_safety_limit_m=parser_hard_safety_limit_m,
+        default_small_step_m=float(args.default_small_step_m),
         input_mode=input_mode,
         qwen_model=args.qwen_model,
         qwen_endpoint=args.qwen_endpoint,
@@ -753,6 +798,7 @@ def _parse_command_for_mode(
     dry_run: bool,
     max_distance_m: float,
     hard_safety_limit_m: float,
+    default_small_step_m: float,
     input_mode: str,
     qwen_model: str | None,
     qwen_endpoint: str | None,
@@ -763,6 +809,7 @@ def _parse_command_for_mode(
             command,
             max_distance_m=max_distance_m,
             hard_safety_limit_m=hard_safety_limit_m,
+            default_small_step_m=default_small_step_m,
             input_mode=input_mode,
         )
 
@@ -789,6 +836,7 @@ def _parse_command_for_mode(
             command,
             max_distance_m=max_distance_m,
             hard_safety_limit_m=hard_safety_limit_m,
+            default_small_step_m=default_small_step_m,
             input_mode=input_mode,
         )
         if parsed is not None:
@@ -816,14 +864,21 @@ def _parse_rule_result(
     max_distance_m: float,
     hard_safety_limit_m: float,
     input_mode: str,
+    default_small_step_m: float = DEFAULT_SMALL_STEP_M,
 ) -> tuple[ParsedMotionCommand | None, dict[str, Any]]:
     try:
         parsed = parse_motion_command(
             command,
             max_distance_m=max_distance_m,
             hard_safety_limit_m=hard_safety_limit_m,
+            default_small_step_m=default_small_step_m,
         )
     except MotionParseError as exc:
+        language_evidence = normalize_motion_command(
+            command,
+            default_small_step_m=default_small_step_m,
+            parser_source="normalizer",
+        )
         reasons = [str(exc)]
         return None, {
             "parser_source": "rule_based",
@@ -833,6 +888,7 @@ def _parse_rule_result(
             "llm_latency_ms": None,
             "raw_llm_output": None,
             "normalized_contract": None,
+            **_language_metadata_fields(language_evidence),
             "parser_blocking_reasons": reasons,
             "blocking_reasons": reasons,
             "input_mode": input_mode,
@@ -845,6 +901,7 @@ def _parse_rule_result(
         "llm_latency_ms": None,
         "raw_llm_output": None,
         "normalized_contract": None,
+        **_language_metadata_fields(parsed.natural_language_evidence),
         "parser_blocking_reasons": [],
         "blocking_reasons": [],
         "input_mode": input_mode,
@@ -862,6 +919,17 @@ def _parsed_from_qwen_result(
     if not _vector3(delta):
         raise MotionParseError("E_INVALID_QWEN_DELTA")
     distance_m = float(result.get("distance_m"))
+    language_evidence = _rule_language_evidence(
+        command=command,
+        normalized=_normalize(command),
+        distance_m=distance_m,
+        unit="qwen_json",
+        delta=[round(float(value), 6) for value in delta],
+        distance_source="explicit",
+        direction_source="explicit_direction_word",
+        confidence=_optional_number(result.get("confidence")) or 0.90,
+        parser_source="qwen_llm",
+    )
     return ParsedMotionCommand(
         command=command.strip(),
         frame="base_link",
@@ -878,7 +946,101 @@ def _parsed_from_qwen_result(
         llm_latency_ms=result.get("llm_latency_ms"),
         raw_llm_output=result.get("raw_llm_output"),
         parser_blocking_reasons=result.get("parser_blocking_reasons", []),
+        natural_language_evidence=language_evidence,
     )
+
+
+def _rule_language_evidence(
+    *,
+    command: str,
+    normalized: str,
+    distance_m: float,
+    unit: str,
+    delta: list[float],
+    distance_source: str,
+    direction_source: str,
+    confidence: float,
+    parser_source: str = "rule_based",
+) -> dict[str, Any]:
+    axis, sign = _axis_direction_from_delta(delta)
+    return {
+        "natural_language_coverage_version": MOTION_LANGUAGE_POLICY_VERSION,
+        "motion_language_policy_version": MOTION_LANGUAGE_POLICY_VERSION,
+        "raw_command": command.strip(),
+        "normalized_command": normalized,
+        "parser_source": parser_source,
+        "parser_confidence": round(float(confidence), 6),
+        "motion_parse_confidence": round(float(confidence), 6),
+        "parse_status": STATUS_PASS,
+        "clarification_required": False,
+        "clarification_reason": None,
+        "unsupported_intent_reason": None,
+        "distance_source": distance_source,
+        "direction_source": direction_source,
+        "inferred_default_distance_m": None,
+        "requested_distance_m": round(float(distance_m), 6),
+        "direction_axis": axis,
+        "direction_sign": sign,
+        "motion_frame": "base_link",
+        "requires_confirmation": True,
+        "safety_gate_still_required": True,
+        "execution_permission_decided_by_parser": False,
+        "unit": unit,
+    }
+
+
+def _motion_parse_error_from_language(language_evidence: dict[str, Any]) -> str:
+    if language_evidence.get("parse_status") == "UNSUPPORTED_INTENT":
+        return str(language_evidence.get("unsupported_intent_reason") or "E_UNSUPPORTED_INTENT")
+    return str(language_evidence.get("clarification_reason") or "E_COMMAND_NEEDS_CLARIFICATION")
+
+
+def _language_metadata_fields(language_evidence: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(language_evidence, dict):
+        return {
+            "natural_language_coverage_version": MOTION_LANGUAGE_POLICY_VERSION,
+            "motion_language_policy_version": MOTION_LANGUAGE_POLICY_VERSION,
+            "parse_status": None,
+            "clarification_required": None,
+            "clarification_reason": None,
+            "unsupported_intent_reason": None,
+            "distance_source": None,
+            "direction_source": None,
+            "inferred_default_distance_m": None,
+            "requested_distance_m": None,
+            "direction_axis": None,
+            "direction_sign": None,
+            "motion_frame": None,
+            "motion_parse_confidence": None,
+            "requires_confirmation": True,
+            "safety_gate_still_required": True,
+            "execution_permission_decided_by_parser": False,
+            "raw_command": None,
+            "normalized_command": None,
+        }
+    keys = [
+        "natural_language_coverage_version",
+        "motion_language_policy_version",
+        "raw_command",
+        "normalized_command",
+        "parse_status",
+        "clarification_required",
+        "clarification_reason",
+        "unsupported_intent_reason",
+        "distance_source",
+        "direction_source",
+        "inferred_default_distance_m",
+        "requested_distance_m",
+        "direction_axis",
+        "direction_sign",
+        "motion_frame",
+        "parser_confidence",
+        "motion_parse_confidence",
+        "requires_confirmation",
+        "safety_gate_still_required",
+        "execution_permission_decided_by_parser",
+    ]
+    return {key: language_evidence.get(key) for key in keys}
 
 
 def _metadata_from_parser_result(
@@ -900,6 +1062,7 @@ def _metadata_from_parser_result(
         raw_llm_output=parser_result.get("raw_llm_output"),
         normalized_contract=parser_result.get("normalized_contract"),
         parser_blocking_reasons=_string_list(parser_result.get("parser_blocking_reasons") or parser_result.get("blocking_reasons")),
+        language_metadata=_language_metadata_fields(parser_result),
     )
 
 
@@ -933,8 +1096,8 @@ def _lexical_direction_expectation(command: str) -> dict[str, str] | None:
         ("backward", "x", "-", [r"\bbackward\b", r"\bbackwards\b", r"\bback\b"]),
         ("left", "y", "+", [r"\bleft\b"]),
         ("right", "y", "-", [r"\bright\b"]),
-        ("up", "z", "+", [r"\bup\b", r"\bhigher\b", r"\braise\b"]),
-        ("down", "z", "-", [r"\bdown\b", r"\blower\b", r"\blowering\b"]),
+        ("up", "z", "+", [r"\bup\b", r"\bhigher\b", r"\braise\b", r"\blift\b"]),
+        ("down", "z", "-", [r"\bdown\b", r"\blower\b", r"\blowering\b", r"\bdrop\b", r"\bdescend\b"]),
     ]
     matches = [
         {"direction_word": word, "expected_axis": axis, "expected_direction": sign}
@@ -957,6 +1120,7 @@ def _parser_metadata(
     raw_llm_output: str | None,
     normalized_contract: dict[str, Any] | None,
     parser_blocking_reasons: list[str],
+    language_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "input_mode": input_mode,
@@ -970,6 +1134,7 @@ def _parser_metadata(
         "raw_llm_output": raw_llm_output,
         "normalized_contract": normalized_contract,
         "parser_blocking_reasons": parser_blocking_reasons,
+        **(language_metadata if isinstance(language_metadata, dict) else {}),
     }
 
 

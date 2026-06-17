@@ -33,6 +33,36 @@ def test_valid_restricted_relative_commands(command, delta):
 
 
 @pytest.mark.parametrize(
+    ("command", "delta", "distance_source"),
+    [
+        ("raise the tcp by 5 cm", [0.0, 0.0, 0.05], "explicit"),
+        ("lift the tool 2 centimeters", [0.0, 0.0, 0.02], "explicit"),
+        ("move the robot hand slightly down by 10 mm", [0.0, 0.0, -0.01], "explicit"),
+        ("drop the end effector 2 centimeters", [0.0, 0.0, -0.02], "explicit"),
+        ("shift the arm tip left by 10 mm", [0.0, 0.01, 0.0], "explicit"),
+        ("move forward 5 centimeters", [0.05, 0.0, 0.0], "explicit"),
+        ("go backward by 3 cm", [-0.03, 0.0, 0.0], "explicit"),
+        ("raise it by two centimeters", [0.0, 0.0, 0.02], "explicit"),
+        ("lower it by five millimeters", [0.0, 0.0, -0.005], "explicit"),
+        ("move the tcp to the right by 1 cm", [0.0, -0.01, 0.0], "explicit"),
+        ("go down a little", [0.0, 0.0, -0.01], "inferred_default"),
+        ("move up a bit", [0.0, 0.0, 0.01], "inferred_default"),
+        ("nudge the tcp left", [0.0, 0.01, 0.0], "inferred_default"),
+        ("shift the end effector forward slightly", [0.01, 0.0, 0.0], "inferred_default"),
+    ],
+)
+def test_natural_language_motion_coverage_parses_to_canonical_relative_motion(command, delta, distance_source):
+    parsed = parse_motion_command(command)
+
+    assert parsed.delta_m == delta
+    assert parsed.natural_language_evidence["parse_status"] == "PASS"
+    assert parsed.natural_language_evidence["distance_source"] == distance_source
+    assert parsed.natural_language_evidence["requires_confirmation"] is True
+    assert parsed.natural_language_evidence["safety_gate_still_required"] is True
+    assert parsed.natural_language_evidence["execution_permission_decided_by_parser"] is False
+
+
+@pytest.mark.parametrize(
     "command",
     [
         "hover above red mug",
@@ -46,6 +76,23 @@ def test_valid_restricted_relative_commands(command, delta):
 def test_rejects_vision_and_direct_robot_control_commands(command):
     with pytest.raises(MotionParseError):
         parse_motion_command(command)
+
+
+@pytest.mark.parametrize(
+    ("command", "reason"),
+    [
+        ("move it over there", "E_TARGET_LOCATION_UNSPECIFIED"),
+        ("move to the mug", "NEEDS_VISION"),
+        ("grab the cup", "UNSUPPORTED_VISION_OR_MANIPULATION_INTENT"),
+        ("move 5 cm", "E_DIRECTION_MISSING"),
+        ("move up and down 5 cm", "E_CONFLICTING_DIRECTIONS"),
+    ],
+)
+def test_ambiguous_or_unsupported_language_does_not_parse_as_motion(command, reason):
+    with pytest.raises(MotionParseError) as exc:
+        parse_motion_command(command)
+
+    assert str(exc.value) == reason
 
 
 def test_rejects_motion_over_hard_safety_limit():
@@ -135,7 +182,31 @@ def test_manual_qwen_path_reads_stdin_and_preserves_text(monkeypatch, capsys):
     assert '"llm_called": true' in output
     assert '"delta_m": [\n      0.0,\n      0.0,\n      0.005\n    ]' in output
     evidence = _final_evidence(output)
-    assert evidence["execution_preview"] == {
+    assert {
+        key: evidence["execution_preview"][key]
+        for key in [
+            "original_command",
+            "input_mode",
+            "parser_mode",
+            "parser_source",
+            "llm_called",
+            "model_name",
+            "endpoint",
+            "intent",
+            "frame",
+            "axis",
+            "direction",
+            "distance_m",
+            "delta_m",
+            "max_distance_m",
+            "hard_safety_limit_m",
+            "within_safety_limit",
+            "dry_run",
+            "real_robot_motion_requested",
+            "manual_confirmation_required",
+            "preview_status",
+        ]
+    } == {
         "original_command": "raise the tcp by 5 millimeters",
         "input_mode": "manual",
         "parser_mode": "qwen",
@@ -157,6 +228,8 @@ def test_manual_qwen_path_reads_stdin_and_preserves_text(monkeypatch, capsys):
         "manual_confirmation_required": True,
         "preview_status": "PASS",
     }
+    assert evidence["execution_preview"]["natural_language_coverage_version"] == "teto_v3_0_10_nl_motion_coverage_v1"
+    assert evidence["execution_preview"]["execution_permission_decided_by_parser"] is False
     planner = evidence["planner_acceptance"]
     assert planner["status"] == "PASS"
     assert planner["requested_distance_m"] == 0.005
@@ -988,6 +1061,47 @@ def test_one_shot_ten_cm_blocks_when_long_step_decomposition_disabled(monkeypatc
     assert evidence["real_robot_motion_executed"] is False
 
 
+def test_rule_cli_reports_fuzzy_language_evidence_without_execution_permission(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
+
+    exit_code = cli.main(["--parser", "rule", "--cmd", "go down a little"])
+
+    evidence = _final_evidence(capsys.readouterr().out)
+    assert exit_code == 0
+    assert evidence["final_status"] == "PASS"
+    assert evidence["natural_language_coverage_version"] == "teto_v3_0_10_nl_motion_coverage_v1"
+    assert evidence["parse_status"] == "PASS"
+    assert evidence["distance_source"] == "inferred_default"
+    assert evidence["direction_source"] == "explicit_direction_word"
+    assert evidence["inferred_default_distance_m"] == 0.01
+    assert evidence["requested_distance_m"] == 0.01
+    assert evidence["direction_axis"] == "z"
+    assert evidence["direction_sign"] == "-"
+    assert evidence["requires_confirmation"] is True
+    assert evidence["safety_gate_still_required"] is True
+    assert evidence["execution_permission_decided_by_parser"] is False
+    assert evidence["trajectory_sent"] is False
+    assert evidence["execute_trajectory_called"] is False
+    assert evidence["real_robot_motion_executed"] is False
+
+
+def test_rule_cli_ambiguous_language_blocks_before_motion_execution(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: pytest.fail("pose lookup should not run"))
+
+    exit_code = cli.main(["--parser", "rule", "--cmd", "move it over there"])
+
+    evidence = _final_evidence(capsys.readouterr().out)
+    assert exit_code == 2
+    assert evidence["final_status"] == "BLOCKED"
+    assert evidence["parse_status"] == "NEEDS_CLARIFICATION"
+    assert evidence["clarification_required"] is True
+    assert evidence["clarification_reason"] == "E_TARGET_LOCATION_UNSPECIFIED"
+    assert evidence["execution_permission_decided_by_parser"] is False
+    assert evidence["trajectory_sent"] is False
+    assert evidence["execute_trajectory_called"] is False
+    assert evidence["real_robot_motion_executed"] is False
+
+
 def test_ten_cm_accepts_as_decomposed_contract_when_enabled(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
 
@@ -1023,6 +1137,40 @@ def test_ten_cm_accepts_as_decomposed_contract_when_enabled(monkeypatch, capsys)
     assert evidence["real_substep_execution_enabled"] is False
     assert evidence["substep_execution_mode"] == "contract_only"
     assert evidence["decomposed_motion_allowed"] is True
+    assert evidence["target_pose"] is None
+    assert evidence["moveit_plan_request"] is None
+    assert evidence["trajectory_sent"] is False
+    assert evidence["execute_trajectory_called"] is False
+    assert evidence["real_robot_motion_executed"] is False
+
+
+def test_parser_can_parse_twenty_cm_but_gateway_keeps_contract_only_safety(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
+
+    exit_code = cli.main(
+        [
+            "--parser",
+            "rule",
+            "--enable-long-step-decomposition",
+            "--cmd",
+            "move forward 20 cm",
+        ]
+    )
+
+    evidence = _final_evidence(capsys.readouterr().out)
+    assert exit_code == 0
+    assert evidence["final_status"] == "PASS"
+    assert evidence["parse_status"] == "PASS"
+    assert evidence["requested_distance_m"] == 0.20
+    assert evidence["direction_axis"] == "x"
+    assert evidence["direction_sign"] == "+"
+    assert evidence["execution_permission_decided_by_parser"] is False
+    assert evidence["planned_execution_style"] == "decomposed_autoregressive_contract"
+    assert evidence["safety_gate_scope"] == "decomposed_contract"
+    assert evidence["one_shot_distance_check_status"] == "BLOCKED"
+    assert evidence["decomposed_motion_allowed"] is True
+    assert evidence["real_substep_execution_enabled"] is False
+    assert evidence["substep_execution_mode"] == "contract_only"
     assert evidence["target_pose"] is None
     assert evidence["moveit_plan_request"] is None
     assert evidence["trajectory_sent"] is False

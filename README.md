@@ -118,6 +118,36 @@ keep `planned_execution_style=decomposed_autoregressive_contract`,
 `trajectory_sent=false`, and `real_robot_motion_executed=false`. They do not
 create a one-shot target pose or MoveIt plan request for the full long motion.
 
+## TETO v3.0.10: Natural-Language Motion Coverage Expansion
+
+TETO v3.0.10 expands natural-language coverage for relative TCP motion
+commands while preserving all robot execution safety gates. It recognizes more
+human-like English motion phrases, common TCP/tool/end-effector synonyms,
+centimeter and millimeter distance expressions, small written numbers, fuzzy
+small-step phrases such as "a little" or "slightly", and a small set of common
+Chinese relative-motion phrases.
+
+Language coverage does not expand one-shot real execution permission. Parsed
+commands still flow through current TCP readiness, direction guard, one-shot
+distance limits, long-step decomposition contract checks, planner audit
+evidence, planner risk classification, and manual confirmation behavior before
+any real execution path. Parser evidence records
+`execution_permission_decided_by_parser=false` and
+`safety_gate_still_required=true`.
+
+Fuzzy small-step commands infer a conservative default distance
+(`default_small_step_m=0.01` by default), set
+`distance_source=inferred_default`, and keep `requires_confirmation=true`.
+Ambiguous commands such as "move it over there" or object/vision commands such
+as "move to the mug" are classified as clarification-required or unsupported
+and are not converted into executable robot motion.
+
+An offline coverage report can be generated with:
+
+```bash
+python3 scripts/run_motion_language_coverage.py
+```
+
 ## Project Structure
 
 ```text
