@@ -174,6 +174,41 @@ direction guard, one-shot limits, long-step decomposition contract checks,
 planner audit evidence, planner risk classification, and manual confirmation
 remain downstream safety gates before any real execution path.
 
+## TETO v3.0.12: Offline Long-Distance Autoregressive Motion Planner
+
+TETO v3.0.12 introduces an offline long-distance autoregressive motion
+planner. It converts an accepted canonical long-distance decomposed contract
+into a per-substep preview plan. Each substep records current/latest verified
+TCP readiness, target generation, planner audit and risk placeholders,
+verification policy, simulated post-step evidence, and an explicit
+continue-or-abort decision.
+
+Targets are generated sequentially from the latest simulated verified TCP
+pose. They are not all precomputed from the initial pose. This models the
+future observe, generate, plan/audit, execute-or-skip, verify, and continue-or-
+abort loop while keeping execution disabled.
+
+The one-shot envelope is unchanged at `max_one_shot_distance_m=0.05` by
+default. Real multi-step execution remains disabled. The planner runs only in
+`offline_preview` or `contract_only` mode, keeps
+`real_substep_execution_enabled=false`, never creates a real MoveIt request,
+never calls ExecuteTrajectory, and never sends a trajectory. Qwen or the
+fallback normalizer supplies only canonical motion semantics:
+`execution_permission_decided_by_parser=false`. The downstream safety gate
+remains authoritative.
+
+Generate an offline report with:
+
+```bash
+python3 scripts/run_long_motion_autoregressive_preview.py \
+  --parser rule \
+  --mock-current-tcp-pose \
+  --cmd "move forward 10 cm"
+```
+
+JSON and Markdown evidence is written under
+`outputs/autoregressive_motion_previews/` by default.
+
 ## Project Structure
 
 ```text
