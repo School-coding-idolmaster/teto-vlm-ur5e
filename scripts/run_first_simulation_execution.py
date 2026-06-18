@@ -294,7 +294,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--camera-source-mode",
-        choices=["offline_file", "manual_snapshot", "live_disabled", "optional_realsense_one_shot"],
+        choices=[
+            "realsense_replay",
+            "offline_file",
+            "manual_snapshot",
+            "live_disabled",
+            "optional_realsense_one_shot",
+        ],
         help="Override the camera source mode declared in the adapter config.",
     )
     parser.add_argument(

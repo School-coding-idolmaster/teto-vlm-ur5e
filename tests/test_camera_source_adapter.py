@@ -13,6 +13,7 @@ from src.camera_source_adapter import (
     MODE_LIVE_DISABLED,
     MODE_MANUAL_SNAPSHOT,
     MODE_OFFLINE_FILE,
+    MODE_REALSENSE_REPLAY,
     MODE_REALSENSE_ONE_SHOT,
     STATUS_BLOCKED,
     STATUS_PASS,
@@ -58,6 +59,16 @@ def test_manual_snapshot_source_passes():
     assert result["camera_source_status"] == STATUS_PASS
     assert result["source_mode"] == MODE_MANUAL_SNAPSHOT
     assert result["capture_method"] == "declared_snapshot_manifest"
+
+
+def test_realsense_replay_source_passes_with_full_snapshot_bundle():
+    result = _evaluate_camera_source(source_mode=MODE_REALSENSE_REPLAY)
+
+    assert result["camera_source_status"] == STATUS_PASS
+    assert result["source_mode"] == MODE_REALSENSE_REPLAY
+    assert result["rgb_ref"] == result["image_ref"]
+    assert result["tf_snapshot_ref"] == result["extrinsics_ref"]
+    assert result["capture_method"] == "realsense_snapshot_replay_manifest"
 
 
 def test_live_disabled_source_is_safe_disabled():
@@ -125,6 +136,12 @@ def test_robot_control_field_blocks_without_generating_controls():
 
 
 def test_example_configs_smoke():
+    replay = evaluate_camera_source_adapter(
+        build_camera_source_adapter_request(
+            requested=True,
+            config_path="configs/camera_source_adapter.example.yaml",
+        )
+    )
     offline = evaluate_camera_source_adapter(
         build_camera_source_adapter_request(
             requested=True,
@@ -144,6 +161,8 @@ def test_example_configs_smoke():
         )
     )
 
+    assert replay["camera_source_status"] == STATUS_PASS
+    assert replay["source_mode"] == MODE_REALSENSE_REPLAY
     assert offline["camera_source_status"] == STATUS_PASS
     assert manual["camera_source_status"] == STATUS_PASS
     assert disabled["camera_source_status"] == STATUS_SAFE_DISABLED

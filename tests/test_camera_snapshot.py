@@ -4,11 +4,15 @@ from datetime import datetime, timezone
 import yaml
 
 from src.camera_snapshot import (
+    E_ALIGNED_DEPTH_REQUIRED,
+    E_CAMERA_INFO_REF_MISSING,
     E_CAMERA_SNAPSHOT_STALE,
     E_DEPTH_REF_MISSING,
     E_IMAGE_REF_MISSING,
     E_LIVE_CAMERA_DISABLED,
+    E_METADATA_REF_MISSING,
     E_ROBOT_COMMAND_NOT_ALLOWED,
+    E_TF_SNAPSHOT_REF_MISSING,
     CameraSnapshotRequest,
     build_camera_snapshot_request,
     evaluate_camera_snapshot_contract,
@@ -39,6 +43,8 @@ def test_valid_offline_camera_snapshot_passes():
     assert result["live_vlm_called"] is False
     assert result["real_robot_motion_executed"] is False
     assert result["real_robot_command_enabled"] is False
+    assert result["rgb_ref"] == result["image_ref"]
+    assert result["tf_snapshot_ref"] == result["extrinsics_ref"]
 
 
 def test_missing_image_ref_blocks_snapshot():
@@ -60,6 +66,41 @@ def test_missing_depth_ref_when_required_blocks_snapshot():
 
     assert result["validity_status"] == "BLOCKED"
     assert E_DEPTH_REF_MISSING in result["blocking_reasons"]
+
+
+def test_formal_realsense_snapshot_requires_calibration_metadata_and_tf_refs():
+    snapshot = _valid_snapshot()
+    snapshot.update(
+        {
+            "source": "realsense_replay",
+            "camera_info_ref": None,
+            "metadata_ref": None,
+            "extrinsics_ref": None,
+            "tf_snapshot_ref": None,
+        }
+    )
+
+    result = evaluate_camera_snapshot_contract(CameraSnapshotRequest(requested=True, snapshot=snapshot))
+
+    assert result["validity_status"] == "BLOCKED"
+    assert E_CAMERA_INFO_REF_MISSING in result["blocking_reasons"]
+    assert E_METADATA_REF_MISSING in result["blocking_reasons"]
+    assert E_TF_SNAPSHOT_REF_MISSING in result["blocking_reasons"]
+
+
+def test_formal_realsense_snapshot_requires_aligned_depth():
+    snapshot = _valid_snapshot()
+    snapshot.update(
+        {
+            "source": "realsense_replay",
+            "alignment_status": "unaligned",
+        }
+    )
+
+    result = evaluate_camera_snapshot_contract(CameraSnapshotRequest(requested=True, snapshot=snapshot))
+
+    assert result["validity_status"] == "BLOCKED"
+    assert E_ALIGNED_DEPTH_REQUIRED in result["blocking_reasons"]
 
 
 def test_expired_ttl_blocks_snapshot():
@@ -121,7 +162,7 @@ def test_example_config_smoke_passes():
 
     assert result["validity_status"] == "PASS"
     assert result["snapshot_id"] == "example_offline_snapshot_001"
-    assert result["source"] == "offline_file"
+    assert result["source"] == "realsense_replay"
     assert result["no_motion_snapshot_passed"] is True
 
 

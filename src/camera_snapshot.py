@@ -23,6 +23,10 @@ E_CAMERA_SNAPSHOT_STALE = "E_CAMERA_SNAPSHOT_STALE"
 E_CAMERA_FRAME_MISSING = "E_CAMERA_FRAME_MISSING"
 E_IMAGE_REF_MISSING = "E_IMAGE_REF_MISSING"
 E_DEPTH_REF_MISSING = "E_DEPTH_REF_MISSING"
+E_ALIGNED_DEPTH_REQUIRED = "E_ALIGNED_DEPTH_REQUIRED"
+E_CAMERA_INFO_REF_MISSING = "E_CAMERA_INFO_REF_MISSING"
+E_METADATA_REF_MISSING = "E_METADATA_REF_MISSING"
+E_TF_SNAPSHOT_REF_MISSING = "E_TF_SNAPSHOT_REF_MISSING"
 E_LIVE_CAMERA_DISABLED = "E_LIVE_CAMERA_DISABLED"
 E_ROBOT_COMMAND_NOT_ALLOWED = "E_ROBOT_COMMAND_NOT_ALLOWED"
 
@@ -56,10 +60,12 @@ SNAPSHOT_FIELDS = (
     "ttl_ms",
     "source",
     "frame_id",
+    "rgb_ref",
     "image_ref",
     "depth_ref",
     "camera_info_ref",
     "metadata_ref",
+    "tf_snapshot_ref",
     "extrinsics_ref",
     "width",
     "height",
@@ -145,8 +151,18 @@ def evaluate_camera_snapshot_contract(
         blocking_reasons.append(E_CAMERA_FRAME_MISSING)
     if not normalized["image_ref"]:
         blocking_reasons.append(E_IMAGE_REF_MISSING)
-    if normalized["depth_required"] and not normalized["depth_ref"]:
+    formal_realsense_source = normalized["source"] in {"realsense_d455", "realsense_replay"}
+    if (normalized["depth_required"] or formal_realsense_source) and not normalized["depth_ref"]:
         blocking_reasons.append(E_DEPTH_REF_MISSING)
+    if formal_realsense_source:
+        if normalized["alignment_status"] != "aligned_rgb_depth":
+            blocking_reasons.append(E_ALIGNED_DEPTH_REQUIRED)
+        if not normalized["camera_info_ref"]:
+            blocking_reasons.append(E_CAMERA_INFO_REF_MISSING)
+        if not normalized["metadata_ref"]:
+            blocking_reasons.append(E_METADATA_REF_MISSING)
+        if not normalized["tf_snapshot_ref"]:
+            blocking_reasons.append(E_TF_SNAPSHOT_REF_MISSING)
     if normalized["live_camera_enabled"] or normalized["source"] == "live_camera":
         blocking_reasons.append(E_LIVE_CAMERA_DISABLED)
     forbidden_fields = _forbidden_robot_control_fields(snapshot)
@@ -163,6 +179,11 @@ def evaluate_camera_snapshot_contract(
     return {
         **normalized,
         "contract_version": CONTRACT_VERSION,
+        "snapshot_contract_type": (
+            "realsense_scene_snapshot"
+            if formal_realsense_source
+            else "legacy_declared_snapshot_contract"
+        ),
         "teto_version": CURRENT_CAMERA_SNAPSHOT_VERSION,
         "requested": True,
         "config_path": request.config_path,
@@ -177,7 +198,11 @@ def evaluate_camera_snapshot_contract(
         "real_robot_command_enabled": False,
         "forbidden_robot_control_fields": forbidden_fields,
         "safety_boundary": _safety_boundary(),
-        "next_safe_action": _next_safe_action(validity_status, blocking_reasons),
+        "next_safe_action": _next_safe_action(
+            validity_status,
+            blocking_reasons,
+            source=normalized.get("source"),
+        ),
     }
 
 
@@ -237,6 +262,8 @@ def _not_requested_result() -> Dict[str, Any]:
 
 
 def _snapshot_fields(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    rgb_ref = _string(snapshot.get("rgb_ref")) or _string(snapshot.get("image_ref"))
+    tf_snapshot_ref = _string(snapshot.get("tf_snapshot_ref")) or _string(snapshot.get("extrinsics_ref"))
     return {
         "snapshot_id": _string(snapshot.get("snapshot_id")),
         "scene_version": _string(snapshot.get("scene_version")),
@@ -244,11 +271,13 @@ def _snapshot_fields(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "ttl_ms": _optional_int(snapshot.get("ttl_ms")),
         "source": _string(snapshot.get("source")) or "live_disabled",
         "frame_id": _string(snapshot.get("frame_id")),
-        "image_ref": _string(snapshot.get("image_ref")),
+        "rgb_ref": rgb_ref,
+        "image_ref": rgb_ref,
         "depth_ref": _string(snapshot.get("depth_ref")),
         "camera_info_ref": _string(snapshot.get("camera_info_ref")),
         "metadata_ref": _string(snapshot.get("metadata_ref")),
-        "extrinsics_ref": _string(snapshot.get("extrinsics_ref")),
+        "tf_snapshot_ref": tf_snapshot_ref,
+        "extrinsics_ref": _string(snapshot.get("extrinsics_ref")) or tf_snapshot_ref,
         "width": _optional_int(snapshot.get("width")),
         "height": _optional_int(snapshot.get("height")),
         "color_encoding": _string(snapshot.get("color_encoding")),
@@ -334,8 +363,15 @@ def _safety_boundary() -> Dict[str, bool]:
     }
 
 
-def _next_safe_action(validity_status: str, blocking_reasons: list[str]) -> str:
+def _next_safe_action(
+    validity_status: str,
+    blocking_reasons: list[str],
+    *,
+    source: str | None = None,
+) -> str:
     if validity_status == STATUS_PASS:
+        if source in {"realsense_d455", "realsense_replay"}:
+            return "Use this validated RealSense snapshot as replayable no-motion scene evidence."
         return "Use this offline/manual snapshot only as replayable no-motion scene evidence."
     return (
         "Fix the camera snapshot manifest and rerun contract validation without enabling "

@@ -109,6 +109,8 @@ def run_batch_recognition(
 
     input_manifest = {
         "version": CURRENT_TETO_VERSION,
+        "record_type": "legacy_semantic_replay",
+        "is_realsense_scene_snapshot": False,
         "prompt_type": prompt_type,
         "backend": selected_backend,
         "image_count": len(image_paths),
@@ -131,6 +133,8 @@ def run_batch_recognition(
         for index, image_path in enumerate(image_paths, start=1):
             print(f"[{index}/{len(image_paths)}] processing {image_path.name}")
             item = {
+                "record_type": "legacy_semantic_replay",
+                "is_realsense_scene_snapshot": False,
                 "image_path": str(image_path),
                 "prompt_type": prompt_type,
                 "prompt": prompt,
@@ -159,6 +163,8 @@ def run_batch_recognition(
             results_file.write(json.dumps(item, ensure_ascii=False) + "\n")
 
     summary = {
+        "record_type": "legacy_semantic_replay",
+        "is_realsense_scene_snapshot": False,
         "run_name": run_metadata["run_name"],
         "created_at": run_metadata["created_at"],
         "input_dir": str(source_dir),

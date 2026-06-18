@@ -1,5 +1,4 @@
 pillow
-pillow-heif
 pyyaml
 
 # Optional for real VLM inference:

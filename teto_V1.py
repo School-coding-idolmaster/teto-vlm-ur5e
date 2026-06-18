@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 from src.batch_recognition import run_batch_recognition
+from src.camera_snapshot import build_camera_snapshot_request, evaluate_camera_snapshot_contract
 from src.display_utils import print_vlm_result
 from src.image_utils import batch_convert_images, convert_image, load_image_processing_config
 from src.output_paths import (
@@ -91,13 +92,14 @@ def print_menu():
     print("              TETO V3.0.0")
     print("             Test Launcher")
     print("=" * 40)
-    print("1. Convert images")
-    print("2. Run the demo")
-    print("3. Just chat with TETO")
-    print("4. Check environment")
-    print("5. Run first simulation execution")
-    print("6. Quit")
+    print("1. Validate RealSense snapshot replay")
+    print("2. Just chat with TETO")
+    print("3. Check environment")
+    print("4. Run first simulation execution")
+    print("5. Quit")
     print()
+    print("Formal visual input: RealSense D455 snapshot / snapshot replay")
+    print("Legacy RGB-only conversion and image demos are not exposed here.")
     print("Semantic pipeline:")
     print("Planner Eligibility -> Projector Eligibility -> Execution Readiness -> Simulation Bridge")
 
@@ -223,6 +225,7 @@ def handle_batch_convert_images():
 
 
 def handle_convert_images():
+    """Legacy/debug RGB-only converter; intentionally absent from the formal menu."""
     while True:
         print()
         print_convert_menu()
@@ -437,6 +440,7 @@ def maybe_show_robot_task_inspection(result: dict) -> None:
 
 
 def handle_run_the_demo():
+    """Legacy/debug RGB-only semantic demo; intentionally absent from the formal menu."""
     while True:
         print()
         print_demo_menu()
@@ -473,6 +477,25 @@ def handle_just_chat_with_teto():
             print(f"TETO chat error: {exc}")
             return
         print(f"TETO: {reply}")
+
+
+def handle_validate_realsense_snapshot_replay():
+    print("==============================")
+    print("RealSense Snapshot Replay")
+    print("==============================")
+    default_manifest = PROJECT_ROOT / "configs" / "camera_snapshot.example.yaml"
+    value = _clean_path(input(f"Snapshot manifest [{default_manifest}]: "))
+    manifest = Path(value).expanduser() if value else default_manifest
+    result = evaluate_camera_snapshot_contract(
+        build_camera_snapshot_request(requested=True, config_path=manifest)
+    )
+    if result.get("source") not in {"realsense_d455", "realsense_replay"}:
+        result = {
+            **result,
+            "validity_status": "BLOCKED",
+            "formal_visual_entry_reason": "E_FORMAL_VISUAL_SOURCE_NOT_REALSENSE",
+        }
+    print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 def _validate_image_path(image_path: str) -> bool:
@@ -555,20 +578,18 @@ def main():
         choice = input("Select an option: ").strip()
 
         if choice == "1":
-            handle_convert_images()
+            handle_validate_realsense_snapshot_replay()
         elif choice == "2":
-            handle_run_the_demo()
-        elif choice == "3":
             handle_just_chat_with_teto()
-        elif choice == "4":
+        elif choice == "3":
             handle_check_environment()
-        elif choice == "5":
+        elif choice == "4":
             handle_first_simulation_execution()
-        elif choice == "6":
+        elif choice == "5":
             print("Bye.")
             break
         else:
-            print("Invalid option. Please choose 1, 2, 3, 4, 5, or 6.")
+            print("Invalid option. Please choose 1, 2, 3, 4, or 5.")
 
 
 if __name__ == "__main__":

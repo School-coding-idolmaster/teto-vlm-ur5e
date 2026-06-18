@@ -1,32 +1,29 @@
 import argparse
 import json
-from pathlib import Path
 
-from src.image_utils import prepare_image_dataset
-from src.prompt_utils import build_prompt, get_prompt, list_prompt_types
-from src.recognition_results import save_single_recognition_result
-from src.vlm_infer import VLMInferencer
+from src.camera_snapshot import build_camera_snapshot_request, evaluate_camera_snapshot_contract
+
+
+FORMAL_REALSENSE_SOURCES = {"realsense_d455", "realsense_replay"}
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Unified CLI for the TETO V1 VLM Pipeline.")
+    parser = argparse.ArgumentParser(
+        description="TETO formal CLI for RealSense D455 snapshot validation and safe utilities."
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("check-env", help="Check Python, dependencies, and GPU status")
 
-    demo_parser = subparsers.add_parser("demo", help="Run the demo")
-    demo_parser.add_argument("--image", required=True)
-    demo_parser.add_argument("--prompt-type", default="describe_image", choices=list_prompt_types())
-    demo_parser.add_argument("--prompt", help="Custom prompt, or user instruction for robot_task_json.")
-    demo_parser.add_argument("--results", help="Deprecated. Single recognition now writes an isolated result folder.")
-
-    prepare_parser = subparsers.add_parser("prepare-images", help="Prepare image datasets for VLM use")
-    prepare_parser.add_argument("--input-dir", required=True)
-    prepare_parser.add_argument("--output-dir", default="data/processed/auto")
-    prepare_parser.add_argument("--manifest", default="outputs/results/prepared_images.jsonl")
-    prepare_parser.add_argument("--max-size", type=int, default=1024)
-    prepare_parser.add_argument("--quality", type=int, default=90)
-    prepare_parser.add_argument("--no-recursive", action="store_true")
+    snapshot_parser = subparsers.add_parser(
+        "snapshot-replay",
+        help="Validate a RealSense D455 snapshot or snapshot replay manifest.",
+    )
+    snapshot_parser.add_argument(
+        "--snapshot-manifest",
+        required=True,
+        help="YAML/JSON manifest with RGB, aligned depth, camera_info, metadata, TF, and timestamps.",
+    )
     return parser
 
 
@@ -40,46 +37,26 @@ def main() -> int:
         print_env_info()
         return 0
 
-    if args.command == "demo":
-        image_path = Path(args.image).expanduser()
-        if not image_path.exists():
-            print(f"Image file not found: {image_path}")
-            return 1
-        prompt = (
-            build_prompt(args.prompt_type, args.prompt)
-            if args.prompt_type == "robot_task_json"
-            else args.prompt if args.prompt else get_prompt(args.prompt_type)
+    if args.command == "snapshot-replay":
+        result = evaluate_camera_snapshot_contract(
+            build_camera_snapshot_request(
+                requested=True,
+                config_path=args.snapshot_manifest,
+            )
         )
-        try:
-            result = VLMInferencer().infer(image_path, prompt)
-            result_info = save_single_recognition_result(
-                image_path,
-                args.prompt_type,
-                prompt,
-                "mock",
-                result,
-            )
-        except Exception as exc:
-            print(exc)
-            return 1
-        print(json.dumps({"result": result, "saved_to": result_info}, ensure_ascii=False, indent=2))
-        return 0
-
-    if args.command == "prepare-images":
-        try:
-            stats = prepare_image_dataset(
-                args.input_dir,
-                output_dir=args.output_dir,
-                manifest_path=args.manifest,
-                max_size=args.max_size,
-                quality=args.quality,
-                recursive=not args.no_recursive,
-            )
-        except Exception as exc:
-            print(exc)
-            return 1
-        print(json.dumps(stats, ensure_ascii=False, indent=2))
-        return 0
+        source = result.get("source")
+        if source not in FORMAL_REALSENSE_SOURCES:
+            result = {
+                **result,
+                "validity_status": "BLOCKED",
+                "formal_visual_entry_status": "BLOCKED",
+                "formal_visual_entry_reason": "E_FORMAL_VISUAL_SOURCE_NOT_REALSENSE",
+                "allowed_formal_sources": sorted(FORMAL_REALSENSE_SOURCES),
+            }
+        else:
+            result["formal_visual_entry_status"] = result.get("validity_status")
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if result.get("formal_visual_entry_status") == "PASS" else 2
 
     parser.print_help()
     return 1

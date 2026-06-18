@@ -3,12 +3,14 @@ camera_snapshot:
   scene_version: example_lab_scene_v1
   capture_timestamp: "2099-01-01T00:00:00Z"
   ttl_ms: 315360000000
-  source: offline_file
+  source: realsense_replay
   frame_id: example_camera_frame_001
+  rgb_ref: data/processed/examples/offline_rgb_placeholder.jpg
   image_ref: data/processed/examples/offline_rgb_placeholder.jpg
   depth_ref: data/processed/examples/offline_depth_placeholder.png
   camera_info_ref: data/processed/examples/camera_info_placeholder.json
   metadata_ref: data/processed/examples/camera_metadata_placeholder.json
+  tf_snapshot_ref: data/processed/examples/camera_extrinsics_placeholder.json
   extrinsics_ref: data/processed/examples/camera_extrinsics_placeholder.json
   width: 640
   height: 480

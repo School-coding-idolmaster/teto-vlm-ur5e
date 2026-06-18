@@ -20,6 +20,8 @@ def save_single_recognition_result(
     index_path = results_index_path()
 
     result_payload = {
+        "record_type": "legacy_rgb_only_record",
+        "is_realsense_scene_snapshot": False,
         "image_path": str(Path(image_path).expanduser()),
         "prompt_type": prompt_type,
         "prompt": prompt,
@@ -35,6 +37,8 @@ def save_single_recognition_result(
 
     summary = {
         "type": "single_recognition",
+        "record_type": "legacy_rgb_only_record",
+        "is_realsense_scene_snapshot": False,
         "run_name": metadata["run_name"],
         "created_at": metadata["created_at"],
         "image_path": str(Path(image_path).expanduser()),
@@ -72,6 +76,8 @@ class SingleRecognitionRecorder:
 
     def record_success(self, prompt_type: str, prompt: str, response: Dict[str, object]) -> None:
         item = {
+            "record_type": "legacy_rgb_only_record",
+            "is_realsense_scene_snapshot": False,
             "image_path": self.image_path,
             "prompt_type": prompt_type,
             "prompt": prompt,
@@ -87,6 +93,8 @@ class SingleRecognitionRecorder:
     def record_failure(self, prompt_type: str, prompt: str, error: str) -> None:
         self.items.append(
             {
+                "record_type": "legacy_rgb_only_record",
+                "is_realsense_scene_snapshot": False,
                 "image_path": self.image_path,
                 "prompt_type": prompt_type,
                 "prompt": prompt,

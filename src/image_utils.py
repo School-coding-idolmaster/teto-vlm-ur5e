@@ -48,7 +48,7 @@ def _ensure_heif_support(path: Path) -> None:
         from pillow_heif import register_heif_opener
     except ImportError as exc:
         raise ValueError(
-            "HEIC/HEIF images require the optional dependency `pillow-heif`. "
+            "Legacy/debug HEIC/HEIF input requires the optional dependency `pillow-heif`. "
             "Install it with `python3 -m pip install pillow-heif`, then try again."
         ) from exc
 
@@ -163,7 +163,7 @@ def prepare_image_dataset(
     quality=90,
     recursive=True,
 ) -> Dict[str, object]:
-    """Prepare a directory of images for model inference or training pipelines."""
+    """Legacy/debug RGB-folder preparation; not a RealSense snapshot dataset builder."""
     destination_dir = _normalize_path(output_dir) if output_dir else DEFAULT_VLM_IMAGE_DIR
     manifest = _normalize_path(manifest_path) if manifest_path else None
     if manifest:

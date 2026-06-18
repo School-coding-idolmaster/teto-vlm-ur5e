@@ -1,31 +1,35 @@
-# TETO V2 VLM Pipeline
+# TETO VLM-UR5e
 
-TETO V2 VLM Pipeline is a lightweight Python project skeleton for learning,
-showing, and extending a Vision-Language Model pipeline. It is not a formal
-training framework yet.
+The formal visual pipeline is now RealSense D455 native. Runtime and training
+inputs must be a RealSense Scene Snapshot or RealSense Snapshot Replay that
+keeps RGB, aligned depth, camera information, metadata, TF/timestamps, and
+scene identity together.
 
 ## Current Goals
 
 This project currently focuses on:
 
 - Startup animation and launcher
-- Automatic model-safe image preparation
-- Single-image and batch image conversion
-- Image input checks
+- RealSense D455 snapshot and snapshot-replay contracts
+- Aligned RGB-D geometry validation and 2D-to-3D projection
+- Snapshot identity, camera information, metadata, TF, timestamps, and
+  `scene_version`
+- Model-safe preprocessing of the RGB frame from an accepted snapshot
 - Prompt template management
 - Mock local VLM inference interface
 - Optional local Qwen2.5-VL inference through the existing Ollama demo path
-- Simple image question-answering demo
-- Follow-up question mode for repeated free-form prompts on one image
-- Demo result saving
 - `robot_task_json` result inspector / replay viewer for saved JSONL runs
 - Simulation object execution reports and evidence exports through Isaac Runtime
 - Read-only UR5e articulation readiness, articulation state observation, and
   simulation-only motion precheck contracts
 - Full robot-system shadow bridge evidence that merges ROS2 fake-publish,
   MoveIt plan-only, and UR5 read-only state declarations without motion
-- Placeholder dataset and annotation utilities
 - Placeholder robot interface
+
+Historical arbitrary-image conversion and RGB-only demos remain temporarily
+available as legacy/debug tools during Phase 1 cleanup. They are not formal
+visual inputs, do not create RealSense Scene Snapshots, and must not feed robot
+runtime or training datasets intended for the RealSense-native pipeline.
 
 Future work can connect Qwen2.5-VL, LLaVA, InternVL, Isaac Sim execution,
 live ROS2 publish, MoveIt2 execution, UR5 controllers, or other local robotics
@@ -329,31 +333,34 @@ Check the environment:
 python3 scripts/check_env.py
 ```
 
-Run the mock demo:
+Validate the formal RealSense snapshot replay example:
 
 ```bash
-python3 scripts/run_demo.py --image data/raw/1.jpg --prompt-type describe_image --backend mock
+python3 -m src.cli snapshot-replay \
+  --snapshot-manifest configs/camera_snapshot.example.yaml
 ```
 
-Run the local Qwen2.5-VL demo using the existing Ollama model:
+The formal snapshot contract carries at least:
 
-```bash
-python3 scripts/run_demo.py --image data/raw/1.jpg --prompt-type describe_image --backend qwen
-```
+- `snapshot_id`
+- `scene_version`
+- `rgb_ref`
+- `depth_ref`
+- `camera_info_ref`
+- `metadata_ref`
+- `tf_snapshot_ref`
+- `capture_timestamp`
+- `source: realsense_d455` or `source: realsense_replay`
 
-By default, the Qwen backend uses `qwen2.5vl:3b`, matching the existing demo.
-`--backend local` is accepted as an alias for `--backend qwen`.
-To override the local model name without changing code:
+Phase 1 provides a validation boundary, not a fabricated D455 capture
+implementation. The example manifest is a schema fixture. A future native
+builder must capture and verify the RGB/depth pairing, alignment, device
+metadata, calibration, TF snapshot, timestamps, and file provenance before a
+manifest can represent real sensor evidence.
 
-```bash
-python3 scripts/run_demo.py --image data/raw/1.jpg --prompt-type describe_image --backend qwen --model-path qwen2.5vl:3b
-```
-
-Use a custom prompt:
-
-```bash
-python3 scripts/run_demo.py --image data/raw/1.jpg --prompt "Please describe all objects." --backend mock
-```
+`scripts/run_demo.py` and `scripts/batch_recognize.py` are retained only as
+legacy/debug RGB-only semantic tools. Their `--image` and `--input-dir`
+arguments are not formal pipeline inputs.
 
 ## Prompt Types
 
@@ -387,25 +394,25 @@ Current prompt types:
   Humans, animals, and unsafe or unsuitable objects must be marked with
   `manipulation_assessment.candidate=false`.
 
-Single image SRL test:
+Legacy/debug RGB-only SRL test:
 
 ```bash
 python3 scripts/run_demo.py --image data/raw/1.jpg --prompt-type spatial_relationship_lite --backend qwen
 ```
 
-Batch SRL test:
+Legacy/debug RGB-only batch SRL test:
 
 ```bash
 python3 scripts/batch_recognize.py --input-dir data/processed/train --prompt-type spatial_relationship_lite --backend qwen
 ```
 
-Single controlled robot task JSON test:
+Legacy/debug RGB-only controlled task JSON test:
 
 ```bash
 python3 scripts/run_demo.py --image data/raw/1.jpg --prompt-type robot_task_json --prompt "pick the red cup" --backend qwen
 ```
 
-Batch controlled robot task JSON test:
+Legacy/debug RGB-only batch controlled task JSON test:
 
 ```bash
 python3 scripts/batch_recognize.py --input-dir data/processed/train --prompt-type robot_task_json --prompt "pick the red cup" --backend qwen
@@ -445,7 +452,7 @@ launcher prints the inspector summary for that exact run directory after the
 batch completes. It then asks whether to show detailed item inspection. Normal
 batch recognition does not trigger the robot task inspector.
 
-## TETO V1.1.4 recommended smoke test
+## Historical TETO V1.1.4 legacy RGB-only smoke test
 
 Use the Qwen backend to create a small real-output smoke set without connecting
 to ROS2, MoveIt, UR5, or any robot controller. Prepare four image folders or a
@@ -546,10 +553,11 @@ are `null`, and `grounded` is `false`. The valid `camera` target is counted as
 the single grounded item. `post_normalization_errors` is empty for all four
 items.
 
-## TETO V1.3.0 scene snapshot contract preparation
+## Historical TETO V1.3.0 legacy semantic image record
 
-`robot_task_json` normalized output now includes a lightweight scene snapshot
-contract for later planner_gateway / semantic_task_server stages:
+Historical RGB-only `robot_task_json` output keeps a compatibility `scene`
+record for semantic replay. It is explicitly a
+`legacy_rgb_only_record`, not a RealSense Scene Snapshot:
 
 ```json
 {
@@ -559,7 +567,9 @@ contract for later planner_gateway / semantic_task_server stages:
     "image_path": "input image path",
     "image_width": 640,
     "image_height": 480,
-    "source": "single_image",
+    "record_type": "legacy_rgb_only_record",
+    "source": "legacy_semantic_image",
+    "is_realsense_scene_snapshot": false,
     "status": "valid"
   }
 }
@@ -572,10 +582,9 @@ also receive `target.target_id="obj_001"` when `candidate=true` and the target
 label is known; no-target, unknown, rejected, or unsafe cases use
 `target_id="unknown"`.
 
-This is still only a software-readable VLM intermediate representation. It
-does not read depth, compute camera/world coordinates, publish TF, call MoveIt,
-connect to UR5, generate URScript, generate joint angles, generate trajectories,
-or send robot control commands.
+This compatibility record has no depth, camera information, metadata, TF, or
+sensor-backed timestamp. It must not be promoted to the formal RealSense
+snapshot pipeline or used as robot visual input.
 
 ## TETO V1.4.0 scene cache replay contract preparation
 
@@ -1908,8 +1917,9 @@ control path.
 
 Supported source modes:
 
-- `offline_file`
-- `manual_snapshot`
+- `realsense_replay` (formal replay input)
+- `offline_file` (legacy/debug contract fixture)
+- `manual_snapshot` (legacy/debug contract fixture)
 - `live_disabled`
 - `optional_realsense_one_shot`
 
@@ -2221,51 +2231,25 @@ flags proving `execution_allowed=false`, `moveit_execute_called=false`,
 `joint_targets_generated=false`, `real_robot_motion_executed=false`, and
 `automatic_retry_motion=false`.
 
-Demo commands accept common image formats directly. TETO automatically
-creates a cached RGB JPEG under `data/processed/auto/`, with EXIF orientation
-applied, long edge resized, animated images reduced to the first frame, and
-transparent pixels flattened for model compatibility.
+## Legacy/debug RGB-only tools
 
-For the Qwen/Ollama backend, TETO uses a smaller default image size than the
-mock path and retries with smaller images if the local model runner stops due
-to resource limits. You can force a lower size for constrained GPUs:
+The generic converter, arbitrary local-image demo, and RGB folder batch code
+remain in the repository temporarily for compatibility and semantic debugging.
+They are hidden from the formal launcher and unified CLI. They do not create
+formal snapshots and are not recommended for RealSense-native training or
+runtime.
 
-```bash
-TETO_VLM_MAX_SIZE=512 python3 scripts/run_demo.py --image data/raw/1.jpg --backend qwen
-```
+The reusable `prepare_image_for_vlm` preprocessing remains available for
+resizing and RGB normalization after an RGB frame has been selected from an
+accepted RealSense snapshot. It must not be treated as a snapshot builder.
 
-Prepare a larger image directory for training or offline processing:
-
-```bash
-python3 -m src.cli prepare-images \
-  --input-dir data/raw \
-  --output-dir data/processed/train \
-  --manifest outputs/results/train_images.jsonl
-```
-
-Training code can also call the same preparation layer directly:
-
-```python
-from src.image_utils import prepare_image_for_vlm, prepare_image_dataset
-
-safe_image = prepare_image_for_vlm("data/raw/example.heic")
-stats = prepare_image_dataset(
-    "data/raw",
-    output_dir="data/processed/train",
-    manifest_path="outputs/results/train_images.jsonl",
-)
-```
-
-The manifest is JSONL. Each line maps the original file to the prepared model
-input path with `source_image_path` and `image_path`.
-
-In the `python3 teto_V1.py` launcher, use the image conversion menu entry:
+The formal launcher menu is:
 
 ```text
-1. Convert images
-2. Run the demo
-3. Just chat with TETO
-4. Check environment
+1. Validate RealSense snapshot replay
+2. Just chat with TETO
+3. Check environment
+4. Run first simulation execution
 5. Quit
 ```
 
@@ -2275,46 +2259,9 @@ unless `TETO_QWEN_MODEL` overrides it. It does not need an image and does not
 write recognition results. Type `back`, `q`, `quit`, or `exit` to return to the
 main menu. Select `mock` only when you want the simple local fallback.
 
-Choose `Convert images`, then select a conversion mode:
-
-```text
-1. Single image
-2. Batch images
-3. Back
-```
-
-For batch conversion, choose `Batch convert images` and enter an input folder.
-Press Enter to use the default `data/raw`. TETO reads `image.max_size` and
-`image.quality` from `config/default.yaml`; if the config cannot be read, it
-falls back to `max_size=1024` and `quality=85`.
-
-Single image conversion creates a timestamped folder under:
-
-```text
-outputs/image_conversion/single/single_YYYYMMDD_HHMMSS/
-├── processed/
-├── summary.json
-└── errors.log
-```
-
-Each batch conversion creates a new folder so older results are not overwritten:
-
-```text
-outputs/image_conversion/batch/batch_YYYYMMDD_HHMMSS/
-├── processed/
-├── manifest.jsonl
-├── summary.json
-└── errors.log
-```
-
-`processed/` contains converted JPEG images. `manifest.jsonl` records each
-source image, output image, status, and error message. `summary.json` records
-the batch input, output, totals, max size, and quality. `errors.log` lists
-failed images and reasons. Batch conversion supports `.jpg`, `.jpeg`, `.png`,
-and `.webp` inputs.
-
-Older workspaces may still contain `outputs/batches/`. New batch conversion
-runs no longer write there.
+Old workspaces may still contain `outputs/image_conversion/`,
+`outputs/batches/`, or RGB-only recognition runs. Those artifacts are legacy
+evidence and are not RealSense Snapshot Replay datasets.
 
 ## Batch Recognition Results
 
@@ -2447,15 +2394,15 @@ Use the unified CLI:
 
 ```bash
 python3 -m src.cli check-env
-python3 -m src.cli demo --image data/raw/1.jpg --prompt-type describe_image
-python3 -m src.cli prepare-images --input-dir data/raw --output-dir data/processed/train
+python3 -m src.cli snapshot-replay \
+  --snapshot-manifest configs/camera_snapshot.example.yaml
 ```
 
 ## Notes
 
 - `teto_V1.py` is the visual launcher, not a training main program.
 - Real VLM inference logic belongs in `src/vlm_infer.py`.
-- Image processing logic belongs in `src/image_utils.py`.
+- Snapshot RGB preprocessing logic belongs in `src/image_utils.py`.
 - Prompt templates belong in `src/prompt_utils.py`.
 - Local Qwen2.5-VL integration lives in `src/vlm_infer.py`.
 - Future Isaac Sim / ROS2 / UR5 integration should mainly modify
@@ -2464,7 +2411,7 @@ python3 -m src.cli prepare-images --input-dir data/raw --output-dir data/process
 ## Extension Plan
 
 - Connect real local Qwen2.5-VL inference
-- Add lab image datasets
+- Add RealSense D455 snapshot datasets
 - Add annotation formats
 - Add spatial relationship understanding tasks
 - Add simple robot action plan JSON output

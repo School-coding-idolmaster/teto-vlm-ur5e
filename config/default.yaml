@@ -4,17 +4,12 @@ model:
   device: "auto"
 
 image:
+  # VLM preprocessing for RGB frames extracted from a RealSense snapshot.
   max_size: 1024
   quality: 85
-  supported_formats:
-    - ".jpg"
-    - ".jpeg"
-    - ".png"
-    - ".webp"
 
 paths:
-  raw_data: "data/raw"
-  processed_data: "data/processed"
+  snapshot_replay: "data/realsense_snapshots"
+  vlm_cache: "data/processed/auto"
   results: "outputs/results"
   logs: "outputs/logs"
-

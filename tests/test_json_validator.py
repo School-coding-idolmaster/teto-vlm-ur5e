@@ -448,7 +448,7 @@ def test_bbox_can_be_read_from_common_object_locations():
     assert result["normalized_json"]["target"]["bbox_xyxy"] == [1.0, 2.0, 11.0, 22.0]
 
 
-def test_scene_snapshot_fields_are_added_for_valid_candidate():
+def test_legacy_rgb_record_fields_are_added_for_valid_candidate():
     result = normalize_robot_task_json(
         VALID_ROBOT_TASK,
         image_size=(640, 480),
@@ -466,12 +466,15 @@ def test_scene_snapshot_fields_are_added_for_valid_candidate():
     assert normalized["scene"]["image_path"] == "/tmp/red_cup.jpg"
     assert normalized["scene"]["image_width"] == normalized["geometry_2d"]["image_width"] == 640
     assert normalized["scene"]["image_height"] == normalized["geometry_2d"]["image_height"] == 480
-    assert normalized["scene"]["source"] == "single_image"
+    assert normalized["scene"]["record_type"] == "legacy_rgb_only_record"
+    assert normalized["scene"]["source"] == "legacy_semantic_image"
+    assert normalized["scene"]["is_realsense_scene_snapshot"] is False
+    assert "depth_ref" in normalized["scene"]["missing_realsense_fields"]
     assert normalized["scene"]["status"] == "valid"
     assert normalized["target"]["target_id"] == "obj_001"
 
 
-def test_scene_snapshot_no_target_uses_unknown_target_id():
+def test_legacy_rgb_record_no_target_uses_unknown_target_id():
     data = {
         **VALID_ROBOT_TASK,
         "target": {
@@ -507,7 +510,7 @@ def test_scene_snapshot_no_target_uses_unknown_target_id():
     assert normalized["target"]["target_id"] == "unknown"
 
 
-def test_scene_snapshot_parse_failure_is_invalid():
+def test_legacy_rgb_record_parse_failure_is_invalid():
     result = parse_robot_task_response(
         "not json",
         image_size=(320, 240),

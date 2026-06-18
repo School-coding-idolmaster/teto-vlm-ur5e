@@ -185,7 +185,9 @@ def test_batch_recognition_saves_robot_task_json_fields(tmp_path, monkeypatch):
     assert result_rows[0]["normalized_json"]["scene"]["image_path"] == str(input_dir / "one.jpg")
     assert result_rows[0]["normalized_json"]["scene"]["image_width"] == 8
     assert result_rows[0]["normalized_json"]["scene"]["image_height"] == 8
-    assert result_rows[0]["normalized_json"]["scene"]["source"] == "single_image"
+    assert result_rows[0]["normalized_json"]["scene"]["record_type"] == "legacy_rgb_only_record"
+    assert result_rows[0]["normalized_json"]["scene"]["source"] == "legacy_semantic_image"
+    assert result_rows[0]["normalized_json"]["scene"]["is_realsense_scene_snapshot"] is False
     assert result_rows[0]["normalized_json"]["scene"]["status"] == "valid"
     assert (output_root / result["run_name"] / "input_manifest.json").exists()
     assert (output_root / result["run_name"] / "smoke_report.md").exists()

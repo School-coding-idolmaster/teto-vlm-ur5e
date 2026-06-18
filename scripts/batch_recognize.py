@@ -12,8 +12,13 @@ from src.prompt_utils import build_prompt, list_prompt_types
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run batch image recognition with the existing TETO VLM inferencer.")
-    parser.add_argument("--input-dir", required=True, help="Folder containing images")
+    parser = argparse.ArgumentParser(
+        description=(
+            "LEGACY/DEBUG RGB-only batch semantic demo. It does not create formal "
+            "RealSense Scene Snapshots."
+        )
+    )
+    parser.add_argument("--input-dir", required=True, help="Legacy folder containing RGB images")
     parser.add_argument("--prompt-type", default="describe_image", choices=list_prompt_types())
     parser.add_argument("--prompt", help="Custom prompt, or user instruction for robot_task_json.")
     parser.add_argument("--backend", default="qwen", choices=["mock", "qwen", "local"], help="Inference backend")
@@ -42,6 +47,10 @@ def print_summary(result: dict) -> None:
 
 def main() -> int:
     args = build_parser().parse_args()
+    print(
+        "LEGACY/DEBUG: RGB-only batch input; generated records are legacy semantic "
+        "replay records, not RealSense snapshots."
+    )
     prompt_type = args.prompt_type
     prompt = args.prompt
     if args.prompt and args.prompt_type != "robot_task_json":

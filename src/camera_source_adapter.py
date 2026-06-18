@@ -23,6 +23,7 @@ STATUS_NOT_REQUESTED = "NOT_REQUESTED"
 MODE_OFFLINE_FILE = "offline_file"
 MODE_MANUAL_SNAPSHOT = "manual_snapshot"
 MODE_LIVE_DISABLED = "live_disabled"
+MODE_REALSENSE_REPLAY = "realsense_replay"
 MODE_REALSENSE_ONE_SHOT = "optional_realsense_one_shot"
 
 E_LIVE_CAMERA_CAPTURE_NOT_ALLOWED = "E_LIVE_CAMERA_CAPTURE_NOT_ALLOWED"
@@ -68,10 +69,12 @@ CAMERA_SOURCE_FIELDS = (
     "capture_timestamp",
     "frame_id",
     "camera_frame",
+    "rgb_ref",
     "image_ref",
     "depth_ref",
     "camera_info_ref",
     "metadata_ref",
+    "tf_snapshot_ref",
     "extrinsics_ref",
     "width",
     "height",
@@ -161,6 +164,10 @@ def evaluate_camera_source_adapter(request: CameraSourceAdapterRequest | None = 
     allow_live = request.allow_live_camera_capture or config.get("allow_live_camera_capture") is True
     continuous_requested = config.get("continuous_capture_enabled") is True
     capture_backend = _string(config.get("capture_backend")) or _default_backend(source_mode)
+    capture_method = _string(config.get("capture_method")) or _default_capture_method(source_mode)
+    if source_mode == MODE_REALSENSE_REPLAY:
+        capture_backend = "realsense_snapshot_replay"
+        capture_method = "realsense_snapshot_replay_manifest"
     capture_backend_available = _backend_available(capture_backend, source_mode)
     one_shot_capture_used = False
 
@@ -168,6 +175,7 @@ def evaluate_camera_source_adapter(request: CameraSourceAdapterRequest | None = 
         MODE_OFFLINE_FILE,
         MODE_MANUAL_SNAPSHOT,
         MODE_LIVE_DISABLED,
+        MODE_REALSENSE_REPLAY,
         MODE_REALSENSE_ONE_SHOT,
     }:
         blocking_reasons.append(E_UNSUPPORTED_SOURCE_MODE)
@@ -180,7 +188,12 @@ def evaluate_camera_source_adapter(request: CameraSourceAdapterRequest | None = 
             blocking_reasons.append(E_CAMERA_BACKEND_UNAVAILABLE)
         else:
             one_shot_capture_used = True
-    if source_mode in {MODE_OFFLINE_FILE, MODE_MANUAL_SNAPSHOT, MODE_REALSENSE_ONE_SHOT}:
+    if source_mode in {
+        MODE_OFFLINE_FILE,
+        MODE_MANUAL_SNAPSHOT,
+        MODE_REALSENSE_REPLAY,
+        MODE_REALSENSE_ONE_SHOT,
+    }:
         if not snapshot.get("image_ref"):
             blocking_reasons.append(E_IMAGE_REF_MISSING)
         if config.get("camera_info_required", True) is not False and not snapshot.get("camera_info_ref"):
@@ -196,7 +209,12 @@ def evaluate_camera_source_adapter(request: CameraSourceAdapterRequest | None = 
         blocking_reasons.append(E_ROBOT_COMMAND_NOT_ALLOWED)
         warnings.append(f"forbidden_robot_control_fields={forbidden_fields}")
 
-    if source_mode in {MODE_OFFLINE_FILE, MODE_MANUAL_SNAPSHOT, MODE_REALSENSE_ONE_SHOT}:
+    if source_mode in {
+        MODE_OFFLINE_FILE,
+        MODE_MANUAL_SNAPSHOT,
+        MODE_REALSENSE_REPLAY,
+        MODE_REALSENSE_ONE_SHOT,
+    }:
         for reason in snapshot_contract.get("blocking_reasons", []):
             if reason == "E_IMAGE_REF_MISSING":
                 blocking_reasons.append(E_IMAGE_REF_MISSING)
@@ -230,7 +248,7 @@ def evaluate_camera_source_adapter(request: CameraSourceAdapterRequest | None = 
         "source_mode": source_mode,
         "capture_backend": capture_backend,
         "capture_backend_available": capture_backend_available,
-        "capture_method": _string(config.get("capture_method")) or _default_capture_method(source_mode),
+        "capture_method": capture_method,
         "one_shot_capture_used": one_shot_capture_used,
         "continuous_capture_used": False,
         "live_camera_capture_allowed": allow_live,
@@ -326,10 +344,13 @@ def _snapshot_from_config(config: Dict[str, Any], source_mode: str) -> Dict[str,
         "ttl_ms": merged.get("ttl_ms", 315360000000),
         "source": source_mode,
         "frame_id": _string(merged.get("frame_id")),
-        "image_ref": _string(merged.get("image_ref")),
+        "rgb_ref": _string(merged.get("rgb_ref")) or _string(merged.get("image_ref")),
+        "image_ref": _string(merged.get("rgb_ref")) or _string(merged.get("image_ref")),
         "depth_ref": _string(merged.get("depth_ref")),
         "camera_info_ref": _string(merged.get("camera_info_ref")),
         "metadata_ref": _string(merged.get("metadata_ref")),
+        "tf_snapshot_ref": _string(merged.get("tf_snapshot_ref"))
+        or _string(merged.get("extrinsics_ref")),
         "extrinsics_ref": _string(merged.get("extrinsics_ref")),
         "width": _optional_int(merged.get("width")),
         "height": _optional_int(merged.get("height")),
@@ -355,10 +376,12 @@ def _source_fields(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "capture_timestamp": snapshot.get("capture_timestamp"),
         "frame_id": snapshot.get("frame_id"),
         "camera_frame": snapshot.get("camera_frame"),
+        "rgb_ref": snapshot.get("rgb_ref") or snapshot.get("image_ref"),
         "image_ref": snapshot.get("image_ref"),
         "depth_ref": snapshot.get("depth_ref"),
         "camera_info_ref": snapshot.get("camera_info_ref"),
         "metadata_ref": snapshot.get("metadata_ref"),
+        "tf_snapshot_ref": snapshot.get("tf_snapshot_ref") or snapshot.get("extrinsics_ref"),
         "extrinsics_ref": snapshot.get("extrinsics_ref"),
         "width": snapshot.get("width"),
         "height": snapshot.get("height"),
@@ -384,12 +407,16 @@ def _backend_available(capture_backend: str | None, source_mode: str) -> bool:
 def _default_backend(source_mode: str) -> str:
     if source_mode == MODE_REALSENSE_ONE_SHOT:
         return "realsense_one_shot"
+    if source_mode == MODE_REALSENSE_REPLAY:
+        return "realsense_snapshot_replay"
     return source_mode
 
 
 def _default_capture_method(source_mode: str) -> str:
     if source_mode == MODE_REALSENSE_ONE_SHOT:
         return "one_shot_snapshot_contract_only"
+    if source_mode == MODE_REALSENSE_REPLAY:
+        return "realsense_snapshot_replay_manifest"
     if source_mode == MODE_LIVE_DISABLED:
         return "disabled_no_capture"
     return "declared_snapshot_manifest"

@@ -1,4 +1,5 @@
 camera_source_adapter:
+  legacy_debug_only: true
   source_mode: manual_snapshot
   snapshot_id: camera_source_manual_snapshot_001
   scene_version: camera_source_manual_scene_v1

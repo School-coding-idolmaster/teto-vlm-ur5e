@@ -89,7 +89,9 @@ DEFAULT_ROBOT_TASK_JSON = {
         "image_path": "unknown",
         "image_width": None,
         "image_height": None,
-        "source": "single_image",
+        "record_type": "legacy_rgb_only_record",
+        "source": "legacy_semantic_image",
+        "is_realsense_scene_snapshot": False,
         "status": "unknown",
     },
     "target": {
@@ -269,7 +271,7 @@ def normalize_robot_task_json(
 ) -> Dict[str, Any]:
     if not isinstance(data, dict):
         normalized = deepcopy(DEFAULT_ROBOT_TASK_JSON)
-        _apply_scene_snapshot(normalized, scene_context, image_size, "invalid")
+        _apply_legacy_semantic_image_record(normalized, scene_context, image_size, "invalid")
         return {
             "parsed_json": deepcopy(DEFAULT_ROBOT_TASK_JSON),
             "normalized_json": normalized,
@@ -355,7 +357,7 @@ def normalize_robot_task_json(
     validation_warnings.extend(_new_warnings_only(normalized_safety_warnings, validation_warnings))
     status = "invalid" if normalized_validation_errors else "valid"
     _apply_target_id(normalized)
-    _apply_scene_snapshot(normalized, scene_context, image_size, status)
+    _apply_legacy_semantic_image_record(normalized, scene_context, image_size, status)
 
     return {
         "normalized_json": normalized,
@@ -381,7 +383,7 @@ def parse_robot_task_response(
         if image_size:
             normalized["geometry_2d"]["image_width"] = image_size[0]
             normalized["geometry_2d"]["image_height"] = image_size[1]
-        _apply_scene_snapshot(normalized, scene_context, image_size, "invalid")
+        _apply_legacy_semantic_image_record(normalized, scene_context, image_size, "invalid")
         normalized["error"]["code"] = "E_PARSE"
         normalized["error"]["message"] = "; ".join(extracted["validation_errors"])
         return {
@@ -752,7 +754,7 @@ def _apply_target_id(data: Dict[str, Any]) -> None:
     )
 
 
-def _apply_scene_snapshot(
+def _apply_legacy_semantic_image_record(
     data: Dict[str, Any],
     scene_context: Dict[str, Any] | None,
     image_size: Tuple[int, int] | None,
@@ -772,7 +774,16 @@ def _apply_scene_snapshot(
         "image_path": _string_value(context.get("image_path"), "unknown"),
         "image_width": image_width,
         "image_height": image_height,
-        "source": "single_image",
+        "record_type": "legacy_rgb_only_record",
+        "source": "legacy_semantic_image",
+        "is_realsense_scene_snapshot": False,
+        "missing_realsense_fields": [
+            "snapshot_id",
+            "depth_ref",
+            "camera_info_ref",
+            "metadata_ref",
+            "tf_snapshot_ref",
+        ],
         "status": status if status in {"valid", "invalid", "unknown"} else "unknown",
     }
 

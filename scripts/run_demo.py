@@ -14,8 +14,13 @@ from src.vlm_infer import VLMInferencer
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run a VLM image question-answering demo.")
-    parser.add_argument("--image", required=True, help="Image path")
+    parser = argparse.ArgumentParser(
+        description=(
+            "LEGACY/DEBUG RGB-only semantic demo. This is not a RealSense Scene "
+            "Snapshot pipeline and must not be used as robot visual input."
+        )
+    )
+    parser.add_argument("--image", required=True, help="Legacy local RGB image path")
     parser.add_argument("--prompt-type", default="describe_image", choices=list_prompt_types())
     parser.add_argument("--prompt", help="Custom prompt, or user instruction for robot_task_json.")
     parser.add_argument("--backend", default="qwen", choices=["mock", "qwen", "local"], help="Inference backend")
@@ -26,6 +31,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
+    print(
+        "LEGACY/DEBUG: RGB-only semantic demo; no depth, camera_info, metadata, "
+        "TF, or RealSense snapshot identity is provided."
+    )
     image_path = Path(args.image).expanduser()
     if not image_path.exists():
         print(f"Image file not found: {image_path}")
