@@ -209,6 +209,46 @@ python3 scripts/run_long_motion_autoregressive_preview.py \
 JSON and Markdown evidence is written under
 `outputs/autoregressive_motion_previews/` by default.
 
+## TETO v3.0.13: Minimal Guarded Real Vector Long-Motion Test
+
+TETO v3.0.13 extends `relative_cartesian_motion` to support a base-link
+Cartesian delta vector `[dx, dy, dz]`. Single-axis commands remain compatible
+and are represented internally as vectors. Multi-axis commands and explicit
+`--delta-json` input produce `vector_relative` contracts whose requested
+distance is the Euclidean vector norm.
+
+Long vector motions are decomposed by straight-line interpolation in TCP
+position space. TETO does not execute all X motion followed by Y and Z. For
+the intended first lab command, `move forward 30 cm and left 10 cm`, the
+vector is `{"x": 0.30, "y": 0.10, "z": 0.0}`, its norm is approximately
+`0.316 m`, and a `0.02 m` maximum substep norm produces 16 autoregressive
+vector substeps with a nominal delta of
+`{"x": 0.01875, "y": 0.00625, "z": 0.0}` each.
+
+The minimal one-command test entrypoint is:
+
+```bash
+python3 scripts/run_real_long_motion_test.py \
+  --delta-json '{"x":0.30,"y":0.10,"z":0.0}' \
+  --max-total-distance-m 0.35 \
+  --max-substep-distance-m 0.02 \
+  --mock-current-tcp-pose \
+  '{"position_m":[0.0,0.0,0.5],"orientation_xyzw":[0,0,0,1]}'
+```
+
+This defaults to offline preview. Real autoregressive execution requires all
+three explicit flags: `--real`, `--enable-real-autoregressive-execution`, and
+`--armed-long-motion-test`. Each armed substep reads the current TCP pose,
+generates one target from that latest actual pose, plans and executes only that
+substep, reads TCP again, verifies vector projection, distance, and orthogonal
+drift, and aborts immediately on failure.
+
+The one-shot real-motion limit remains unchanged at `0.05 m`; a long vector
+cannot use the one-shot path. The parser still records
+`execution_permission_decided_by_parser=false`, and the downstream safety
+gate remains authoritative. No scenario harness, batch test framework, YAML
+scenario infrastructure, warmup sequence, or auto-reverse behavior was added.
+
 ## Project Structure
 
 ```text

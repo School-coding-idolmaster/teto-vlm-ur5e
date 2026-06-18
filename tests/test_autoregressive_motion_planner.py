@@ -180,7 +180,7 @@ def test_v3_0_11_language_normalizes_before_planner_and_parser_never_permits_exe
     assert result["safety_gate_still_required"] is True
 
 
-def test_compound_motion_stays_clarification_and_is_not_planned_as_single_axis():
+def test_explicit_compound_motion_is_planned_as_vector_not_single_axis():
     canonical = normalize_motion_command("go up 5 cm and right 2 cm")
     result = plan_offline_autoregressive_motion(
         AutoregressiveMotionPlannerRequest(
@@ -189,9 +189,12 @@ def test_compound_motion_stays_clarification_and_is_not_planned_as_single_axis()
         )
     )
 
-    assert canonical["parse_status"] == "NEEDS_CLARIFICATION"
-    assert result["final_plan_status"] == "INVALID_REQUEST"
-    assert result["substeps"] == []
+    assert canonical["parse_status"] == "PASS"
+    assert canonical["motion_contract_type"] == "vector_relative"
+    assert canonical["delta_m"] == [0.0, -0.02, 0.05]
+    assert result["final_plan_status"] == "PASS"
+    assert result["direction_axis"] is None
+    assert result["motion_contract_type"] == "vector_relative"
 
 
 def test_contract_only_semantics_are_explicit_for_every_substep():

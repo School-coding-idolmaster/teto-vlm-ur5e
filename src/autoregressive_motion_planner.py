@@ -4,9 +4,11 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
+from src.vector_autoregressive_motion_planner import plan_vector_autoregressive_motion
 
-PLANNER_VERSION = "teto_v3_0_12_offline_autoregressive_long_motion_v1"
-ABORT_POLICY_VERSION = "teto_v3_0_12_offline_abort_policy_v1"
+
+PLANNER_VERSION = "teto_v3_0_13_vector_autoregressive_long_motion_v1"
+ABORT_POLICY_VERSION = "teto_v3_0_13_vector_abort_policy_v1"
 EPS = 1e-9
 
 STATUS_PASS = "PASS"
@@ -36,7 +38,15 @@ def plan_offline_autoregressive_motion(
     axis = _string(intent.get("direction_axis"))
     sign = _string(intent.get("direction_sign"))
     frame = _string(intent.get("motion_frame") or intent.get("frame")) or "base_link"
-    delta = _vector3(intent.get("delta_m") or intent.get("cartesian_offset_m"))
+    delta = _vector3(intent.get("delta_m") or intent.get("vector_delta_m") or intent.get("cartesian_offset_m"))
+    if delta is not None and sum(abs(value) > EPS for value in delta) > 1:
+        return plan_vector_autoregressive_motion(
+            intent=intent,
+            delta=delta,
+            current_tcp_pose=request.current_tcp_pose,
+            config=config,
+            gateway_evidence=gateway,
+        )
     requested_distance = _number(intent.get("requested_distance_m"))
     if requested_distance is None and delta is not None:
         requested_distance = _distance(delta)
@@ -284,6 +294,20 @@ def _base_evidence(
         "real_substep_execution_enabled": False,
         "execution_permission_decided_by_parser": False,
         "safety_gate_still_required": True,
+        "vector_motion_supported": True,
+        "motion_contract_type": "single_axis_relative",
+        "delta_m": _delta_from_axis_sign(axis, sign, requested_distance),
+        "vector_delta_m": _components(_delta_from_axis_sign(axis, sign, requested_distance)),
+        "requested_distance_norm_m": requested_distance,
+        "vector_components_m": _components(_delta_from_axis_sign(axis, sign, requested_distance)),
+        "vector_component_count_nonzero": 1 if axis in AXIS_INDEX and sign in {"+", "-"} else 0,
+        "vector_motion_frame": frame,
+        "legacy_axis_compatible": True,
+        "vector_source": "legacy_axis",
+        "one_shot_vector_motion_allowed": False,
+        "one_shot_real_motion_allowed": bool(
+            requested_distance is not None and requested_distance <= max_one_shot + EPS
+        ),
         "decomposition_enabled": decomposition_enabled,
         "decomposed_motion_allowed": False,
         "requested_distance_m": requested_distance,
@@ -498,6 +522,8 @@ def _direction_check(
 
 
 def _vector3(value: Any) -> list[float] | None:
+    if isinstance(value, dict):
+        value = [value.get("x"), value.get("y"), value.get("z")]
     if not isinstance(value, (list, tuple)) or len(value) != 3:
         return None
     try:
@@ -505,6 +531,17 @@ def _vector3(value: Any) -> list[float] | None:
     except (TypeError, ValueError):
         return None
     return vector if all(math.isfinite(item) for item in vector) else None
+
+
+def _delta_from_axis_sign(axis: str | None, sign: str | None, distance: float | None) -> list[float]:
+    vector = [0.0, 0.0, 0.0]
+    if axis in AXIS_INDEX and sign in {"+", "-"} and distance is not None:
+        vector[AXIS_INDEX[axis]] = round(float(distance) * (1.0 if sign == "+" else -1.0), 6)
+    return vector
+
+
+def _components(vector: list[float]) -> dict[str, float]:
+    return {axis: round(float(vector[index]), 6) for axis, index in AXIS_INDEX.items()}
 
 
 def _distance(vector: list[float]) -> float:

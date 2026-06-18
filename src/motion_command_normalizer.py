@@ -7,6 +7,7 @@ from typing import Any
 
 POLICY_VERSION = "teto_v3_0_11_llm_first_motion_semantics_v1"
 SEMANTIC_ALIGNMENT_VERSION = "teto_v3_0_11_llm_first_motion_semantics_v1"
+VECTOR_MOTION_CONTRACT_VERSION = "teto_v3_0_13_vector_relative_motion_v1"
 QWEN_SEMANTIC_SCHEMA_VERSION = "teto_motion_semantics.v1"
 DEFAULT_FRAME = "base_link"
 DEFAULT_SMALL_STEP_M = 0.01
@@ -191,6 +192,16 @@ def _normalize_rule_based(
     if _matches_any(normalized, _VISION_OR_OBJECT_PATTERNS):
         return _blocked(base, STATUS_UNSUPPORTED_INTENT, unsupported="NEEDS_VISION")
 
+    vector_delta = _extract_explicit_vector_delta(normalized)
+    if vector_delta is not None:
+        return _vector_motion_result(
+            base,
+            vector_delta,
+            parser_source=parser_source,
+            vector_source="fallback_rule",
+            confidence=0.90,
+        )
+
     direction = _extract_direction(normalized)
     distance = _extract_distance(normalized)
     fuzzy = _matches_any(normalized, _FUZZY_PATTERNS)
@@ -229,6 +240,7 @@ def _normalize_rule_based(
         "direction_axis": direction["axis"],
         "direction_sign": direction["sign"],
         "delta_m": delta,
+        **_vector_contract_fields(delta, vector_source="fallback_rule"),
         "unit": distance["unit"],
         "fallback_parse_used": True,
         "canonicalization_source": "fallback_rule",
@@ -264,6 +276,7 @@ def _normalize_qwen_semantic(
     intent_status = str(semantic.get("intent_status") or "").strip().lower()
     intent_type = str(semantic.get("intent_type") or "").strip().lower()
     motion = semantic.get("motion") if isinstance(semantic.get("motion"), dict) else {}
+    motion_mode = str(motion.get("mode") or "single_axis").strip().lower()
     direction_semantic = str(motion.get("direction_semantic") or "").strip().lower()
     distance = motion.get("distance") if isinstance(motion.get("distance"), dict) else {}
     distance_quality = str(distance.get("quality") or "").strip().lower()
@@ -293,6 +306,37 @@ def _normalize_qwen_semantic(
                 {**base, "canonicalization_source": "clarification"},
                 STATUS_NEEDS_CLARIFICATION,
                 clarification="E_QWEN_SEMANTIC_INTENT_UNCLEAR",
+            ),
+        }
+    if motion_mode == "unsupported_compound":
+        return {
+            "decision": "use_qwen",
+            "result": _blocked(
+                {**base, "canonicalization_source": "clarification"},
+                STATUS_NEEDS_CLARIFICATION,
+                clarification="E_VECTOR_MOTION_NEEDS_CLARIFICATION",
+            ),
+        }
+    if motion_mode == "vector_delta":
+        vector_delta = _semantic_vector_delta(motion.get("delta"))
+        if vector_delta is None:
+            return {
+                "decision": "use_qwen",
+                "result": _blocked(
+                    {**base, "canonicalization_source": "clarification"},
+                    STATUS_NEEDS_CLARIFICATION,
+                    clarification="E_INVALID_VECTOR_DELTA",
+                ),
+            }
+        return {
+            "decision": "use_qwen",
+            "result": _vector_motion_result(
+                base,
+                vector_delta,
+                parser_source="qwen_llm",
+                vector_source="qwen_semantic",
+                confidence=confidence_overall if confidence_overall is not None else 0.90,
+                canonicalization_source="qwen_semantic",
             ),
         }
     if direction_semantic == "conflicting":
@@ -353,6 +397,7 @@ def _normalize_qwen_semantic(
             "direction_axis": axis,
             "direction_sign": sign,
             "delta_m": delta,
+            **_vector_contract_fields(delta, vector_source="qwen_semantic"),
             "unit": unit,
             "canonicalization_source": "qwen_semantic",
         },
@@ -364,6 +409,7 @@ def _base_evidence(raw_command: str, normalized: str, *, frame: str, parser_sour
         "natural_language_coverage_version": POLICY_VERSION,
         "motion_language_policy_version": POLICY_VERSION,
         "semantic_alignment_version": SEMANTIC_ALIGNMENT_VERSION,
+        "vector_motion_contract_version": VECTOR_MOTION_CONTRACT_VERSION,
         "raw_command": raw_command.strip(),
         "normalized_command": normalized,
         "parser_source": parser_source,
@@ -382,6 +428,16 @@ def _base_evidence(raw_command: str, normalized: str, *, frame: str, parser_sour
         "motion_frame": frame,
         "intent": None,
         "delta_m": None,
+        "vector_motion_supported": True,
+        "motion_contract_type": None,
+        "vector_delta_m": None,
+        "requested_distance_norm_m": None,
+        "vector_components_m": None,
+        "vector_component_count_nonzero": 0,
+        "vector_motion_frame": frame,
+        "legacy_axis_compatible": False,
+        "vector_source": None,
+        "one_shot_vector_motion_allowed": False,
         "unit": None,
         "requires_confirmation": True,
         "safety_gate_still_required": True,
@@ -492,6 +548,8 @@ def _qwen_evidence_fields(semantic: dict[str, Any], *, invalid_reason: str | Non
         "qwen_intent_status": semantic.get("intent_status") if semantic else None,
         "qwen_intent_type": semantic.get("intent_type") if semantic else None,
         "qwen_direction_semantic": motion.get("direction_semantic"),
+        "qwen_motion_mode": motion.get("mode"),
+        "qwen_vector_delta_m": _semantic_vector_delta(motion.get("delta")),
         "qwen_distance_quality": distance.get("quality"),
         "qwen_distance_m": _semantic_distance_value(distance),
         "qwen_language": semantic.get("language") if semantic else None,
@@ -576,6 +634,8 @@ def _qwen_fallback_conflict(qwen_result: dict[str, Any], fallback: dict[str, Any
     for key in ("direction_axis", "direction_sign"):
         if qwen_result.get(key) != fallback.get(key):
             mismatches.append(key)
+    if qwen_result.get("delta_m") != fallback.get("delta_m"):
+        mismatches.append("delta_m")
     qwen_distance = _optional_float(qwen_result.get("requested_distance_m"))
     fallback_distance = _optional_float(fallback.get("requested_distance_m"))
     if qwen_distance is not None and fallback_distance is not None and abs(qwen_distance - fallback_distance) > EPS:
@@ -646,6 +706,156 @@ def _extract_distance(normalized: str) -> dict[str, Any]:
         "source": "explicit",
         "unit": unit,
     }
+
+
+def canonicalize_delta_motion(
+    delta: dict[str, Any] | list[float] | tuple[float, ...],
+    *,
+    frame: str = DEFAULT_FRAME,
+    vector_source: str = "delta_json",
+    parser_source: str = "explicit_delta",
+) -> dict[str, Any]:
+    vector = _coerce_delta_vector(delta)
+    base = _base_evidence("", "", frame=frame, parser_source=parser_source)
+    if vector is None or _vector_norm(vector) <= EPS:
+        return _blocked(base, STATUS_NEEDS_CLARIFICATION, clarification="E_INVALID_VECTOR_DELTA")
+    return _vector_motion_result(
+        base,
+        vector,
+        parser_source=parser_source,
+        vector_source=vector_source,
+        confidence=1.0,
+        canonicalization_source=vector_source,
+    )
+
+
+def _vector_motion_result(
+    base: dict[str, Any],
+    delta: list[float],
+    *,
+    parser_source: str,
+    vector_source: str,
+    confidence: float,
+    canonicalization_source: str | None = None,
+) -> dict[str, Any]:
+    vector = [round(float(value), 6) for value in delta]
+    norm = round(_vector_norm(vector), 6)
+    nonzero = [index for index, value in enumerate(vector) if abs(value) > EPS]
+    axis = ("x", "y", "z")[nonzero[0]] if len(nonzero) == 1 else None
+    sign = ("+" if vector[nonzero[0]] > 0.0 else "-") if len(nonzero) == 1 else None
+    return {
+        **base,
+        "parse_status": STATUS_PASS,
+        "intent": INTENT_RELATIVE_CARTESIAN_MOTION,
+        "parser_source": parser_source,
+        "parser_confidence": round(float(confidence), 6),
+        "motion_parse_confidence": round(float(confidence), 6),
+        "distance_source": "vector_components",
+        "direction_source": "vector_delta",
+        "requested_distance_m": norm,
+        "direction_axis": axis,
+        "direction_sign": sign,
+        "delta_m": vector,
+        **_vector_contract_fields(vector, vector_source=vector_source),
+        "unit": "m",
+        "fallback_parse_used": vector_source == "fallback_rule",
+        "canonicalization_source": canonicalization_source or vector_source,
+    }
+
+
+def _vector_contract_fields(delta: list[float], *, vector_source: str) -> dict[str, Any]:
+    vector = [round(float(value), 6) for value in delta]
+    nonzero = sum(abs(value) > EPS for value in vector)
+    norm = round(_vector_norm(vector), 6)
+    return {
+        "vector_motion_supported": True,
+        "motion_contract_type": "single_axis_relative" if nonzero == 1 else "vector_relative",
+        "vector_delta_m": {"x": vector[0], "y": vector[1], "z": vector[2]},
+        "requested_distance_norm_m": norm,
+        "vector_components_m": {"x": vector[0], "y": vector[1], "z": vector[2]},
+        "vector_component_count_nonzero": nonzero,
+        "vector_motion_frame": DEFAULT_FRAME,
+        "legacy_axis_compatible": nonzero == 1,
+        "vector_source": vector_source,
+        "one_shot_vector_motion_allowed": False if nonzero > 1 and norm > 0.05 + EPS else None,
+    }
+
+
+def _extract_explicit_vector_delta(normalized: str) -> list[float] | None:
+    axis_matches = re.findall(
+        r"\b([xyz])\s*[:=]?\s*([-+]?\d+(?:\.\d+)?)\s*(mm|cm|m)?\b",
+        normalized,
+    )
+    if len({match[0] for match in axis_matches}) >= 2:
+        components = {"x": 0.0, "y": 0.0, "z": 0.0}
+        for axis, raw_value, unit in axis_matches:
+            value = float(raw_value)
+            components[axis] = value / 1000.0 if unit == "mm" else value / 100.0 if unit == "cm" else value
+        return [components["x"], components["y"], components["z"]]
+
+    direction_map = {
+        "forward": ("x", 1.0),
+        "backward": ("x", -1.0),
+        "left": ("y", 1.0),
+        "right": ("y", -1.0),
+        "up": ("z", 1.0),
+        "down": ("z", -1.0),
+    }
+    number = r"(\d+(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten)"
+    matches = re.findall(
+        rf"\b(forward|backward|left|right|up|down)\b[^,;]*?\b{number}\s*"
+        r"(mm|millimeter|millimeters|cm|centimeter|centimeters|m|meter|meters)\b",
+        normalized,
+    )
+    if len(matches) < 2:
+        return None
+    components = {"x": 0.0, "y": 0.0, "z": 0.0}
+    used_axes = set()
+    for direction, raw_value, unit in matches:
+        axis, sign = direction_map[direction]
+        if axis in used_axes:
+            return None
+        value = _number_value(raw_value)
+        if value is None:
+            return None
+        meters = value / 1000.0 if unit.startswith("mm") or unit.startswith("millimeter") else value / 100.0 if unit.startswith("cm") or unit.startswith("centimeter") else value
+        components[axis] = sign * meters
+        used_axes.add(axis)
+    return [components["x"], components["y"], components["z"]]
+
+
+def _semantic_vector_delta(value: Any) -> list[float] | None:
+    if not isinstance(value, dict):
+        return None
+    components = []
+    for axis in ("x", "y", "z"):
+        component = value.get(axis)
+        if isinstance(component, dict):
+            meters = _semantic_distance_value(component)
+        else:
+            meters = _optional_float(component)
+        if meters is None:
+            return None
+        components.append(float(meters))
+    return components if _vector_norm(components) > EPS else None
+
+
+def _coerce_delta_vector(value: Any) -> list[float] | None:
+    if isinstance(value, dict):
+        raw = [value.get("x"), value.get("y"), value.get("z")]
+    elif isinstance(value, (list, tuple)) and len(value) == 3:
+        raw = list(value)
+    else:
+        return None
+    try:
+        vector = [float(item) for item in raw]
+    except (TypeError, ValueError):
+        return None
+    return vector if all(math.isfinite(item) for item in vector) else None
+
+
+def _vector_norm(delta: list[float]) -> float:
+    return math.sqrt(sum(float(value) ** 2 for value in delta))
 
 
 def _number_value(raw: str) -> float | None:

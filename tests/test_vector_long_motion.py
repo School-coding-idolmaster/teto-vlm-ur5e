@@ -1,0 +1,316 @@
+import json
+import math
+
+from scripts import run_real_long_motion_test as real_cli
+from src.autoregressive_motion_planner import (
+    AutoregressiveMotionPlannerRequest,
+    plan_offline_autoregressive_motion,
+)
+from src.cartesian_motion_gateway import CartesianMotionGatewayRequest, evaluate_cartesian_motion_gateway
+from src.guarded_vector_motion_executor import (
+    GuardedVectorExecutionRequest,
+    execute_guarded_vector_motion,
+)
+from src.motion_command_normalizer import canonicalize_delta_motion
+from src.qwen_motion_parser import QwenMotionParserRequest, evaluate_qwen_motion_parser
+
+
+def test_vector_norm_and_straight_line_decomposition():
+    plan = _vector_plan()
+
+    assert plan["final_plan_status"] == "PASS"
+    assert plan["motion_contract_type"] == "vector_relative"
+    assert plan["requested_distance_norm_m"] == round(math.sqrt(0.10), 6)
+    assert plan["substep_count"] == 16
+    assert plan["substeps"][0]["substep_delta_m"] == {"x": 0.01875, "y": 0.00625, "z": 0.0}
+    assert all(step["substep_delta_norm_m"] <= 0.02 for step in plan["substeps"])
+    assert plan["substeps"][-1]["cumulative_delta_after_m"] == {"x": 0.3, "y": 0.1, "z": 0.0}
+    assert all(step["target_generated_from"] == "latest_verified_tcp_pose" for step in plan["substeps"][1:])
+
+
+def test_single_axis_backward_compatibility_keeps_ten_substeps():
+    canonical = canonicalize_delta_motion({"x": 0.20, "y": 0.0, "z": 0.0})
+    plan = plan_offline_autoregressive_motion(
+        AutoregressiveMotionPlannerRequest(
+            canonical_motion_intent=canonical,
+            current_tcp_pose=_pose(),
+            config=_config(max_total=0.20),
+        )
+    )
+
+    assert canonical["motion_contract_type"] == "single_axis_relative"
+    assert plan["substep_count"] == 10
+    assert plan["direction_axis"] == "x"
+    assert plan["direction_sign"] == "+"
+
+
+def test_explicit_delta_json_cli_is_preview_only_without_real_flags(tmp_path, capsys):
+    exit_code = real_cli.main(
+        [
+            "--delta-json",
+            '{"x":0.30,"y":0.10,"z":0.0}',
+            "--max-total-distance-m",
+            "0.35",
+            "--max-substep-distance-m",
+            "0.02",
+            "--mock-current-tcp-pose",
+            '{"position_m":[0,0,0.5],"orientation_xyzw":[0,0,0,1]}',
+            "--output-dir",
+            str(tmp_path),
+        ]
+    )
+
+    assert exit_code == 0
+    summary = json.loads(capsys.readouterr().out)
+    report = json.loads(next(tmp_path.glob("*.json")).read_text())
+    assert summary["substep_count"] == 16
+    assert summary["real_execution_enabled"] is False
+    assert report["canonical_motion_intent"]["vector_source"] == "delta_json"
+    assert report["real_execution"]["execute_trajectory_called"] is False
+    assert report["real_execution"]["trajectory_sent"] is False
+
+
+def test_mocked_qwen_vector_semantics_canonicalize_without_execution_permission():
+    payload = _qwen_vector_payload()
+    result = evaluate_qwen_motion_parser(
+        QwenMotionParserRequest(
+            user_text="move forward 30 cm and left 10 cm",
+            max_distance_m=0.35,
+            hard_safety_limit_m=0.35,
+            llm_callable=lambda _prompt: json.dumps(payload),
+        )
+    )
+
+    assert result["qwen_motion_parser_status"] == "PASS"
+    assert result["delta_m"] == [0.3, 0.1, 0.0]
+    assert result["vector_source"] == "qwen_semantic"
+    assert result["motion_contract_type"] == "vector_relative"
+    assert result["execution_permission_decided_by_parser"] is False
+    assert result["safety_gate_still_required"] is True
+
+
+def test_above_vector_envelope_blocks_without_execution():
+    plan = _vector_plan(delta={"x": 0.36, "y": 0.0, "z": 0.01}, max_total=0.35)
+
+    assert plan["final_plan_status"] == "BLOCKED"
+    assert plan["final_blocking_reason"] == "E_LONG_MOTION_TOTAL_EXCEEDS_LIMIT"
+    assert plan["substeps"] == []
+    assert plan["execute_trajectory_called"] is False
+
+
+def test_vector_preview_missing_tcp_needs_current_pose():
+    plan = _vector_plan(current_pose=None)
+
+    assert plan["final_plan_status"] == "NEEDS_CURRENT_TCP"
+    assert plan["substeps"][0]["current_tcp_pose_available"] is False
+    assert plan["substeps"][0]["target_tcp_pose_m"] is None
+
+
+def test_real_flags_absent_never_call_adapters():
+    plan = _vector_plan()
+    result = execute_guarded_vector_motion(
+        GuardedVectorExecutionRequest(
+            autoregressive_plan=plan,
+            pose_reader=lambda: (_ for _ in ()).throw(AssertionError("pose reader called")),
+            substep_executor=lambda *_args: (_ for _ in ()).throw(AssertionError("executor called")),
+        )
+    )
+
+    assert result["final_real_execution_status"] == "NOT_REQUESTED"
+    assert result["real_autoregressive_execution_enabled"] is False
+    assert result["execute_trajectory_called"] is False
+    assert result["trajectory_sent"] is False
+
+
+def test_armed_mock_execution_reads_and_executes_each_substep_sequentially():
+    plan = _vector_plan(delta={"x": 0.03, "y": 0.01, "z": 0.0}, max_substep=0.02)
+    state = {"pose": _pose(), "reads": 0, "calls": 0}
+
+    def read_pose():
+        state["reads"] += 1
+        return {**state["pose"], "position_m": list(state["pose"]["position_m"])}
+
+    def execute(_pre, target, _step):
+        state["calls"] += 1
+        state["pose"] = target
+        return _success_execution()
+
+    result = execute_guarded_vector_motion(
+        GuardedVectorExecutionRequest(
+            autoregressive_plan=plan,
+            real_execution_requested=True,
+            enable_real_autoregressive_execution=True,
+            armed_long_motion_test=True,
+            pose_reader=read_pose,
+            substep_executor=execute,
+        )
+    )
+
+    assert result["final_real_execution_status"] == "PASS"
+    assert result["real_autoregressive_substeps_attempted"] == plan["substep_count"]
+    assert result["real_autoregressive_substeps_completed"] == plan["substep_count"]
+    assert state["calls"] == plan["substep_count"]
+    assert state["reads"] == plan["substep_count"] * 2
+
+
+def test_mock_verification_failure_at_fourth_attempt_aborts_later_steps():
+    plan = _vector_plan(delta={"x": 0.09, "y": 0.03, "z": 0.0}, max_substep=0.02)
+    state = {"pose": _pose(), "calls": 0}
+
+    def read_pose():
+        return {**state["pose"], "position_m": list(state["pose"]["position_m"])}
+
+    def execute(pre, target, _step):
+        state["calls"] += 1
+        state["pose"] = target if state["calls"] != 4 else pre
+        return _success_execution()
+
+    result = _armed_execute(plan, read_pose, execute)
+
+    assert result["final_real_execution_status"] == "ABORTED"
+    assert result["real_autoregressive_substeps_attempted"] == 4
+    assert result["real_autoregressive_substeps_completed"] == 3
+    assert state["calls"] == 4
+
+
+def test_opposite_vector_projection_aborts():
+    plan = _vector_plan(delta={"x": 0.03, "y": 0.01, "z": 0.0})
+    state = {"pose": _pose()}
+
+    def read_pose():
+        return {**state["pose"], "position_m": list(state["pose"]["position_m"])}
+
+    def execute(pre, target, step):
+        intended = list(step["target_delta_m"])
+        state["pose"] = {
+            **target,
+            "position_m": [pre["position_m"][index] - intended[index] for index in range(3)],
+        }
+        return _success_execution()
+
+    result = _armed_execute(plan, read_pose, execute)
+
+    assert result["final_real_execution_status"] == "ABORTED"
+    first = result["per_substep_real_execution_evidence"][0]
+    assert first["vector_direction_check_passed"] is False
+    assert first["abort_reason"] == "E_VECTOR_DIRECTION_PROJECTION_FAILED"
+
+
+def test_long_vector_one_shot_permission_remains_false():
+    plan = _vector_plan()
+
+    assert plan["max_one_shot_distance_m"] == 0.05
+    assert plan["one_shot_target_pose_created"] is False
+    assert plan["one_shot_real_motion_allowed"] is False
+    assert plan["planned_execution_style"] == "decomposed_autoregressive_vector_preview"
+
+
+def test_gateway_blocks_thirty_cm_vector_as_one_shot():
+    result = evaluate_cartesian_motion_gateway(
+        CartesianMotionGatewayRequest(
+            requested=True,
+            config={"max_translation_m": 0.05, "hard_safety_limit_m": 0.05},
+            command_to_task_result=_gateway_task([0.30, 0.10, 0.0]),
+            current_tcp_pose=_pose(),
+        )
+    )
+
+    assert result["cartesian_motion_gateway_status"] == "BLOCKED"
+    assert result["motion_contract_type"] == "vector_relative"
+    assert result["requested_distance_norm_m"] == round(math.sqrt(0.10), 6)
+    assert result["one_shot_vector_motion_allowed"] is False
+    assert result["target_pose"] is None
+
+
+def _vector_plan(
+    *,
+    delta=None,
+    current_pose="default",
+    max_total=0.35,
+    max_substep=0.02,
+):
+    delta = delta or {"x": 0.30, "y": 0.10, "z": 0.0}
+    return plan_offline_autoregressive_motion(
+        AutoregressiveMotionPlannerRequest(
+            canonical_motion_intent=canonicalize_delta_motion(delta),
+            current_tcp_pose=_pose() if current_pose == "default" else current_pose,
+            config=_config(max_total=max_total, max_substep=max_substep),
+        )
+    )
+
+
+def _config(*, max_total=0.35, max_substep=0.02):
+    return {
+        "enable_long_step_decomposition": True,
+        "max_one_shot_distance_m": 0.05,
+        "max_decomposed_total_distance_m": max_total,
+        "max_decomposed_substep_distance_m": max_substep,
+        "substep_execution_mode": "offline_preview",
+        "workspace_bounds": {"x": [-1.0, 1.0], "y": [-1.0, 1.0], "z": [0.0, 2.0]},
+    }
+
+
+def _pose():
+    return {
+        "frame": "base_link",
+        "position_m": [0.0, 0.0, 0.5],
+        "orientation_xyzw": [0.0, 0.0, 0.0, 1.0],
+    }
+
+
+def _success_execution():
+    return {
+        "moveit_pose_executor_status": "PASS",
+        "moveit_pose_plan_requested": True,
+        "execute_success": True,
+        "moveit_execute_called": True,
+        "trajectory_sent": True,
+        "real_robot_motion_executed": True,
+        "moveit_execute_error_code_name": "SUCCESS",
+        "planner_audit_status": "AVAILABLE",
+        "planner_risk_status": "PASS",
+    }
+
+
+def _armed_execute(plan, reader, executor):
+    return execute_guarded_vector_motion(
+        GuardedVectorExecutionRequest(
+            autoregressive_plan=plan,
+            real_execution_requested=True,
+            enable_real_autoregressive_execution=True,
+            armed_long_motion_test=True,
+            pose_reader=reader,
+            substep_executor=executor,
+        )
+    )
+
+
+def _qwen_vector_payload():
+    return {
+        "schema_version": "teto_motion_semantics.v1",
+        "intent_status": "ok",
+        "intent_type": "relative_cartesian_motion",
+        "motion": {
+            "mode": "vector_delta",
+            "direction_semantic": "unknown",
+            "distance": {"quality": "missing"},
+            "delta": {
+                "x": {"value": 30, "unit": "cm", "meters": 0.30, "quality": "explicit"},
+                "y": {"value": 10, "unit": "cm", "meters": 0.10, "quality": "explicit"},
+                "z": {"value": 0, "unit": "m", "meters": 0.0, "quality": "explicit"},
+            },
+        },
+        "confidence": {"intent": 0.95, "direction": 0.95, "distance": 0.95, "overall": 0.95},
+        "language": "en",
+    }
+
+
+def _gateway_task(delta):
+    return {
+        "command_to_task_status": "PASS",
+        "task_contract": {
+            "intent": "cartesian_offset",
+            "frame": "base_link",
+            "cartesian_offset_m": delta,
+        },
+    }

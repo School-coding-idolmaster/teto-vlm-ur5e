@@ -174,18 +174,22 @@ def evaluate_qwen_motion_parser(request: QwenMotionParserRequest) -> Dict[str, A
         elif distance_m is not None and distance_m > float(request.max_distance_m) + EPS:
             blocking_reasons.append(E_EXCESSIVE_CARTESIAN_MOTION)
 
-        if not blocking_reasons and normalized_language.get("parse_status") == NORMALIZER_STATUS_PASS and axis and direction and distance_m is not None:
+        if not blocking_reasons and normalized_language.get("parse_status") == NORMALIZER_STATUS_PASS and distance_m is not None:
             delta_m = normalized_language.get("delta_m")
-            if not _vector3(delta_m):
+            if not _vector3(delta_m) and axis and direction:
                 delta_m = _delta_from_axis_direction(axis, direction, distance_m)
-            normalized_contract = {
-                "intent": INTENT_RELATIVE_CARTESIAN_MOTION,
-                "frame": DEFAULT_FRAME,
-                "delta_m": [round(float(value), 6) for value in delta_m],
-                "max_distance_m": float(request.max_distance_m),
-                "hard_safety_limit_m": float(request.hard_safety_limit_m),
-                "must_confirm": True,
-            }
+            if _vector3(delta_m):
+                normalized_contract = {
+                    "intent": INTENT_RELATIVE_CARTESIAN_MOTION,
+                    "frame": DEFAULT_FRAME,
+                    "delta_m": [round(float(value), 6) for value in delta_m],
+                    "motion_contract_type": normalized_language.get("motion_contract_type"),
+                    "vector_components_m": normalized_language.get("vector_components_m"),
+                    "requested_distance_norm_m": normalized_language.get("requested_distance_norm_m"),
+                    "max_distance_m": float(request.max_distance_m),
+                    "hard_safety_limit_m": float(request.hard_safety_limit_m),
+                    "must_confirm": True,
+                }
 
     blocking_reasons = _unique(blocking_reasons)
     status = STATUS_PASS if not blocking_reasons else STATUS_BLOCKED
@@ -227,7 +231,13 @@ def build_qwen_motion_prompt(user_text: str) -> str:
         "  \"intent_type\": \"relative_cartesian_motion | vision_target_motion | manipulation | speed_control | unknown\",\n"
         "  \"motion\": {\n"
         "    \"reference\": \"tcp | tool | end_effector | robot_hand | arm_tip | unspecified\",\n"
+        "    \"mode\": \"single_axis | vector_delta | unsupported_compound\",\n"
         "    \"direction_semantic\": \"up | down | left | right | forward | backward | conflicting | missing | unknown\",\n"
+        "    \"delta\": {\n"
+        "      \"x\": {\"value\": 0, \"unit\": \"m | cm | mm\", \"meters\": 0.0, \"quality\": \"explicit\"},\n"
+        "      \"y\": {\"value\": 0, \"unit\": \"m | cm | mm\", \"meters\": 0.0, \"quality\": \"explicit\"},\n"
+        "      \"z\": {\"value\": 0, \"unit\": \"m | cm | mm\", \"meters\": 0.0, \"quality\": \"explicit\"}\n"
+        "    },\n"
         "    \"distance\": {\"value\": number|null, \"unit\": \"mm|cm|m|unspecified\", \"meters\": number|null, \"quality\": \"explicit | fuzzy_small | missing | ambiguous\"},\n"
         "    \"fuzzy_magnitude\": \"tiny | small | medium | large | unspecified\",\n"
         "    \"frame_hint\": \"base_link | camera | user_relative | unspecified\"\n"
@@ -451,8 +461,19 @@ def _language_result_fields(language: dict[str, Any]) -> dict[str, Any]:
         "direction_source",
         "inferred_default_distance_m",
         "requested_distance_m",
+        "requested_distance_norm_m",
         "direction_axis",
         "direction_sign",
+        "delta_m",
+        "vector_motion_supported",
+        "motion_contract_type",
+        "vector_delta_m",
+        "vector_components_m",
+        "vector_component_count_nonzero",
+        "vector_motion_frame",
+        "legacy_axis_compatible",
+        "vector_source",
+        "one_shot_vector_motion_allowed",
         "motion_frame",
         "parser_confidence",
         "motion_parse_confidence",
@@ -463,6 +484,8 @@ def _language_result_fields(language: dict[str, Any]) -> dict[str, Any]:
         "qwen_intent_status",
         "qwen_intent_type",
         "qwen_direction_semantic",
+        "qwen_motion_mode",
+        "qwen_vector_delta_m",
         "qwen_distance_quality",
         "qwen_distance_m",
         "qwen_language",

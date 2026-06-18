@@ -43,7 +43,7 @@ DEFAULT_COMMANDS = [
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Generate TETO v3.0.12 offline autoregressive long-motion preview evidence."
+        description="Generate TETO v3.0.13 offline autoregressive long-motion preview evidence."
     )
     parser.add_argument("--cmd", action="append", help="Natural-language command. Repeat for multiple previews.")
     parser.add_argument("--examples", action="store_true", help="Generate the built-in safe offline examples.")
@@ -110,7 +110,7 @@ def _build_evidence(
         )
     )
     return {
-        "report_version": "teto_v3_0_12_autoregressive_preview_report_v1",
+        "report_version": "teto_v3_0_13_autoregressive_preview_report_v1",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "command": command,
         "parser_mode": args.parser,
@@ -166,7 +166,15 @@ def _canonical_from_parser_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
         "direction_axis": evidence.get("direction_axis") or evidence.get("axis"),
         "direction_sign": evidence.get("direction_sign") or evidence.get("direction"),
         "requested_distance_m": evidence.get("requested_distance_m") or evidence.get("distance_m"),
+        "requested_distance_norm_m": evidence.get("requested_distance_norm_m") or evidence.get("distance_m"),
         "delta_m": evidence.get("delta_m"),
+        "vector_delta_m": evidence.get("vector_delta_m"),
+        "vector_components_m": evidence.get("vector_components_m"),
+        "vector_component_count_nonzero": evidence.get("vector_component_count_nonzero"),
+        "motion_contract_type": evidence.get("motion_contract_type"),
+        "legacy_axis_compatible": evidence.get("legacy_axis_compatible"),
+        "vector_source": evidence.get("vector_source"),
+        "vector_motion_supported": evidence.get("vector_motion_supported", True),
         "parser_source": evidence.get("parser_source"),
         "execution_permission_decided_by_parser": False,
         "safety_gate_still_required": True,
@@ -210,7 +218,7 @@ def _write_report(evidence: dict[str, Any], output_dir: Path) -> tuple[Path, Pat
     markdown_path.write_text(
         "\n".join(
             [
-                "# TETO v3.0.12 Offline Autoregressive Motion Preview",
+                "# TETO v3.0.13 Offline Autoregressive Motion Preview",
                 "",
                 f"- Command: `{evidence['command']}`",
                 f"- Parse status: `{evidence['canonical_motion_intent'].get('parse_status')}`",

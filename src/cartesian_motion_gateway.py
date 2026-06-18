@@ -31,7 +31,7 @@ from src.moveit_pose_executor import (
 
 
 CONTRACT_VERSION = "teto_cartesian_motion_gateway.v1"
-CURRENT_CARTESIAN_MOTION_VERSION = "TETO V3.0.12"
+CURRENT_CARTESIAN_MOTION_VERSION = "TETO V3.0.13"
 
 STATUS_PASS = "PASS"
 STATUS_BLOCKED = "BLOCKED"
@@ -188,6 +188,18 @@ def evaluate_cartesian_motion_gateway(request: CartesianMotionGatewayRequest | N
         and translation_distance_m <= max_step_distance_m + MOTION_LIMIT_EPS
     )
     direction_axis, direction_sign = _axis_direction_from_delta(offset)
+    vector_component_count_nonzero = (
+        sum(abs(float(value)) > MOTION_LIMIT_EPS for value in offset)
+        if offset is not None and _valid_vector3(offset)
+        else 0
+    )
+    motion_contract_type = (
+        "single_axis_relative"
+        if vector_component_count_nonzero == 1
+        else "vector_relative"
+        if vector_component_count_nonzero > 1
+        else None
+    )
     target_position = None
     requested_target_pose = None
     delta_from_current_tcp_m = None
@@ -354,6 +366,31 @@ def evaluate_cartesian_motion_gateway(request: CartesianMotionGatewayRequest | N
         "motion_frame": frame,
         "direction_axis": direction_axis,
         "direction_sign": direction_sign,
+        "vector_motion_supported": True,
+        "motion_contract_type": motion_contract_type,
+        "delta_m": _round_vector(offset),
+        "vector_delta_m": (
+            {"x": round(float(offset[0]), 6), "y": round(float(offset[1]), 6), "z": round(float(offset[2]), 6)}
+            if offset is not None and _valid_vector3(offset)
+            else None
+        ),
+        "requested_distance_norm_m": translation_distance_m,
+        "vector_components_m": (
+            {"x": round(float(offset[0]), 6), "y": round(float(offset[1]), 6), "z": round(float(offset[2]), 6)}
+            if offset is not None and _valid_vector3(offset)
+            else None
+        ),
+        "vector_component_count_nonzero": vector_component_count_nonzero,
+        "vector_motion_frame": frame,
+        "legacy_axis_compatible": vector_component_count_nonzero == 1,
+        "vector_source": "gateway_canonical_offset",
+        "one_shot_vector_motion_allowed": bool(
+            vector_component_count_nonzero == 1
+            and translation_distance_m is not None
+            and translation_distance_m <= one_shot_distance_limit_m + MOTION_LIMIT_EPS
+        ),
+        "execution_permission_decided_by_parser": False,
+        "safety_gate_still_required": True,
         "base_link_direction_mapping": config.get("base_link_direction_mapping") if isinstance(config.get("base_link_direction_mapping"), dict) else None,
         "first_move_bootstrap_used": first_move_bootstrap_used,
         "previous_verified_tcp_pose": previous_verified_pose,
