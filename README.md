@@ -249,6 +249,26 @@ cannot use the one-shot path. The parser still records
 gate remains authoritative. No scenario harness, batch test framework, YAML
 scenario infrastructure, warmup sequence, or auto-reverse behavior was added.
 
+## TETO v3.0.14: Safety Gateway Authority Repair
+
+TETO v3.0.14 repairs the safety authority boundaries identified by the
+v3.0.13 code-health audit. The authoritative Cartesian gateway now enforces a
+`max_one_shot_distance_m=0.05` default independently of expanded decomposed or
+vector preview envelopes. Requests above that limit cannot silently become
+one-shot target poses.
+
+Real-motion evidence now preserves whether ExecuteTrajectory was attempted or
+a real motion command was sent even when post-motion verification later fails.
+Every armed autoregressive vector substep must route through an authoritative
+gateway that supplies measured current TCP readiness, safety/execution results,
+and post-motion verification evidence. The real long-motion CLI no longer
+constructs synthetic confirmation or safety-state values and fails closed when
+the authoritative gateway is unavailable.
+
+This safety repair does not add a scenario harness, batch framework, or new
+execution permission. Preview behavior and the v3.0.13 vector decomposition
+geometry remain unchanged.
+
 ## Project Structure
 
 ```text

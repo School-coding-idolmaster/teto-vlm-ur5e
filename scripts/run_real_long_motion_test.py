@@ -7,7 +7,7 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -23,7 +23,6 @@ from src.guarded_vector_motion_executor import (  # noqa: E402
     execute_guarded_vector_motion,
 )
 from src.motion_command_normalizer import canonicalize_delta_motion, normalize_motion_command  # noqa: E402
-from src.moveit_pose_executor import MoveItPoseExecutorRequest, evaluate_moveit_pose_execute  # noqa: E402
 from src.qwen_motion_parser import QwenMotionParserRequest, evaluate_qwen_motion_parser  # noqa: E402
 
 
@@ -37,10 +36,26 @@ def main(argv: list[str] | None = None) -> int:
     real_flags_satisfied = bool(
         args.real and args.enable_real_autoregressive_execution and args.armed_long_motion_test
     )
-    if real_flags_satisfied and args.mock_current_tcp_pose:
-        pose_error = "E_MOCK_CURRENT_TCP_POSE_NOT_ALLOWED_FOR_REAL_EXECUTION"
-        mock_pose = None
-    initial_pose = _read_real_pose() if real_flags_satisfied else mock_pose
+    authoritative_gateway = _authoritative_real_substep_gateway() if real_flags_satisfied else None
+    preflight_blockers: list[str] = []
+    initial_pose = mock_pose
+    if args.real:
+        initial_pose = None
+        if args.mock_current_tcp_pose:
+            preflight_blockers.append("E_MOCK_CURRENT_TCP_POSE_NOT_ALLOWED_FOR_REAL_EXECUTION")
+        if real_flags_satisfied:
+            if authoritative_gateway is None:
+                preflight_blockers.append("E_AUTHORITATIVE_SUBSTEP_GATEWAY_UNAVAILABLE")
+            else:
+                pose_reader = getattr(authoritative_gateway, "read_current_pose", None)
+                if not callable(pose_reader):
+                    preflight_blockers.append("E_AUTHORITATIVE_GATEWAY_CURRENT_TCP_READER_UNAVAILABLE")
+                else:
+                    initial_pose = pose_reader()
+                    if initial_pose is None:
+                        preflight_blockers.append("E_CURRENT_TCP_POSE_MISSING")
+        if preflight_blockers:
+            pose_error = preflight_blockers[0]
     plan = plan_offline_autoregressive_motion(
         AutoregressiveMotionPlannerRequest(
             canonical_motion_intent=canonical,
@@ -63,8 +78,8 @@ def main(argv: list[str] | None = None) -> int:
             real_execution_requested=args.real,
             enable_real_autoregressive_execution=args.enable_real_autoregressive_execution,
             armed_long_motion_test=args.armed_long_motion_test,
-            pose_reader=_read_real_pose if real_flags_satisfied else None,
-            substep_executor=_execute_real_substep if real_flags_satisfied else None,
+            authoritative_substep_gateway=authoritative_gateway if real_flags_satisfied else None,
+            preflight_blocking_reasons=tuple(preflight_blockers),
             config={
                 "max_real_autoregressive_total_distance_m": args.max_total_distance_m,
                 "max_real_autoregressive_substep_distance_m": args.max_substep_distance_m,
@@ -75,11 +90,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     final_status = (
         execution["final_real_execution_status"]
-        if real_flags_satisfied
+        if args.real
         else plan.get("final_plan_status")
     )
     evidence = {
-        "report_version": "teto_v3_0_13_real_long_motion_test_v1",
+        "report_version": "teto_v3_0_14_safety_gateway_authority_repair_v1",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "command": args.cmd,
         "delta_json": args.delta_json,
@@ -93,6 +108,10 @@ def main(argv: list[str] | None = None) -> int:
             "preview_only": not real_flags_satisfied,
             "one_shot_limit_m": 0.05,
             "one_shot_target_pose_created": False,
+            "authoritative_substep_gateway_required": True,
+            "authoritative_substep_gateway_available": authoritative_gateway is not None,
+            "synthetic_safety_state_used": False,
+            "synthetic_confirmation_used": False,
             "operator_console_used": False,
             "manual_y_confirmation_required": False,
         },
@@ -203,58 +222,9 @@ def _mock_pose(raw: str | None) -> tuple[dict[str, Any] | None, str | None]:
     return {"frame": "base_link", **pose}, None
 
 
-def _read_real_pose() -> dict[str, Any] | None:
-    from scripts.text_to_ur5e_real_motion import _lookup_current_tcp_pose
-
-    return _lookup_current_tcp_pose(timeout_s=3.0)
-
-
-def _execute_real_substep(
-    current_pose: dict[str, Any],
-    target_pose: dict[str, Any],
-    step: dict[str, Any],
-) -> dict[str, Any]:
-    distance = float(step["substep_delta_norm_m"])
-    return evaluate_moveit_pose_execute(
-        MoveItPoseExecutorRequest(
-            requested=True,
-            target_pose=target_pose,
-            current_tcp_pose=current_pose,
-            execute=True,
-            manual_confirmation_result={"manual_confirmation_accepted": True},
-            robot_state_result={
-                "read_only_state_contract_ready": True,
-                "robot_state_ok": True,
-                "safety_status_ok": True,
-                "protective_stop": False,
-                "emergency_stop": False,
-                "speed_scaling": 0.05,
-            },
-            config={
-                "planning_group": "ur_manipulator",
-                "planning_frame": "base_link",
-                "end_effector_link": "tool0",
-                "allowed_frames": ["base_link"],
-                "workspace_bounds": {"x": [-1.0, 1.0], "y": [-1.0, 1.0], "z": [0.0, 2.0]},
-                "max_translation_m": 0.02,
-                "configured_max_distance_m": 0.02,
-                "hard_safety_limit_m": 0.02,
-                "requested_distance_m": distance,
-                "position_tolerance_m": min(0.002, distance * 0.10),
-                "orientation_tolerance_rad": 0.01,
-                "manual_confirmation_required": True,
-                "robot_state_ok": True,
-                "safety_status_ok": True,
-                "protective_stop": False,
-                "emergency_stop": False,
-                "speed_scaling": 0.05,
-                "max_speed_scale": 0.05,
-                "max_acc_scale": 0.05,
-                "planner_risk_policy_mode": "soft_warn",
-                "planner_risk_blocking_enabled": False,
-            },
-        )
-    )
+def _authoritative_real_substep_gateway() -> Callable[[dict[str, Any]], dict[str, Any]] | None:
+    """Return the production measured gateway when one is installed; fail closed otherwise."""
+    return None
 
 
 def _write_report(evidence: dict[str, Any], output_dir: Path) -> tuple[Path, Path]:
@@ -266,7 +236,7 @@ def _write_report(evidence: dict[str, Any], output_dir: Path) -> tuple[Path, Pat
     markdown_path.write_text(
         "\n".join(
             [
-                "# TETO v3.0.13 Guarded Vector Long-Motion Test",
+                "# TETO v3.0.14 Safety Gateway Authority Repair",
                 "",
                 f"- Command: `{evidence.get('command')}`",
                 f"- Delta: `{evidence['canonical_motion_intent'].get('vector_components_m')}`",

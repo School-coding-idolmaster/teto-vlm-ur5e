@@ -531,6 +531,117 @@ def test_execute_success_requires_execute_trajectory_success(monkeypatch):
     assert result["execute_success_source"] == "actual_execute_trajectory_action_result"
 
 
+def test_execute_failure_after_trajectory_attempt_preserves_motion_evidence(monkeypatch):
+    monkeypatch.setattr(
+        "src.moveit_pose_executor._plan_with_move_group_action",
+        lambda _target_pose, _config: {
+            "action_call_attempted": True,
+            "action_server_available": True,
+            "goal_accepted": True,
+            "success": True,
+            "planned_trajectory": object(),
+        },
+    )
+    monkeypatch.setattr(
+        "src.moveit_pose_executor._execute_trajectory_action",
+        lambda _trajectory, _config: {
+            "action_call_attempted": True,
+            "action_server_available": True,
+            "goal_accepted": True,
+            "success": False,
+            "error_code_name": "CONTROL_FAILED",
+        },
+    )
+
+    result = evaluate_moveit_pose_execute(
+        MoveItPoseExecutorRequest(
+            requested=True,
+            target_pose=_pose([0.40, 0.0, 0.32]),
+            current_tcp_pose=_pose([0.40, 0.0, 0.30]),
+            config={**_base_config(), **_robot_state_config()},
+            manual_confirmation_result={"manual_confirmation_accepted": True},
+            robot_state_result={"read_only_state_contract_ready": True},
+        )
+    )
+
+    assert result["moveit_pose_executor_status"] == "BLOCKED"
+    assert result["execute_success"] is False
+    assert result["moveit_execute_called"] is True
+    assert result["execution_attempted"] is True
+    assert result["real_execution_attempted"] is True
+    assert result["trajectory_sent"] is True
+    assert result["real_motion_command_sent"] is True
+    assert result["real_robot_motion_executed"] is True
+    assert result["real_robot_motion_executed_evidence_source"] == "execute_trajectory_action_attempted"
+
+
+def test_plan_failure_never_reports_real_execution_attempt(monkeypatch):
+    monkeypatch.setattr(
+        "src.moveit_pose_executor._plan_with_move_group_action",
+        lambda _target_pose, _config: {
+            "action_call_attempted": True,
+            "action_server_available": True,
+            "goal_accepted": True,
+            "success": False,
+        },
+    )
+
+    result = evaluate_moveit_pose_execute(
+        MoveItPoseExecutorRequest(
+            requested=True,
+            target_pose=_pose([0.40, 0.0, 0.32]),
+            current_tcp_pose=_pose([0.40, 0.0, 0.30]),
+            config={**_base_config(), **_robot_state_config()},
+            manual_confirmation_result={"manual_confirmation_accepted": True},
+            robot_state_result={"read_only_state_contract_ready": True},
+        )
+    )
+
+    assert result["moveit_execute_called"] is False
+    assert result["trajectory_sent"] is False
+    assert result["real_robot_motion_executed"] is False
+
+
+def test_execute_action_unavailable_before_send_reports_no_motion_command(monkeypatch):
+    monkeypatch.setattr(
+        "src.moveit_pose_executor._plan_with_move_group_action",
+        lambda _target_pose, _config: {
+            "action_call_attempted": True,
+            "action_server_available": True,
+            "goal_accepted": True,
+            "success": True,
+            "planned_trajectory": object(),
+        },
+    )
+    monkeypatch.setattr(
+        "src.moveit_pose_executor._execute_trajectory_action",
+        lambda _trajectory, _config: {
+            "action_call_attempted": False,
+            "action_server_available": False,
+            "goal_accepted": False,
+            "success": False,
+        },
+    )
+
+    result = evaluate_moveit_pose_execute(
+        MoveItPoseExecutorRequest(
+            requested=True,
+            target_pose=_pose([0.40, 0.0, 0.32]),
+            current_tcp_pose=_pose([0.40, 0.0, 0.30]),
+            config={**_base_config(), **_robot_state_config()},
+            manual_confirmation_result={"manual_confirmation_accepted": True},
+            robot_state_result={"read_only_state_contract_ready": True},
+        )
+    )
+
+    assert result["moveit_execute_called"] is False
+    assert result["execution_attempted"] is False
+    assert result["trajectory_sent"] is False
+    assert result["real_motion_command_sent"] is False
+    assert result["real_robot_motion_executed"] is False
+    assert result["real_robot_motion_executed_evidence_source"] == "execute_trajectory_not_attempted"
+
+
 def _pose(position):
     return {
         "frame": "base_link",

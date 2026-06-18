@@ -31,7 +31,7 @@ from src.moveit_pose_executor import (
 
 
 CONTRACT_VERSION = "teto_cartesian_motion_gateway.v1"
-CURRENT_CARTESIAN_MOTION_VERSION = "TETO V3.0.13"
+CURRENT_CARTESIAN_MOTION_VERSION = "TETO V3.0.14"
 
 STATUS_PASS = "PASS"
 STATUS_BLOCKED = "BLOCKED"
@@ -42,6 +42,7 @@ DEFAULT_MAX_TRANSLATION_M = 0.20
 DEFAULT_HARD_SAFETY_LIMIT_M = DEFAULT_MAX_TRANSLATION_M
 DEFAULT_MICRO_STEP_THRESHOLD_M = 0.005
 DEFAULT_LONG_STEP_THRESHOLD_M = 0.05
+DEFAULT_MAX_ONE_SHOT_DISTANCE_M = 0.05
 DEFAULT_LONG_STEP_POLICY_NAME = "lab_long_step_decomposition_v1"
 DEFAULT_MOTION_PERMISSION_ENVELOPE_VERSION = "teto_v3_0_9_expanded_decomposed_contract_preview"
 DEFAULT_MAX_SUBSTEP_DISTANCE_M = 0.02
@@ -87,6 +88,7 @@ E_LONG_MOTION_TOTAL_EXCEEDS_LIMIT = "E_LONG_MOTION_TOTAL_EXCEEDS_LIMIT"
 E_SUBSTEP_DISTANCE_EXCEEDS_LIMIT = "E_SUBSTEP_DISTANCE_EXCEEDS_LIMIT"
 E_SUBSTEP_DISTANCE_EXCEEDS_HARD_SINGLE_STEP_LIMIT = "E_SUBSTEP_DISTANCE_EXCEEDS_HARD_SINGLE_STEP_LIMIT"
 E_DECOMPOSED_WORKSPACE_ENVELOPE_EXCEEDED = "E_DECOMPOSED_WORKSPACE_ENVELOPE_EXCEEDED"
+E_ONE_SHOT_DISTANCE_EXCEEDS_LIMIT = "E_ONE_SHOT_DISTANCE_EXCEEDS_LIMIT"
 
 
 @dataclass(frozen=True)
@@ -216,11 +218,15 @@ def evaluate_cartesian_motion_gateway(request: CartesianMotionGatewayRequest | N
     orientation_mode = None
     orientation_locked = None
     motion_distance_regime = _motion_distance_regime(translation_distance_m, long_step_threshold_m)
-    configured_one_shot_distance_m = _optional_float(config.get("max_one_shot_distance_m"))
+    configured_one_shot_distance_m = (
+        _optional_float(config.get("max_one_shot_distance_m"))
+        or DEFAULT_MAX_ONE_SHOT_DISTANCE_M
+    )
     one_shot_distance_limit_m = min(
+        DEFAULT_MAX_ONE_SHOT_DISTANCE_M,
         max_translation_m,
         hard_safety_limit_m,
-        configured_one_shot_distance_m if configured_one_shot_distance_m is not None else max_translation_m,
+        configured_one_shot_distance_m,
     )
     one_shot_distance_check_status = (
         STATUS_PASS
@@ -266,6 +272,14 @@ def evaluate_cartesian_motion_gateway(request: CartesianMotionGatewayRequest | N
         blocking_reasons.append(E_EXCESSIVE_CARTESIAN_MOTION)
     elif _distance(offset) > max_translation_m + MOTION_LIMIT_EPS and not long_step_decomposition_enabled:
         blocking_reasons.append(E_EXCESSIVE_CARTESIAN_MOTION)
+    elif (
+        translation_distance_m is not None
+        and translation_distance_m > one_shot_distance_limit_m + MOTION_LIMIT_EPS
+        and not should_decompose
+    ):
+        blocking_reasons.extend(
+            [E_EXCESSIVE_CARTESIAN_MOTION, E_ONE_SHOT_DISTANCE_EXCEEDS_LIMIT]
+        )
     if current_pose is None:
         blocking_reasons.append(E_CURRENT_TCP_POSE_MISSING)
     elif not _valid_pose(current_pose):
@@ -339,7 +353,12 @@ def evaluate_cartesian_motion_gateway(request: CartesianMotionGatewayRequest | N
     decomposed_motion_allowed = decomposition_contract.get("decomposed_motion_allowed") is True
     target_pose = (
         requested_target_pose
-        if not blocking_reasons and requested_target_pose is not None and not decomposed_motion_allowed
+        if (
+            not blocking_reasons
+            and requested_target_pose is not None
+            and not decomposed_motion_allowed
+            and one_shot_distance_check_status == STATUS_PASS
+        )
         else None
     )
     workspace_check_passed = workspace_envelope_within_limit is True
@@ -388,6 +407,18 @@ def evaluate_cartesian_motion_gateway(request: CartesianMotionGatewayRequest | N
             vector_component_count_nonzero == 1
             and translation_distance_m is not None
             and translation_distance_m <= one_shot_distance_limit_m + MOTION_LIMIT_EPS
+        ),
+        "one_shot_real_motion_allowed": bool(
+            status == STATUS_PASS
+            and target_pose is not None
+            and one_shot_distance_check_status == STATUS_PASS
+            and not decomposed_motion_allowed
+        ),
+        "one_shot_target_pose_created": target_pose is not None,
+        "one_shot_blocking_reason": (
+            E_ONE_SHOT_DISTANCE_EXCEEDS_LIMIT
+            if one_shot_distance_check_status == STATUS_BLOCKED
+            else None
         ),
         "execution_permission_decided_by_parser": False,
         "safety_gate_still_required": True,
@@ -502,10 +533,16 @@ def evaluate_cartesian_motion_execution(request: CartesianMotionExecutionRequest
         "manual_confirmation_required": config.get("manual_confirmation_required", True) is True,
         "manual_confirmation_accepted": confirmation.get("manual_confirmation_accepted") is True,
         "moveit_execute_called": executed,
+        "execution_attempted": executed,
+        "real_execution_attempted": executed,
         "trajectory_send_allowed": executed,
         "trajectory_sent": executed,
+        "real_motion_command_sent": executed,
         "controller_command_sent": executed,
         "real_robot_motion_executed": executed,
+        "real_robot_motion_executed_evidence_source": (
+            "gateway_execution_authorized" if executed else "no_real_execution_attempt"
+        ),
         "target_pose": motion.get("target_pose"),
         "target_pose_generated_by_llm": False,
         "urscript_generated": False,
@@ -690,10 +727,14 @@ def _evaluate_real_moveit_execution(
             "manual_confirmation_required": config.get("manual_confirmation_required", True) is True,
             "manual_confirmation_accepted": confirmation.get("manual_confirmation_accepted") is True,
             "moveit_execute_called": False,
+            "execution_attempted": False,
+            "real_execution_attempted": False,
             "trajectory_send_allowed": False,
             "trajectory_sent": False,
+            "real_motion_command_sent": False,
             "controller_command_sent": False,
             "real_robot_motion_executed": False,
+            "real_robot_motion_executed_evidence_source": "no_real_execution_attempt",
             "target_pose": motion.get("target_pose"),
             "target_pose_generated_by_llm": False,
             "urscript_generated": False,
@@ -738,10 +779,16 @@ def _evaluate_real_moveit_execution(
         "manual_confirmation_required": config.get("manual_confirmation_required", True) is True,
         "manual_confirmation_accepted": confirmation.get("manual_confirmation_accepted") is True,
         "moveit_execute_called": moveit_result.get("moveit_execute_called") is True,
+        "execution_attempted": moveit_result.get("execution_attempted") is True,
+        "real_execution_attempted": moveit_result.get("real_execution_attempted") is True,
         "trajectory_send_allowed": moveit_result.get("trajectory_send_allowed") is True,
         "trajectory_sent": moveit_result.get("trajectory_sent") is True,
+        "real_motion_command_sent": moveit_result.get("real_motion_command_sent") is True,
         "controller_command_sent": moveit_result.get("controller_command_sent") is True,
         "real_robot_motion_executed": moveit_result.get("real_robot_motion_executed") is True,
+        "real_robot_motion_executed_evidence_source": moveit_result.get(
+            "real_robot_motion_executed_evidence_source"
+        ),
         "target_pose": motion.get("target_pose"),
         "target_pose_generated_by_llm": False,
         "urscript_generated": False,

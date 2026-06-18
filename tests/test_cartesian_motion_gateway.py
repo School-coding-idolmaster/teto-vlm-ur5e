@@ -5,6 +5,7 @@ from src.cartesian_motion_gateway import (
     E_AXIS_STEP_EXCEEDS_LIMIT,
     E_EXCESSIVE_CARTESIAN_MOTION,
     E_MANUAL_CONFIRMATION_REQUIRED,
+    E_ONE_SHOT_DISTANCE_EXCEEDS_LIMIT,
     E_OUT_OF_WORKSPACE,
     E_STEP_DELTA_EXCEEDS_LIMIT,
     CartesianMotionExecutionRequest,
@@ -21,7 +22,7 @@ def test_gateway_generates_target_pose_from_current_tcp_pose_and_offset():
     result = evaluate_cartesian_motion_gateway(
         CartesianMotionGatewayRequest(
             requested=True,
-            command_to_task_result=_task([0.0, 0.0, 0.10]),
+            command_to_task_result=_task([0.0, 0.0, 0.05]),
             current_tcp_pose={
                 "frame": "base_link",
                 "position_m": [0.40, 0.0, 0.30],
@@ -33,7 +34,7 @@ def test_gateway_generates_target_pose_from_current_tcp_pose_and_offset():
     assert result["cartesian_motion_gateway_status"] == "PASS"
     assert result["target_pose"] == {
         "frame": "base_link",
-        "position_m": [0.4, 0.0, 0.4],
+        "position_m": [0.4, 0.0, 0.35],
         "orientation_xyzw": [0.0, 0.0, 0.0, 1.0],
     }
     assert result["moveit_plan_request"]["target_pose"] == result["target_pose"]
@@ -280,7 +281,7 @@ def test_pipeline_confirmed_cartesian_command_reaches_moveit_execute_gate():
     result = evaluate_cartesian_motion_pipeline(
         CartesianMotionPipelineRequest(
             requested=True,
-            user_command="move 10 cm higher",
+            user_command="move 5 cm higher",
             config={
                 **_enabled_execution_config(),
                 "current_tcp_pose": {
@@ -292,7 +293,7 @@ def test_pipeline_confirmed_cartesian_command_reaches_moveit_execute_gate():
             },
             llm_callable=lambda _prompt: (
                 '{"intent":"cartesian_offset","frame":"base_link","dx":0.0,'
-                '"dy":0.0,"dz":0.10,"confidence":0.94,"error_code":"OK"}'
+                '"dy":0.0,"dz":0.05,"confidence":0.94,"error_code":"OK"}'
             ),
             manual_confirmation_token=DEFAULT_CONFIRMATION_TOKEN,
         )
@@ -300,8 +301,8 @@ def test_pipeline_confirmed_cartesian_command_reaches_moveit_execute_gate():
 
     assert result["cartesian_motion_pipeline_status"] == "PASS"
     assert result["intent"] == "cartesian_offset"
-    assert result["cartesian_offset_m"] == [0.0, 0.0, 0.10]
-    assert result["target_pose"]["position_m"] == [0.4, 0.0, 0.4]
+    assert result["cartesian_offset_m"] == [0.0, 0.0, 0.05]
+    assert result["target_pose"]["position_m"] == [0.4, 0.0, 0.35]
     assert result["manual_confirmation_accepted"] is True
     assert result["moveit_execute_called"] is True
     assert result["real_robot_motion_executed"] is True
@@ -314,20 +315,20 @@ def test_pipeline_without_real_motion_enabled_validates_but_does_not_execute():
     result = evaluate_cartesian_motion_pipeline(
         CartesianMotionPipelineRequest(
             requested=True,
-            user_command="move 10 cm higher",
+            user_command="move 5 cm higher",
             config={
                 "current_tcp_pose": [0.40, 0.0, 0.30],
                 "command_to_task_adapter": {"adapter_mode": "qwen_llm"},
             },
             llm_callable=lambda _prompt: (
                 '{"intent":"cartesian_offset","frame":"base_link","dx":0.0,'
-                '"dy":0.0,"dz":0.10,"confidence":0.94,"error_code":"OK"}'
+                '"dy":0.0,"dz":0.05,"confidence":0.94,"error_code":"OK"}'
             ),
         )
     )
 
     assert result["cartesian_motion_pipeline_status"] == "PASS"
-    assert result["target_pose"]["position_m"] == [0.4, 0.0, 0.4]
+    assert result["target_pose"]["position_m"] == [0.4, 0.0, 0.35]
     assert result["moveit_execute_called"] is False
     assert result["real_robot_motion_executed"] is False
 
@@ -423,6 +424,87 @@ def test_gateway_blocks_long_one_shot_when_decomposition_disabled():
     assert result["safety_gate_scope"] == "one_shot"
     assert result["one_shot_distance_check_status"] == "BLOCKED"
     assert result["decomposition_status"] == "NOT_APPLICABLE"
+    assert result["one_shot_blocking_reason"] == E_ONE_SHOT_DISTANCE_EXCEEDS_LIMIT
+    assert result["one_shot_real_motion_allowed"] is False
+    assert result["one_shot_target_pose_created"] is False
+
+
+@pytest.mark.parametrize("distance", [0.20, 0.30])
+def test_gateway_default_config_blocks_long_one_shot(distance):
+    result = evaluate_cartesian_motion_gateway(
+        CartesianMotionGatewayRequest(
+            requested=True,
+            command_to_task_result=_task([distance, 0.0, 0.0]),
+            current_tcp_pose=_pose([0.0, 0.0, 0.5]),
+        )
+    )
+
+    assert result["cartesian_motion_gateway_status"] == "BLOCKED"
+    assert result["max_one_shot_distance_m"] == 0.05
+    assert result["one_shot_distance_check_status"] == "BLOCKED"
+    assert result["one_shot_blocking_reason"] == E_ONE_SHOT_DISTANCE_EXCEEDS_LIMIT
+    assert result["one_shot_real_motion_allowed"] is False
+    assert result["one_shot_target_pose_created"] is False
+    assert result["target_pose"] is None
+
+
+def test_gateway_default_config_allows_exact_five_cm_one_shot():
+    result = evaluate_cartesian_motion_gateway(
+        CartesianMotionGatewayRequest(
+            requested=True,
+            command_to_task_result=_task([0.05, 0.0, 0.0]),
+            current_tcp_pose=_pose([0.0, 0.0, 0.5]),
+        )
+    )
+
+    assert result["cartesian_motion_gateway_status"] == "PASS"
+    assert result["max_one_shot_distance_m"] == 0.05
+    assert result["one_shot_real_motion_allowed"] is True
+    assert result["one_shot_target_pose_created"] is True
+    assert result["one_shot_blocking_reason"] is None
+    assert result["planned_execution_style"] == "one_shot"
+
+
+def test_gateway_cannot_explicitly_expand_one_shot_above_five_cm():
+    result = evaluate_cartesian_motion_gateway(
+        CartesianMotionGatewayRequest(
+            requested=True,
+            config={
+                "max_translation_m": 0.30,
+                "hard_safety_limit_m": 0.30,
+                "max_one_shot_distance_m": 0.30,
+            },
+            command_to_task_result=_task([0.30, 0.0, 0.0]),
+            current_tcp_pose=_pose([0.0, 0.0, 0.5]),
+        )
+    )
+
+    assert result["cartesian_motion_gateway_status"] == "BLOCKED"
+    assert result["max_one_shot_distance_m"] == 0.05
+    assert result["one_shot_real_motion_allowed"] is False
+    assert result["one_shot_target_pose_created"] is False
+
+
+def test_long_vector_cannot_downgrade_into_one_shot_with_expanded_limits():
+    result = evaluate_cartesian_motion_gateway(
+        CartesianMotionGatewayRequest(
+            requested=True,
+            config={
+                "max_translation_m": 0.35,
+                "hard_safety_limit_m": 0.35,
+                "max_one_shot_distance_m": 0.35,
+            },
+            command_to_task_result=_task([0.30, 0.10, 0.0]),
+            current_tcp_pose=_pose([0.0, 0.0, 0.5]),
+        )
+    )
+
+    assert result["cartesian_motion_gateway_status"] == "BLOCKED"
+    assert result["motion_contract_type"] == "vector_relative"
+    assert result["max_one_shot_distance_m"] == 0.05
+    assert result["one_shot_real_motion_allowed"] is False
+    assert result["one_shot_target_pose_created"] is False
+    assert result["target_pose"] is None
 
 
 def test_gateway_allows_five_cm_one_shot_at_hard_limit_when_decomposition_disabled():

@@ -134,10 +134,14 @@ def evaluate_moveit_pose_plan(request: MoveItPoseExecutorRequest | None = None) 
         "execute_success": False,
         "moveit_plan_called": api_result.get("action_call_attempted") is True,
         "moveit_execute_called": False,
+        "execution_attempted": False,
+        "real_execution_attempted": False,
         "trajectory_send_allowed": False,
         "trajectory_sent": False,
+        "real_motion_command_sent": False,
         "controller_command_sent": False,
         "real_robot_motion_executed": False,
+        "real_robot_motion_executed_evidence_source": "execute_trajectory_not_attempted",
         "action_server_available": api_result.get("action_server_available") is True,
         "goal_accepted": api_result.get("goal_accepted") is True,
         "moveit_error_code": api_result.get("error_code"),
@@ -210,6 +214,7 @@ def evaluate_moveit_pose_execute(request: MoveItPoseExecutorRequest | None = Non
         elif execute_result.get("success") is not True:
             blocking_reasons.append(E_MOVEIT_EXECUTE_FAILED)
 
+    execution_attempted = execute_result.get("action_call_attempted") is True
     execute_success = not blocking_reasons and execute_result.get("success") is True
     status = STATUS_PASS if execute_success else STATUS_BLOCKED
     plan_audit = _plan_audit_result(config=config, validation=validation, api_result=plan_result)
@@ -228,11 +233,19 @@ def evaluate_moveit_pose_execute(request: MoveItPoseExecutorRequest | None = Non
         "plan_success": plan_result.get("success") is True,
         "execute_success": execute_success,
         "moveit_plan_called": plan_result.get("action_call_attempted") is True,
-        "moveit_execute_called": execute_result.get("action_call_attempted") is True,
+        "moveit_execute_called": execution_attempted,
+        "execution_attempted": execution_attempted,
+        "real_execution_attempted": execution_attempted,
         "trajectory_send_allowed": True,
-        "trajectory_sent": execute_result.get("action_call_attempted") is True,
-        "controller_command_sent": execute_result.get("action_call_attempted") is True,
-        "real_robot_motion_executed": execute_success,
+        "trajectory_sent": execution_attempted,
+        "real_motion_command_sent": execution_attempted,
+        "controller_command_sent": execution_attempted,
+        "real_robot_motion_executed": execution_attempted or execute_success,
+        "real_robot_motion_executed_evidence_source": (
+            "execute_trajectory_action_attempted"
+            if execution_attempted
+            else "execute_trajectory_not_attempted"
+        ),
         "action_server_available": (
             plan_result.get("action_server_available") is True
             and execute_result.get("action_server_available") is True
@@ -656,10 +669,14 @@ def _blocked_result(*, plan: bool, validation: Dict[str, Any], config: Dict[str,
         "execute_success": False,
         "moveit_plan_called": False,
         "moveit_execute_called": False,
+        "execution_attempted": False,
+        "real_execution_attempted": False,
         "trajectory_send_allowed": False,
         "trajectory_sent": False,
+        "real_motion_command_sent": False,
         "controller_command_sent": False,
         "real_robot_motion_executed": False,
+        "real_robot_motion_executed_evidence_source": "execute_trajectory_not_attempted",
         "blocking_reasons": validation["blocking_reasons"],
         "warnings": validation["warnings"],
     }
@@ -950,7 +967,12 @@ def _not_requested(*, plan: bool) -> Dict[str, Any]:
         "execute_success": False,
         "moveit_plan_called": False,
         "moveit_execute_called": False,
+        "execution_attempted": False,
+        "real_execution_attempted": False,
+        "trajectory_sent": False,
+        "real_motion_command_sent": False,
         "real_robot_motion_executed": False,
+        "real_robot_motion_executed_evidence_source": "execute_trajectory_not_attempted",
         "planner_risk_status": "NOT_APPLICABLE",
         "planner_risk_reasons": [],
         "planner_risk_warnings": [],
