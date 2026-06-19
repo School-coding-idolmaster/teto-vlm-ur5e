@@ -7,6 +7,7 @@ camera_snapshot:
   frame_id: example_camera_frame_001
   rgb_ref: data/processed/examples/offline_rgb_placeholder.jpg
   image_ref: data/processed/examples/offline_rgb_placeholder.jpg
+  aligned_depth_ref: data/processed/examples/offline_depth_placeholder.png
   depth_ref: data/processed/examples/offline_depth_placeholder.png
   camera_info_ref: data/processed/examples/camera_info_placeholder.json
   metadata_ref: data/processed/examples/camera_metadata_placeholder.json
@@ -17,6 +18,7 @@ camera_snapshot:
   color_encoding: rgb8
   depth_encoding: uint16_mm
   camera_frame: camera_color_optical_frame
+  depth_aligned: true
   alignment_status: aligned_rgb_depth
   sync_status: offline_manifest
   depth_available: true

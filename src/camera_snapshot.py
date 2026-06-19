@@ -64,6 +64,7 @@ SNAPSHOT_FIELDS = (
     "frame_id",
     "rgb_ref",
     "image_ref",
+    "aligned_depth_ref",
     "depth_ref",
     "camera_info_ref",
     "metadata_ref",
@@ -75,6 +76,7 @@ SNAPSHOT_FIELDS = (
     "depth_encoding",
     "camera_frame",
     "alignment_status",
+    "depth_aligned",
     "sync_status",
     "depth_available",
     "camera_info_available",
@@ -175,7 +177,7 @@ def evaluate_camera_snapshot_contract(
     if (normalized["depth_required"] or formal_realsense_source) and not normalized["depth_ref"]:
         blocking_reasons.append(E_DEPTH_REF_MISSING)
     if formal_realsense_source:
-        if normalized["alignment_status"] != "aligned_rgb_depth":
+        if not normalized["depth_aligned"] or normalized["alignment_status"] != "aligned_rgb_depth":
             blocking_reasons.append(E_ALIGNED_DEPTH_REQUIRED)
         if not normalized["camera_info_ref"]:
             blocking_reasons.append(E_CAMERA_INFO_REF_MISSING)
@@ -283,7 +285,11 @@ def _not_requested_result() -> Dict[str, Any]:
 
 def _snapshot_fields(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     rgb_ref = _string(snapshot.get("rgb_ref")) or _string(snapshot.get("image_ref"))
+    aligned_depth_ref = _string(snapshot.get("aligned_depth_ref")) or _string(
+        snapshot.get("depth_ref")
+    )
     tf_snapshot_ref = _string(snapshot.get("tf_snapshot_ref")) or _string(snapshot.get("extrinsics_ref"))
+    alignment_status = _string(snapshot.get("alignment_status"))
     return {
         "snapshot_id": _string(snapshot.get("snapshot_id")),
         "scene_version": _string(snapshot.get("scene_version")),
@@ -293,7 +299,8 @@ def _snapshot_fields(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "frame_id": _string(snapshot.get("frame_id")),
         "rgb_ref": rgb_ref,
         "image_ref": rgb_ref,
-        "depth_ref": _string(snapshot.get("depth_ref")),
+        "aligned_depth_ref": aligned_depth_ref,
+        "depth_ref": aligned_depth_ref,
         "camera_info_ref": _string(snapshot.get("camera_info_ref")),
         "metadata_ref": _string(snapshot.get("metadata_ref")),
         "tf_snapshot_ref": tf_snapshot_ref,
@@ -303,7 +310,9 @@ def _snapshot_fields(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "color_encoding": _string(snapshot.get("color_encoding")),
         "depth_encoding": _string(snapshot.get("depth_encoding")),
         "camera_frame": _string(snapshot.get("camera_frame")),
-        "alignment_status": _string(snapshot.get("alignment_status")),
+        "alignment_status": alignment_status,
+        "depth_aligned": snapshot.get("depth_aligned") is True
+        or alignment_status == "aligned_rgb_depth",
         "sync_status": _string(snapshot.get("sync_status")),
         "depth_available": snapshot.get("depth_available") is True,
         "camera_info_available": snapshot.get("camera_info_available") is True,

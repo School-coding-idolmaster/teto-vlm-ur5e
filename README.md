@@ -352,11 +352,34 @@ The formal snapshot contract carries at least:
 - `capture_timestamp`
 - `source: realsense_d455` or `source: realsense_replay`
 
-Phase 1 provides a validation boundary, not a fabricated D455 capture
-implementation. The example manifest is a schema fixture. A future native
-builder must capture and verify the RGB/depth pairing, alignment, device
-metadata, calibration, TF snapshot, timestamps, and file provenance before a
-manifest can represent real sensor evidence.
+The example manifest is a schema fixture, not a real D455 capture. TETO now
+provides an artifact-to-manifest builder for already captured D455 files:
+
+```bash
+python3 scripts/build_realsense_snapshot_bundle.py \
+  --snapshot-id d455_snapshot_001 \
+  --scene-version lab_scene_001 \
+  --rgb /path/to/color.png \
+  --aligned-depth /path/to/aligned_depth_u16.png \
+  --camera-info /path/to/camera_info.json \
+  --metadata /path/to/capture_metadata.json \
+  --tf-snapshot /path/to/tf_snapshot.json \
+  --capture-timestamp 2026-06-19T00:00:00Z \
+  --output-manifest outputs/realsense_snapshot_fixtures/d455_snapshot_001.yaml
+```
+
+The builder checks that every required artifact exists, RGB and aligned depth
+have matching dimensions, metadata/camera-info/TF files contain structured
+objects, and the generated manifest passes `evaluate_formal_snapshot_replay`.
+It writes stable references and does not copy or modify the input artifacts.
+Missing RGB, aligned depth, camera information, metadata, TF, scene identity,
+or timestamp fails closed.
+
+This is not a live D455 capture implementation. It does not start a camera,
+ROS, MoveIt, or a robot, and it cannot manufacture a missing TF calibration.
+A native capture component must still acquire and verify the RGB/depth pairing,
+alignment, device metadata, calibration, TF snapshot, timestamps, and file
+provenance before the builder is called.
 
 `scripts/run_demo.py` and `scripts/batch_recognize.py` are retained only as
 legacy/debug RGB-only semantic tools. Their `--image` and `--input-dir`

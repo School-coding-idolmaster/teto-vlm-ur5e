@@ -7,6 +7,7 @@ camera_source_adapter:
   camera_frame: camera_color_optical_frame
   rgb_ref: examples/camera_source/sample_image_ref.json
   image_ref: examples/camera_source/sample_image_ref.json
+  aligned_depth_ref: examples/camera_source/sample_depth_ref.json
   depth_ref: examples/camera_source/sample_depth_ref.json
   camera_info_ref: examples/camera_source/sample_camera_info.json
   metadata_ref: examples/camera_source/sample_metadata.json
@@ -21,6 +22,7 @@ camera_source_adapter:
   metadata_available: true
   extrinsics_available: true
   depth_required: true
+  depth_aligned: true
   alignment_status: aligned_rgb_depth
   sync_status: offline_manifest
   capture_backend: realsense_snapshot_replay
