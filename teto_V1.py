@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 from src.batch_recognition import run_batch_recognition
-from src.camera_snapshot import build_camera_snapshot_request, evaluate_camera_snapshot_contract
+from src.camera_snapshot import evaluate_formal_snapshot_replay
 from src.display_utils import print_vlm_result
 from src.image_utils import batch_convert_images, convert_image, load_image_processing_config
 from src.output_paths import (
@@ -486,15 +486,7 @@ def handle_validate_realsense_snapshot_replay():
     default_manifest = PROJECT_ROOT / "configs" / "camera_snapshot.example.yaml"
     value = _clean_path(input(f"Snapshot manifest [{default_manifest}]: "))
     manifest = Path(value).expanduser() if value else default_manifest
-    result = evaluate_camera_snapshot_contract(
-        build_camera_snapshot_request(requested=True, config_path=manifest)
-    )
-    if result.get("source") not in {"realsense_d455", "realsense_replay"}:
-        result = {
-            **result,
-            "validity_status": "BLOCKED",
-            "formal_visual_entry_reason": "E_FORMAL_VISUAL_SOURCE_NOT_REALSENSE",
-        }
+    result = evaluate_formal_snapshot_replay(manifest)
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

@@ -16,6 +16,7 @@ from src.camera_snapshot import (
     CameraSnapshotRequest,
     build_camera_snapshot_request,
     evaluate_camera_snapshot_contract,
+    evaluate_formal_snapshot_replay,
     format_camera_snapshot_report,
 )
 from src.simulation_runtime import run_first_simulation_execution
@@ -164,6 +165,13 @@ def test_example_config_smoke_passes():
     assert result["snapshot_id"] == "example_offline_snapshot_001"
     assert result["source"] == "realsense_replay"
     assert result["no_motion_snapshot_passed"] is True
+
+
+def test_formal_snapshot_replay_helper_accepts_realsense_replay_example():
+    result = evaluate_formal_snapshot_replay("configs/camera_snapshot.example.yaml")
+
+    assert result["formal_visual_entry_status"] == "PASS"
+    assert result["source"] == "realsense_replay"
 
 
 def test_report_contains_no_motion_no_live_camera_no_real_robot_statement():

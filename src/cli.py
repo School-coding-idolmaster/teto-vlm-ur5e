@@ -1,10 +1,7 @@
 import argparse
 import json
 
-from src.camera_snapshot import build_camera_snapshot_request, evaluate_camera_snapshot_contract
-
-
-FORMAL_REALSENSE_SOURCES = {"realsense_d455", "realsense_replay"}
+from src.camera_snapshot import evaluate_formal_snapshot_replay
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -38,23 +35,7 @@ def main() -> int:
         return 0
 
     if args.command == "snapshot-replay":
-        result = evaluate_camera_snapshot_contract(
-            build_camera_snapshot_request(
-                requested=True,
-                config_path=args.snapshot_manifest,
-            )
-        )
-        source = result.get("source")
-        if source not in FORMAL_REALSENSE_SOURCES:
-            result = {
-                **result,
-                "validity_status": "BLOCKED",
-                "formal_visual_entry_status": "BLOCKED",
-                "formal_visual_entry_reason": "E_FORMAL_VISUAL_SOURCE_NOT_REALSENSE",
-                "allowed_formal_sources": sorted(FORMAL_REALSENSE_SOURCES),
-            }
-        else:
-            result["formal_visual_entry_status"] = result.get("validity_status")
+        result = evaluate_formal_snapshot_replay(args.snapshot_manifest)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result.get("formal_visual_entry_status") == "PASS" else 2
 

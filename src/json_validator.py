@@ -9,6 +9,18 @@ from PIL import Image
 
 
 ROBOT_TASK_PROMPT_TYPE = "robot_task_json"
+LEGACY_RGB_ONLY_RECORD_TYPE = "legacy_rgb_only_record"
+LEGACY_SEMANTIC_REPLAY_RECORD_TYPE = "legacy_semantic_replay"
+LEGACY_SEMANTIC_IMAGE_SOURCE = "legacy_semantic_image"
+
+
+def legacy_rgb_only_metadata(
+    record_type: str = LEGACY_RGB_ONLY_RECORD_TYPE,
+) -> Dict[str, Any]:
+    return {
+        "record_type": record_type,
+        "is_realsense_scene_snapshot": False,
+    }
 
 APPROX_POSITIONS = {"left", "right", "center", "top", "bottom", "front", "back", "edge", "unknown"}
 VISIBILITIES = {"clear", "partially_occluded", "heavily_occluded", "unknown"}
@@ -89,9 +101,8 @@ DEFAULT_ROBOT_TASK_JSON = {
         "image_path": "unknown",
         "image_width": None,
         "image_height": None,
-        "record_type": "legacy_rgb_only_record",
-        "source": "legacy_semantic_image",
-        "is_realsense_scene_snapshot": False,
+        **legacy_rgb_only_metadata(),
+        "source": LEGACY_SEMANTIC_IMAGE_SOURCE,
         "status": "unknown",
     },
     "target": {
@@ -774,9 +785,8 @@ def _apply_legacy_semantic_image_record(
         "image_path": _string_value(context.get("image_path"), "unknown"),
         "image_width": image_width,
         "image_height": image_height,
-        "record_type": "legacy_rgb_only_record",
-        "source": "legacy_semantic_image",
-        "is_realsense_scene_snapshot": False,
+        **legacy_rgb_only_metadata(),
+        "source": LEGACY_SEMANTIC_IMAGE_SOURCE,
         "missing_realsense_fields": [
             "snapshot_id",
             "depth_ref",

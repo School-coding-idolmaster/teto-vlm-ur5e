@@ -9,7 +9,11 @@ from src.output_paths import (
     create_robot_task_json_dir,
     results_index_path,
 )
-from src.json_validator import attach_robot_task_json_fields
+from src.json_validator import (
+    LEGACY_SEMANTIC_REPLAY_RECORD_TYPE,
+    attach_robot_task_json_fields,
+    legacy_rgb_only_metadata,
+)
 from src.prompt_utils import get_prompt
 from src.robot_task_inspector import write_scene_and_replay_indexes, write_smoke_report
 from src.execution_readiness_contract import evaluate_execution_readiness
@@ -109,8 +113,7 @@ def run_batch_recognition(
 
     input_manifest = {
         "version": CURRENT_TETO_VERSION,
-        "record_type": "legacy_semantic_replay",
-        "is_realsense_scene_snapshot": False,
+        **legacy_rgb_only_metadata(LEGACY_SEMANTIC_REPLAY_RECORD_TYPE),
         "prompt_type": prompt_type,
         "backend": selected_backend,
         "image_count": len(image_paths),
@@ -133,8 +136,7 @@ def run_batch_recognition(
         for index, image_path in enumerate(image_paths, start=1):
             print(f"[{index}/{len(image_paths)}] processing {image_path.name}")
             item = {
-                "record_type": "legacy_semantic_replay",
-                "is_realsense_scene_snapshot": False,
+                **legacy_rgb_only_metadata(LEGACY_SEMANTIC_REPLAY_RECORD_TYPE),
                 "image_path": str(image_path),
                 "prompt_type": prompt_type,
                 "prompt": prompt,
@@ -163,8 +165,7 @@ def run_batch_recognition(
             results_file.write(json.dumps(item, ensure_ascii=False) + "\n")
 
     summary = {
-        "record_type": "legacy_semantic_replay",
-        "is_realsense_scene_snapshot": False,
+        **legacy_rgb_only_metadata(LEGACY_SEMANTIC_REPLAY_RECORD_TYPE),
         "run_name": run_metadata["run_name"],
         "created_at": run_metadata["created_at"],
         "input_dir": str(source_dir),

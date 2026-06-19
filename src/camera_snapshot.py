@@ -16,6 +16,8 @@ STATUS_PASS = "PASS"
 STATUS_BLOCKED = "BLOCKED"
 STATUS_NOT_REQUESTED = "NOT_REQUESTED"
 
+FORMAL_REALSENSE_SOURCES = frozenset({"realsense_d455", "realsense_replay"})
+
 E_CAMERA_SNAPSHOT_INVALID = "E_CAMERA_SNAPSHOT_INVALID"
 E_SCENE_VERSION_MISSING = "E_SCENE_VERSION_MISSING"
 E_CAPTURE_TIMESTAMP_MISSING = "E_CAPTURE_TIMESTAMP_MISSING"
@@ -127,6 +129,24 @@ def build_camera_snapshot_request(
     )
 
 
+def evaluate_formal_snapshot_replay(config_path: str | Path) -> Dict[str, Any]:
+    result = evaluate_camera_snapshot_contract(
+        build_camera_snapshot_request(requested=True, config_path=config_path)
+    )
+    if result.get("source") not in FORMAL_REALSENSE_SOURCES:
+        return {
+            **result,
+            "validity_status": STATUS_BLOCKED,
+            "formal_visual_entry_status": STATUS_BLOCKED,
+            "formal_visual_entry_reason": "E_FORMAL_VISUAL_SOURCE_NOT_REALSENSE",
+            "allowed_formal_sources": sorted(FORMAL_REALSENSE_SOURCES),
+        }
+    return {
+        **result,
+        "formal_visual_entry_status": result.get("validity_status"),
+    }
+
+
 def evaluate_camera_snapshot_contract(
     request: CameraSnapshotRequest | None = None,
     *,
@@ -151,7 +171,7 @@ def evaluate_camera_snapshot_contract(
         blocking_reasons.append(E_CAMERA_FRAME_MISSING)
     if not normalized["image_ref"]:
         blocking_reasons.append(E_IMAGE_REF_MISSING)
-    formal_realsense_source = normalized["source"] in {"realsense_d455", "realsense_replay"}
+    formal_realsense_source = normalized["source"] in FORMAL_REALSENSE_SOURCES
     if (normalized["depth_required"] or formal_realsense_source) and not normalized["depth_ref"]:
         blocking_reasons.append(E_DEPTH_REF_MISSING)
     if formal_realsense_source:
@@ -370,7 +390,7 @@ def _next_safe_action(
     source: str | None = None,
 ) -> str:
     if validity_status == STATUS_PASS:
-        if source in {"realsense_d455", "realsense_replay"}:
+        if source in FORMAL_REALSENSE_SOURCES:
             return "Use this validated RealSense snapshot as replayable no-motion scene evidence."
         return "Use this offline/manual snapshot only as replayable no-motion scene evidence."
     return (
