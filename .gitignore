@@ -3,6 +3,8 @@ outputs/
 __pycache__/
 .pytest_cache/
 *.pyc
+configs/isaac_sim_operator.lab.local.yaml
+outputs/isaac_sim_operator_runs/
 .env
 venv/
 .venv/

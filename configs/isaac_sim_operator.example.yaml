@@ -1,0 +1,43 @@
+isaac_sim_operator:
+  # Copy this file to the ignored
+  # configs/isaac_sim_operator.lab.local.yaml and replace these placeholders
+  # with workstation-local paths. Never commit lab-specific absolute paths.
+  isaac_app_path: "<ISAAC_SIM_APP_PATH>"
+  isaac_python_path: "<ISAAC_SIM_PYTHON_PATH>"
+  # Use urdf_import with Isaac's bundled UR5e URDF, or switch to usd_reference
+  # when a self-contained local UR5e USD is available.
+  asset_mode: urdf_import
+  ur5e_asset_path: "<UR5E_USD_PATH>"
+  ur5e_urdf_path: "<UR5E_URDF_PATH>"
+  ros_package_path_for_asset_resolution: "<ROS_PACKAGE_PATH>"
+  world_stage_path: null
+  robot_prim_path: /World/TETO_UR5e
+  robot_base_position_m: [0.0, 0.0, 0.0]
+  base_frame: base_link
+  tool_frame: tool0
+  qwen_endpoint: http://127.0.0.1:18080/api/generate
+
+  gui_required: true
+  real_robot_disabled: true
+  real_robot_enabled: false
+  allow_real_robot: false
+  allow_moveit_execute: false
+  dashboard_enabled: false
+  rtde_write_enabled: false
+
+  max_substep_distance_m: 0.02
+  max_total_distance_m: 0.35
+  position_tolerance_m: 0.008
+  ik_position_tolerance_m: 0.002
+  ik_orientation_tolerance_rad: 0.05
+  frames_per_substep: 90
+  startup_render_frames: 30
+  workspace_envelope:
+    x: [-1.0, 1.0]
+    y: [-1.0, 1.0]
+    z: [0.0, 2.0]
+
+  documentation_note: >-
+    This example auto-discovers no real UR endpoint and must never contain a
+    robot controller address. Put workstation-only Isaac paths in an ignored
+    configs/isaac_sim_operator.lab.local.yaml if these defaults do not match.

@@ -2254,6 +2254,41 @@ flags proving `execution_allowed=false`, `moveit_execute_called=false`,
 `joint_targets_generated=false`, `real_robot_motion_executed=false`, and
 `automatic_retry_motion=false`.
 
+## TETO Isaac Sim GUI Operator
+
+The Isaac operator connects natural-language Qwen parsing to TETO validation,
+bounded vector decomposition, a simulated measured gateway, and visible UR5e
+motion in Isaac Sim. The formal demo is GUI-first:
+
+```bash
+bash scripts/start_teto_isaac_gui_operator.sh --gui --console
+```
+
+The console displays `TETO/Isaac>` and accepts commands such as:
+
+```text
+move forward 30 cm and left 10 cm
+```
+
+Each accepted vector is decomposed into bounded substeps. Every substep is
+checked against the configured workspace and verified from Isaac Sim
+forward-kinematics measurements before the next substep may run. JSON and
+Markdown evidence are saved under `outputs/isaac_sim_operator_runs/`.
+
+Use `--headless` only for software smoke tests. Formal evidence keeps
+`execution_mode: isaac_sim` and records whether the runtime was `gui` or
+`headless_smoke_test`. The operator always records
+`real_robot_motion_executed: false`, `real_ur_connection_used: false`,
+`dashboard_used: false`, `rtde_write_used: false`, and
+`isaac_gui_required: true`. A real Isaac run records
+`gateway_type: simulated_measured_gateway`.
+
+Safety is fail-closed: `--real` is rejected, real UR controller addresses are
+rejected, and this path does not use Dashboard, RTDE write, URScript, a real
+MoveIt `ExecuteTrajectory`, or any physical UR5e connection. Workstation-only
+Isaac and UR5e asset paths belong in the ignored
+`configs/isaac_sim_operator.lab.local.yaml`.
+
 ## Legacy/debug RGB-only tools
 
 The generic converter, arbitrary local-image demo, and RGB folder batch code
