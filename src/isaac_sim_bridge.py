@@ -38,6 +38,7 @@ class IsaacSimMeasuredBridge:
         )
 
         asset_mode = str(self.config.get("asset_mode") or "usd_reference")
+        print(f"[TETO Isaac] bridge asset_mode={asset_mode}", flush=True)
         asset_path = Path(str(self.config["ur5e_asset_path"])).expanduser().resolve()
         if not asset_path.is_file():
             raise FileNotFoundError(f"E_UR5E_ASSET_NOT_FOUND: {asset_path}")
@@ -71,6 +72,7 @@ class IsaacSimMeasuredBridge:
             self.config["robot_prim_path"] = prim_path
             self.config["resolved_asset_source"] = "isaac_urdf_imported_to_usd_stage"
         else:
+            print(f"[TETO Isaac] loading UR5e USD reference: {asset_path}", flush=True)
             add_reference_to_stage(usd_path=str(asset_path), prim_path=prim_path)
             self.config["resolved_asset_source"] = "local_usd_reference"
         self.robot = self.world.scene.add(SingleArticulation(prim_path=prim_path, name="teto_isaac_ur5e"))
@@ -88,6 +90,7 @@ class IsaacSimMeasuredBridge:
         if any(abs(float(item)) > 0.0 for item in base_position):
             self.robot.set_world_pose(position=base_position)
             self.world.step(render=not self.headless)
+        print("[TETO Isaac] measured bridge initialized; console may enter REPL", flush=True)
 
     def status(self) -> dict[str, Any]:
         try:

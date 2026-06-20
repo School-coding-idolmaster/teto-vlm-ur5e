@@ -76,7 +76,13 @@ if [[ "${QWEN_ENDPOINT}" != */api/generate ]]; then
   QWEN_ENDPOINT="${QWEN_ENDPOINT}/api/generate"
 fi
 export TETO_QWEN_ENDPOINT="${QWEN_ENDPOINT}"
-bash scripts/ensure_qwen_motion_server.sh
+QWEN_HEALTH_URL="${QWEN_ENDPOINT%/api/generate}/health"
+if curl -fsS --max-time "${TETO_QWEN_HEALTH_TIMEOUT_S:-2}" "${QWEN_HEALTH_URL}" >/dev/null 2>&1; then
+  echo "Qwen motion server healthy at ${QWEN_HEALTH_URL}"
+else
+  echo "WARNING: Qwen endpoint unavailable at ${QWEN_HEALTH_URL}; continuing with Qwen: YELLOW." >&2
+  echo "Start it separately with: bash scripts/ensure_qwen_motion_server.sh" >&2
+fi
 
 ARGS=(scripts/teto_isaac_operator_console.py --world-config "${CONFIG}" --qwen-endpoint "${TETO_QWEN_ENDPOINT}" --no-real-robot)
 if [[ "${HEADLESS}" == true ]]; then ARGS+=(--headless); else ARGS+=(--gui); fi
@@ -84,4 +90,8 @@ if [[ "${CONSOLE}" == true ]]; then ARGS+=(--console); fi
 if [[ -n "${CMD}" ]]; then ARGS+=(--cmd "${CMD}"); fi
 if [[ -n "${UR5E_ASSET}" ]]; then ARGS+=(--ur5e-asset "${UR5E_ASSET}"); fi
 
+printf 'Isaac operator command:'
+printf ' %q' "${ISAAC_PYTHON}" "${ARGS[@]}"
+printf '\n'
+echo "Launcher branch: $([[ "${CONSOLE}" == true ]] && echo persistent_console || echo one_shot_or_default_console)"
 exec "${ISAAC_PYTHON}" "${ARGS[@]}"

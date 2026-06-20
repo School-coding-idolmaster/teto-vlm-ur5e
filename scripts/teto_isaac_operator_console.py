@@ -44,6 +44,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
+    print(f"[TETO Isaac] operator main entered argv={raw_argv!r}", flush=True)
     try:
         validate_no_real_robot_args(raw_argv)
         args = build_parser().parse_args(raw_argv)
@@ -60,18 +61,29 @@ def main(argv: list[str] | None = None) -> int:
         config.raw["qwen_endpoint"] = args.qwen_endpoint
     if args.ur5e_asset:
         config.raw["ur5e_asset_path"] = args.ur5e_asset
+        config.raw["asset_mode"] = "usd_reference"
+        print(
+            f"[TETO Isaac] --ur5e-asset selects usd_reference: {args.ur5e_asset}",
+            flush=True,
+        )
     if args.synthetic_fake_gateway and not args.headless:
         print("SAFETY BLOCK: E_SYNTHETIC_FAKE_GATEWAY_REQUIRES_HEADLESS", file=sys.stderr)
         return 2
 
     simulation_app = None
     if args.synthetic_fake_gateway:
+        print("[TETO Isaac] using synthetic fake gateway for headless smoke", flush=True)
         gateway = SyntheticFakeGateway()
     else:
         try:
+            print(
+                f"[TETO Isaac] creating SimulationApp headless={args.headless}",
+                flush=True,
+            )
             from isaacsim import SimulationApp
 
             simulation_app = SimulationApp({"headless": args.headless})
+            print("[TETO Isaac] SimulationApp created; initializing measured bridge", flush=True)
             from src.isaac_sim_bridge import IsaacSimMeasuredBridge
 
             gateway = IsaacSimMeasuredBridge(
@@ -80,9 +92,14 @@ def main(argv: list[str] | None = None) -> int:
                 headless=args.headless,
             )
         except Exception as exc:
+            print(
+                f"Isaac startup failed before console: {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
             if simulation_app is not None:
+                print("[TETO Isaac] closing SimulationApp after startup failure", flush=True)
                 simulation_app.close()
-            print(f"Isaac startup failed: {exc}", file=sys.stderr)
             return 3
 
     operator = IsaacSimOperator(
@@ -93,16 +110,21 @@ def main(argv: list[str] | None = None) -> int:
     )
     _banner(operator.status(), args.headless)
     try:
-        if args.cmd:
-            result = operator.execute_text(args.cmd)
-            print(json.dumps(_summary(result), ensure_ascii=False, indent=2))
-            return 0 if result.get("status") == "PASS" else 4
-        if args.console or not args.cmd:
-            return _interactive_loop(operator, gateway, simulation_app)
-        return 0
+        return _run_operator_session(args, operator, gateway, simulation_app)
     finally:
         if simulation_app is not None:
+            print("[TETO Isaac] session ended; closing SimulationApp", flush=True)
             simulation_app.close()
+
+
+def _run_operator_session(args, operator: IsaacSimOperator, gateway, simulation_app) -> int:
+    if args.cmd:
+        print("[TETO Isaac] entering one-shot command branch", flush=True)
+        result = operator.execute_text(args.cmd)
+        print(json.dumps(_summary(result), ensure_ascii=False, indent=2), flush=True)
+        return 0 if result.get("status") == "PASS" else 4
+    print("[TETO Isaac] entering persistent REPL; type quit or Ctrl-D to close", flush=True)
+    return _interactive_loop(operator, gateway, simulation_app)
 
 
 def _interactive_loop(operator: IsaacSimOperator, gateway, simulation_app) -> int:
@@ -114,14 +136,17 @@ def _interactive_loop(operator: IsaacSimOperator, gateway, simulation_app) -> in
             try:
                 command = input("TETO/Isaac> ")
             except EOFError:
+                print("[TETO Isaac] Ctrl-D received; requesting clean shutdown", flush=True)
                 command = "quit"
             commands.put(command)
             if command.strip().lower() in {"quit", "exit"}:
                 return
 
-    threading.Thread(target=reader, daemon=True).start()
+    reader_thread = threading.Thread(target=reader, name="teto-isaac-console-input", daemon=True)
+    reader_thread.start()
     while not stopped.is_set():
         if simulation_app is not None and not gateway.render_once():
+            print("[TETO Isaac] SimulationApp is no longer running; leaving REPL", flush=True)
             break
         try:
             command = commands.get(timeout=0.01)
@@ -130,14 +155,15 @@ def _interactive_loop(operator: IsaacSimOperator, gateway, simulation_app) -> in
             continue
         normalized = command.strip().lower()
         if normalized in {"quit", "exit"}:
+            print("[TETO Isaac] quit received; closing console session", flush=True)
             stopped.set()
             break
         if normalized == "status":
-            print(json.dumps(operator.status(), ensure_ascii=False, indent=2))
+            print(json.dumps(operator.status(), ensure_ascii=False, indent=2), flush=True)
         elif normalized == "home":
-            print(json.dumps(operator.home(), ensure_ascii=False, indent=2))
+            print(json.dumps(operator.home(), ensure_ascii=False, indent=2), flush=True)
         elif normalized == "reset":
-            print(json.dumps(operator.reset(), ensure_ascii=False, indent=2))
+            print(json.dumps(operator.reset(), ensure_ascii=False, indent=2), flush=True)
         elif normalized:
             result = operator.execute_text(command)
             for step in result.get("substeps", []):
@@ -145,18 +171,18 @@ def _interactive_loop(operator: IsaacSimOperator, gateway, simulation_app) -> in
                     f"substep {step['substep_index']}/{step['substep_count']}: "
                     f"{step['verification_result']} measured={step['simulated_measured_tcp_after']['position_m'] if step.get('simulated_measured_tcp_after') else None}"
                 )
-            print(json.dumps(_summary(result), ensure_ascii=False, indent=2))
+            print(json.dumps(_summary(result), ensure_ascii=False, indent=2), flush=True)
     return 0
 
 
 def _banner(status: dict, headless: bool) -> None:
-    print("TETO Isaac Sim GUI Operator")
-    print(f"Mode: {'HEADLESS_SMOKE_TEST' if headless else 'ISAAC_SIM_ONLY'}")
-    print("Real robot: DISABLED")
-    print(f"Qwen: {'OK' if status['qwen_health'].get('ok') else 'YELLOW'}")
-    print(f"Isaac GUI: {'NOT REQUIRED (CI ONLY)' if headless else 'REQUIRED'}")
-    print(f"Isaac connection: {status['isaac_connection_status']}")
-    print("Window checklist: viewport visible; UR5e visible; timeline/rendering active.")
+    print("TETO Isaac Sim GUI Operator", flush=True)
+    print(f"Mode: {'HEADLESS_SMOKE_TEST' if headless else 'ISAAC_SIM_ONLY'}", flush=True)
+    print("Real robot: DISABLED", flush=True)
+    print(f"Qwen: {'OK' if status['qwen_health'].get('ok') else 'YELLOW'}", flush=True)
+    print(f"Isaac GUI: {'NOT REQUIRED (CI ONLY)' if headless else 'REQUIRED'}", flush=True)
+    print(f"Isaac connection: {status['isaac_connection_status']}", flush=True)
+    print("Window checklist: viewport visible; UR5e visible; timeline/rendering active.", flush=True)
 
 
 def _summary(result: dict) -> dict:
