@@ -8,6 +8,7 @@ import os
 import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from typing import Any
 from urllib.parse import unquote
 
 
@@ -16,6 +17,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--urdf", required=True, help="Resolved URDF input path.")
     parser.add_argument("--out", required=True, help="Destination USD path.")
     parser.add_argument("--overwrite", action="store_true", help="Replace an existing generated USD.")
+    parser.add_argument(
+        "--clean-no-tool",
+        action="store_true",
+        help="Remove workstation demo attachments while preserving the standard UR5e flange/tool0 chain.",
+    )
     parser.add_argument(
         "--native-kit",
         action="store_true",
@@ -39,21 +45,50 @@ def _missing_local_dependencies(layer, asset_path: Path) -> list[str]:
     return sorted(set(missing))
 
 
-def _sanitized_urdf_copy(urdf_path: Path) -> tuple[tempfile.TemporaryDirectory, Path, int]:
+def _sanitized_urdf_copy(
+    urdf_path: Path,
+    *,
+    clean_no_tool: bool = False,
+) -> tuple[tempfile.TemporaryDirectory, Path, dict[str, Any]]:
     tree = ET.parse(urdf_path)
     root = tree.getroot()
-    removed = 0
+    removed_empty_geometry = 0
+    removed_links: list[str] = []
+    removed_joints: list[str] = []
+    if clean_no_tool:
+        removed_link_names = {"End_E", "stage_3", "camera_link", "ground_plane"}
+        for link in list(root.findall("link")):
+            link_name = str(link.get("name") or "")
+            if link_name in removed_link_names:
+                root.remove(link)
+                removed_links.append(link_name)
+        for joint in list(root.findall("joint")):
+            parent = joint.find("parent")
+            child = joint.find("child")
+            parent_link = str(parent.get("link") or "") if parent is not None else ""
+            child_link = str(child.get("link") or "") if child is not None else ""
+            if parent_link in removed_link_names or child_link in removed_link_names:
+                root.remove(joint)
+                removed_joints.append(str(joint.get("name") or ""))
+        for gazebo in list(root.findall("gazebo")):
+            if str(gazebo.get("reference") or "") in removed_link_names:
+                root.remove(gazebo)
     for link in root.findall("link"):
         for element_name in ("visual", "collision"):
             for element in list(link.findall(element_name)):
                 geometry = element.find("geometry")
                 if geometry is None or not list(geometry):
                     link.remove(element)
-                    removed += 1
+                    removed_empty_geometry += 1
     temp_dir = tempfile.TemporaryDirectory(prefix="teto_isaac_urdf_")
     sanitized_path = Path(temp_dir.name) / urdf_path.name
     tree.write(sanitized_path, encoding="utf-8", xml_declaration=True)
-    return temp_dir, sanitized_path, removed
+    return temp_dir, sanitized_path, {
+        "clean_no_tool": clean_no_tool,
+        "removed_empty_geometry_elements": removed_empty_geometry,
+        "removed_links": sorted(removed_links),
+        "removed_joints": sorted(removed_joints),
+    }
 
 
 def main() -> int:
@@ -74,7 +109,10 @@ def main() -> int:
     try:
         from pxr import Sdf, Usd, UsdPhysics
 
-        temp_dir, import_urdf_path, removed_empty_geometry = _sanitized_urdf_copy(urdf_path)
+        temp_dir, import_urdf_path, sanitization = _sanitized_urdf_copy(
+            urdf_path,
+            clean_no_tool=args.clean_no_tool,
+        )
         if args.native_kit:
             isaac_root = os.environ.get("ISAAC_PATH")
             if not isaac_root and os.environ.get("CARB_APP_PATH"):
@@ -180,6 +218,40 @@ def main() -> int:
             for prim in prims
             if prim.HasAPI(UsdPhysics.RigidBodyAPI)
         ]
+        main_joint_names = [
+            "shoulder_pan_joint",
+            "shoulder_lift_joint",
+            "elbow_joint",
+            "wrist_1_joint",
+            "wrist_2_joint",
+            "wrist_3_joint",
+        ]
+        imported_joint_names = {prim.GetName() for prim in prims if prim.IsA(UsdPhysics.Joint)}
+        missing_main_joints = [
+            name for name in main_joint_names if name not in imported_joint_names
+        ]
+        tool0_paths = [
+            prim.GetPath().pathString
+            for prim in prims
+            if prim.GetName() == "tool0"
+        ]
+        forbidden_clean_paths = [
+            prim.GetPath().pathString
+            for prim in prims
+            if prim.GetName() in {"End_E", "stage_3", "camera_link", "ground_plane"}
+        ]
+        if args.clean_no_tool and missing_main_joints:
+            raise RuntimeError(
+                "E_ISAAC_CLEAN_ASSET_MAIN_JOINTS_MISSING: "
+                + ", ".join(missing_main_joints)
+            )
+        if args.clean_no_tool and not tool0_paths:
+            raise RuntimeError("E_ISAAC_CLEAN_ASSET_TOOL0_MISSING")
+        if args.clean_no_tool and forbidden_clean_paths:
+            raise RuntimeError(
+                "E_ISAAC_CLEAN_ASSET_ATTACHMENT_REMAINS: "
+                + ", ".join(forbidden_clean_paths)
+            )
         robot_prims = [
             prim.GetPath().pathString
             for prim in prims
@@ -210,13 +282,17 @@ def main() -> int:
                     "urdf": str(urdf_path),
                     "usd": str(output_path),
                     "imported_prim_path": str(imported_prim_path),
-                    "removed_empty_geometry_elements": removed_empty_geometry,
+                    "sanitization": sanitization,
                     "robot_prims": robot_prims,
                     "articulation_roots": articulation_paths,
                     "joint_count": len(joint_paths),
                     "joints": joint_paths,
                     "rigid_body_count": len(rigid_body_paths),
                     "rigid_bodies": rigid_body_paths,
+                    "main_joint_names": main_joint_names,
+                    "missing_main_joints": missing_main_joints,
+                    "tool0_paths": tool0_paths,
+                    "forbidden_clean_paths": forbidden_clean_paths,
                     "used_layers": sorted(used_layers),
                     "missing_dependencies": all_missing_dependencies,
                 },

@@ -15,11 +15,18 @@ from src.isaac_sim_operator import (
     IsaacOperatorSafetyError,
     IsaacSimOperator,
     SyntheticFakeGateway,
+    _joint_delta_summary,
     load_isaac_operator_config,
     validate_no_real_robot_args,
     validate_no_real_robot_config,
 )
-from src.isaac_sim_bridge import _missing_local_usd_dependencies, _require_articulation
+from src.isaac_sim_bridge import (
+    DEFAULT_ISAAC_HOME_POSE_RAD,
+    _missing_local_usd_dependencies,
+    _named_joint_target,
+    _require_articulation,
+    _visual_timing,
+)
 
 CONSOLE_SCRIPT = Path("scripts/teto_isaac_operator_console.py")
 
@@ -93,6 +100,15 @@ def _load_console_module():
     return module
 
 
+def _load_importer_module():
+    path = Path("scripts/import_ur5e_urdf_to_isaac_usd.py")
+    spec = importlib.util.spec_from_file_location("import_ur5e_urdf_to_isaac_usd_test", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
 def _config() -> IsaacOperatorConfig:
     return IsaacOperatorConfig(
         raw={
@@ -112,11 +128,27 @@ def test_example_config_loads_and_is_fail_closed():
     assert config.raw["gui_required"] is True
     assert config.raw["real_robot_disabled"] is True
     assert config.raw["allow_moveit_execute"] is False
+    assert config.raw["apply_initial_home_pose"] is True
+    assert config.raw["visual_demo_slowdown_enabled"] is True
+    assert config.raw["visual_markers_enabled"] is True
 
 
 def test_real_flag_is_refused():
     with pytest.raises(IsaacOperatorSafetyError, match="E_REAL_FLAG_FORBIDDEN"):
         validate_no_real_robot_args(["--real"])
+
+
+def test_isaac_visual_options_do_not_appear_in_real_motion_script():
+    real_script = Path("scripts/text_to_ur5e_real_motion.py").read_text(encoding="utf-8")
+    for option in (
+        "--motion-duration-sec",
+        "--substep-pause-sec",
+        "--no-visual-demo-slowdown",
+        "--no-visual-markers",
+        "visual_demo_slowdown_enabled",
+        "isaac_initial_home_pose",
+    ):
+        assert option not in real_script
 
 
 def test_real_ur_ip_is_refused():
@@ -167,6 +199,7 @@ def test_vector_command_decomposes_executes_and_writes_simulation_evidence(tmp_p
     assert result["rtde_write_used"] is False
     assert result["moveit_execute_trajectory_called"] is False
     assert result["trajectory_sent"] is False
+    assert result["isaac_visual_timing"]["scope"] == "isaac_sim_only"
 
 
 @pytest.mark.parametrize(
@@ -192,6 +225,11 @@ def test_single_axis_explicit_delta_executes_only_in_isaac_sim(command, tmp_path
     assert result["rtde_write_used"] is False
     assert result["moveit_execute_trajectory_called"] is False
     assert result["trajectory_sent"] is False
+    assert result["target_final_tcp_pose"]["position_m"] == [0.4, 0.0, 0.45]
+    assert result["measured_delta_vector_m"] == [0.0, 0.0, 0.05]
+    assert result["final_position_error_m"] == 0.0
+    assert result["direction_check_passed"] is True
+    assert result["isaac_visual_timing"]["scope"] == "isaac_sim_only"
 
 
 def test_gui_operator_refuses_synthetic_gateway(tmp_path):
@@ -209,6 +247,98 @@ def test_home_and_reset_are_simulation_only(tmp_path):
     operator = IsaacSimOperator(config=_config(), gateway=gateway, headless=True, output_dir=tmp_path)
     assert operator.home() == {"status": "PASS", "simulated_only": True}
     assert operator.reset() == {"status": "PASS", "simulated_only": True}
+
+
+def test_natural_home_pose_maps_only_named_isaac_joints():
+    names = ["fixed_joint", *DEFAULT_ISAAC_HOME_POSE_RAD]
+    current = [0.25] * len(names)
+    target, applied_names, applied_positions = _named_joint_target(
+        names,
+        current,
+        DEFAULT_ISAAC_HOME_POSE_RAD,
+    )
+
+    assert target[0] == 0.25
+    assert applied_names == list(DEFAULT_ISAAC_HOME_POSE_RAD)
+    assert applied_positions == list(DEFAULT_ISAAC_HOME_POSE_RAD.values())
+    assert target[1:] == list(DEFAULT_ISAAC_HOME_POSE_RAD.values())
+
+
+def test_natural_home_pose_fails_closed_when_joint_is_missing():
+    with pytest.raises(RuntimeError, match="E_ISAAC_HOME_JOINTS_MISSING"):
+        _named_joint_target(
+            ["shoulder_pan_joint"],
+            [0.0],
+            DEFAULT_ISAAC_HOME_POSE_RAD,
+        )
+
+
+def test_visual_timing_is_gui_only():
+    config = {
+        "visual_demo_slowdown_enabled": True,
+        "motion_duration_sec": 2.4,
+        "substep_pause_sec": 0.25,
+        "visual_demo_fps": 60,
+        "frames_per_substep": 90,
+    }
+    gui = _visual_timing(config, headless=False, substep_count=3)
+    headless = _visual_timing(config, headless=True, substep_count=3)
+
+    assert gui["visual_demo_slowdown_enabled"] is True
+    assert gui["motion_frames_per_substep"] == 48
+    assert gui["pause_frames_per_substep"] == 15
+    assert headless["visual_demo_slowdown_enabled"] is False
+    assert headless["motion_frames_per_substep"] == 90
+    assert headless["pause_frames_per_substep"] == 0
+
+
+def test_joint_delta_summary_is_compact():
+    summary = _joint_delta_summary(
+        {"names": ["a", "b"], "positions_rad": [0.0, 1.0]},
+        {"names": ["a", "b"], "positions_rad": [0.1, 1.0]},
+    )
+    assert summary == [
+        {"joint": "a", "before_rad": 0.0, "after_rad": 0.1, "delta_rad": 0.1}
+    ]
+
+
+def test_clean_no_tool_sanitization_preserves_standard_tool0(tmp_path):
+    importer = _load_importer_module()
+    urdf = tmp_path / "robot.urdf"
+    urdf.write_text(
+        """<?xml version="1.0"?>
+<robot name="test">
+  <link name="world"/>
+  <link name="base_link"/>
+  <link name="flange"/>
+  <link name="tool0"/>
+  <link name="End_E"><visual><geometry><mesh filename="tool_12.dae"/></geometry></visual></link>
+  <link name="stage_3"><visual><geometry><mesh filename="stage_3.dae"/></geometry></visual></link>
+  <link name="camera_link"/>
+  <link name="ground_plane"/>
+  <joint name="flange-tool0" type="fixed"><parent link="flange"/><child link="tool0"/></joint>
+  <joint name="tool0_to_my_tool" type="fixed"><parent link="tool0"/><child link="End_E"/></joint>
+  <joint name="stage_3_joint" type="fixed"><parent link="End_E"/><child link="stage_3"/></joint>
+</robot>
+""",
+        encoding="utf-8",
+    )
+
+    temp_dir, sanitized, metadata = importer._sanitized_urdf_copy(
+        urdf,
+        clean_no_tool=True,
+    )
+    try:
+        text = sanitized.read_text(encoding="utf-8")
+    finally:
+        temp_dir.cleanup()
+
+    assert 'link name="tool0"' in text
+    assert 'joint name="flange-tool0"' in text
+    assert "tool_12" not in text
+    assert "stage_3" not in text
+    assert metadata["removed_links"] == ["End_E", "camera_link", "ground_plane", "stage_3"]
+    assert metadata["removed_joints"] == ["stage_3_joint", "tool0_to_my_tool"]
 
 
 def test_console_mode_waits_until_quit(monkeypatch):
@@ -343,6 +473,61 @@ def test_ur5e_asset_override_selects_usd_reference(monkeypatch, tmp_path):
     assert observed["closed"] is True
 
 
+def test_console_defaults_to_clean_no_tool_asset_and_applies_visual_options(monkeypatch, tmp_path):
+    console = _load_console_module()
+    config = _config()
+    clean_asset = tmp_path / "outputs/isaac_assets/generated_ur5e/ur5e_clean_no_tool.usd"
+    clean_asset.parent.mkdir(parents=True)
+    clean_asset.write_text("#usda 1.0\n", encoding="utf-8")
+    observed = {}
+
+    class FakeSimulationApp:
+        def __init__(self, _settings):
+            pass
+
+        def close(self):
+            pass
+
+    class FakeBridge:
+        gateway_type = "simulated_measured_gateway"
+
+        def __init__(self, *, simulation_app, config, headless):
+            observed.update(config)
+
+        def status(self):
+            return {"connection_status": "ISAAC_SIM_CONNECTED"}
+
+    monkeypatch.setattr(console, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(console, "load_isaac_operator_config", lambda _path: config)
+    monkeypatch.setattr(console, "_banner", lambda *_args: None)
+    monkeypatch.setattr(console, "_run_operator_session", lambda *_args: 0)
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "isaacsim",
+        SimpleNamespace(SimulationApp=FakeSimulationApp),
+    )
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "src.isaac_sim_bridge",
+        SimpleNamespace(IsaacSimMeasuredBridge=FakeBridge),
+    )
+
+    assert console.main(
+        [
+            "--gui",
+            "--console",
+            "--motion-duration-sec",
+            "3.0",
+            "--substep-pause-sec",
+            "0.4",
+        ]
+    ) == 0
+    assert observed["asset_mode"] == "usd_reference"
+    assert observed["ur5e_asset_path"] == str(clean_asset)
+    assert observed["motion_duration_sec"] == 3.0
+    assert observed["substep_pause_sec"] == 0.4
+
+
 def test_missing_usd_dependency_is_reported_before_articulation_init(tmp_path):
     asset = tmp_path / "ur5e.usd"
     asset.write_text("#usda 1.0\n", encoding="utf-8")
@@ -473,6 +658,11 @@ def test_launcher_continues_to_console_when_qwen_is_unavailable(tmp_path):
             "--console",
             "--isaac-app",
             str(fake_app),
+            "--motion-duration-sec",
+            "3.0",
+            "--substep-pause-sec",
+            "0.4",
+            "--no-visual-markers",
         ],
         cwd=Path.cwd(),
         env=environment,
@@ -486,4 +676,9 @@ def test_launcher_continues_to_console_when_qwen_is_unavailable(tmp_path):
     assert "Launcher branch: persistent_console" in completed.stdout
     assert "FAKE_ISAAC_PYTHON_ARGS:" in completed.stdout
     assert "<--console>" in completed.stdout
+    assert "<--motion-duration-sec>" in completed.stdout
+    assert "<3.0>" in completed.stdout
+    assert "<--substep-pause-sec>" in completed.stdout
+    assert "<0.4>" in completed.stdout
+    assert "<--no-visual-markers>" in completed.stdout
     assert "<scripts/teto_isaac_operator_console.py>" in completed.stdout

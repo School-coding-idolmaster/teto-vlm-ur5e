@@ -28,6 +28,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--world-config", default="configs/isaac_sim_operator.example.yaml")
     parser.add_argument("--qwen-endpoint")
     parser.add_argument("--ur5e-asset")
+    parser.add_argument("--motion-duration-sec", type=float)
+    parser.add_argument("--substep-pause-sec", type=float)
+    parser.add_argument("--no-visual-demo-slowdown", action="store_true")
+    parser.add_argument("--no-visual-markers", action="store_true")
     parser.add_argument("--gui", action="store_true", default=True, help="Require visible Isaac GUI (default).")
     parser.add_argument("--headless", action="store_true", help="CI smoke only; evidence is marked headless_smoke_test.")
     parser.add_argument("--console", action="store_true", help="Open the TETO/Isaac interactive prompt.")
@@ -59,6 +63,14 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.qwen_endpoint:
         config.raw["qwen_endpoint"] = args.qwen_endpoint
+    if args.motion_duration_sec is not None:
+        config.raw["motion_duration_sec"] = max(float(args.motion_duration_sec), 0.0)
+    if args.substep_pause_sec is not None:
+        config.raw["substep_pause_sec"] = max(float(args.substep_pause_sec), 0.0)
+    if args.no_visual_demo_slowdown:
+        config.raw["visual_demo_slowdown_enabled"] = False
+    if args.no_visual_markers:
+        config.raw["visual_markers_enabled"] = False
     if args.ur5e_asset:
         config.raw["ur5e_asset_path"] = args.ur5e_asset
         config.raw["asset_mode"] = "usd_reference"
@@ -66,6 +78,12 @@ def main(argv: list[str] | None = None) -> int:
             f"[TETO Isaac] --ur5e-asset selects usd_reference: {args.ur5e_asset}",
             flush=True,
         )
+    else:
+        clean_asset = REPO_ROOT / "outputs/isaac_assets/generated_ur5e/ur5e_clean_no_tool.usd"
+        if clean_asset.is_file():
+            config.raw["ur5e_asset_path"] = str(clean_asset)
+            config.raw["asset_mode"] = "usd_reference"
+            print(f"[TETO Isaac] defaulting to clean no-tool asset: {clean_asset}", flush=True)
     if args.synthetic_fake_gateway and not args.headless:
         print("SAFETY BLOCK: E_SYNTHETIC_FAKE_GATEWAY_REQUIRES_HEADLESS", file=sys.stderr)
         return 2
@@ -159,7 +177,7 @@ def _interactive_loop(operator: IsaacSimOperator, gateway, simulation_app) -> in
             stopped.set()
             break
         if normalized == "status":
-            print(json.dumps(operator.status(), ensure_ascii=False, indent=2), flush=True)
+            print(json.dumps(_status_summary(operator.status()), ensure_ascii=False, indent=2), flush=True)
         elif normalized == "home":
             print(json.dumps(operator.home(), ensure_ascii=False, indent=2), flush=True)
         elif normalized == "reset":
@@ -190,10 +208,38 @@ def _summary(result: dict) -> dict:
         "status": result.get("status"),
         "abort_reason": result.get("abort_reason"),
         "substeps": f"{result.get('completed_substep_count')}/{result.get('substep_count')}",
-        "final_simulated_tcp_pose": result.get("final_simulated_tcp_pose"),
+        "requested_delta_m": result.get("delta_vector_m"),
+        "measured_delta_m": result.get("measured_delta_vector_m"),
+        "target_final_tcp": result.get("target_final_tcp_pose"),
+        "measured_final_tcp": result.get("final_simulated_tcp_pose"),
+        "position_error_m": result.get("final_position_error_m"),
+        "direction_check_passed": result.get("direction_check_passed"),
+        "joint_delta_summary": result.get("joint_delta_summary"),
+        "visible_motion_hint": result.get("visible_motion_hint"),
         "gateway_type": result.get("gateway_type"),
         "evidence": result.get("artifact_paths"),
         "real_robot_motion_executed": False,
+    }
+
+
+def _status_summary(status: dict) -> dict:
+    return {
+        "execution_mode": status.get("execution_mode"),
+        "runtime_mode": status.get("runtime_mode"),
+        "isaac_connection_status": status.get("isaac_connection_status"),
+        "qwen_ok": (status.get("qwen_health") or {}).get("ok"),
+        "current_simulated_tcp_pose": status.get("current_simulated_tcp_pose"),
+        "current_simulated_joint_state": status.get("current_simulated_joint_state"),
+        "isaac_initial_home_pose_applied": status.get("isaac_initial_home_pose_applied"),
+        "isaac_initial_home_pose_source": status.get("isaac_initial_home_pose_source"),
+        "isaac_visual_markers_enabled": status.get("isaac_visual_markers_enabled"),
+        "isaac_trajectory_trace_enabled": status.get("isaac_trajectory_trace_enabled"),
+        "isaac_visual_timing": status.get("isaac_visual_timing"),
+        "last_command_summary": _summary(status["last_command_result"]) if status.get("last_command_result") else None,
+        "real_robot_motion_executed": False,
+        "dashboard_used": False,
+        "rtde_write_used": False,
+        "moveit_execute_trajectory_called": False,
     }
 
 

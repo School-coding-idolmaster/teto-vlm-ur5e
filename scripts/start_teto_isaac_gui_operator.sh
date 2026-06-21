@@ -12,6 +12,10 @@ QWEN_ENDPOINT="http://127.0.0.1:18080"
 HEADLESS=false
 CONSOLE=false
 CMD=""
+MOTION_DURATION_SEC=""
+SUBSTEP_PAUSE_SEC=""
+VISUAL_DEMO_SLOWDOWN=true
+VISUAL_MARKERS=true
 
 usage() {
   cat <<'EOF'
@@ -22,6 +26,10 @@ Usage: bash scripts/start_teto_isaac_gui_operator.sh [options]
   --qwen-endpoint URL       Qwen base or /api/generate endpoint
   --isaac-app PATH          Isaac Sim isaac-sim.sh (python.sh is auto-derived)
   --ur5e-asset PATH         Local UR5e USD asset
+  --motion-duration-sec N   Visible GUI motion duration across all substeps
+  --substep-pause-sec N     Pause after each visible GUI substep
+  --no-visual-demo-slowdown Disable Isaac-only visual interpolation/pacing
+  --no-visual-markers       Disable Isaac TCP/target/path debug drawing
   --world-config PATH       Operator YAML config
   --console                 Open interactive TETO/Isaac prompt
   --cmd TEXT                Run one command
@@ -46,6 +54,10 @@ while [[ $# -gt 0 ]]; do
     --qwen-endpoint) QWEN_ENDPOINT="$2"; shift 2 ;;
     --isaac-app) ISAAC_APP="$2"; shift 2 ;;
     --ur5e-asset) UR5E_ASSET="$2"; shift 2 ;;
+    --motion-duration-sec) MOTION_DURATION_SEC="$2"; shift 2 ;;
+    --substep-pause-sec) SUBSTEP_PAUSE_SEC="$2"; shift 2 ;;
+    --no-visual-demo-slowdown) VISUAL_DEMO_SLOWDOWN=false; shift ;;
+    --no-visual-markers) VISUAL_MARKERS=false; shift ;;
     --world-config) CONFIG="$2"; shift 2 ;;
     --console) CONSOLE=true; shift ;;
     --cmd) CMD="$2"; shift 2 ;;
@@ -89,6 +101,10 @@ if [[ "${HEADLESS}" == true ]]; then ARGS+=(--headless); else ARGS+=(--gui); fi
 if [[ "${CONSOLE}" == true ]]; then ARGS+=(--console); fi
 if [[ -n "${CMD}" ]]; then ARGS+=(--cmd "${CMD}"); fi
 if [[ -n "${UR5E_ASSET}" ]]; then ARGS+=(--ur5e-asset "${UR5E_ASSET}"); fi
+if [[ -n "${MOTION_DURATION_SEC}" ]]; then ARGS+=(--motion-duration-sec "${MOTION_DURATION_SEC}"); fi
+if [[ -n "${SUBSTEP_PAUSE_SEC}" ]]; then ARGS+=(--substep-pause-sec "${SUBSTEP_PAUSE_SEC}"); fi
+if [[ "${VISUAL_DEMO_SLOWDOWN}" == false ]]; then ARGS+=(--no-visual-demo-slowdown); fi
+if [[ "${VISUAL_MARKERS}" == false ]]; then ARGS+=(--no-visual-markers); fi
 
 printf 'Isaac operator command:'
 printf ' %q' "${ISAAC_PYTHON}" "${ARGS[@]}"

@@ -173,6 +173,28 @@ class IsaacSimOperator:
             "qwen_health": qwen_health(self.config.qwen_endpoint),
             "current_simulated_tcp_pose": gateway_status.get("current_tcp_pose"),
             "current_simulated_joint_state": gateway_status.get("joint_state"),
+            "isaac_initial_home_pose_applied": gateway_status.get(
+                "isaac_initial_home_pose_applied",
+                bool(self.config.raw.get("apply_initial_home_pose", True)),
+            ),
+            "isaac_initial_home_pose_source": gateway_status.get(
+                "isaac_initial_home_pose_source",
+                "isaac_config_pending_gateway_confirmation",
+            ),
+            "isaac_initial_home_joint_names": gateway_status.get("isaac_initial_home_joint_names"),
+            "isaac_initial_home_joint_positions_rad": gateway_status.get(
+                "isaac_initial_home_joint_positions_rad"
+            ),
+            "isaac_visual_markers_enabled": gateway_status.get(
+                "isaac_visual_markers_enabled",
+                bool(self.config.raw.get("visual_markers_enabled", True)) and not self.headless,
+            ),
+            "isaac_trajectory_trace_enabled": gateway_status.get(
+                "isaac_trajectory_trace_enabled",
+                bool(self.config.raw.get("trajectory_trace_enabled", True)) and not self.headless,
+            ),
+            "isaac_visual_timing": gateway_status.get("isaac_visual_timing")
+            or _configured_visual_timing(self.config.raw, headless=self.headless),
             "last_command_result": self.last_result,
             "last_evidence_path": self.last_evidence_path,
             **_safety_flags(),
@@ -273,6 +295,9 @@ class IsaacSimOperator:
                     "verification_result": "PASS" if verified else "FAILED",
                     "continue_allowed": verified,
                     "gateway_result": result,
+                    "isaac_visual_timing": result.get("isaac_visual_timing"),
+                    "isaac_visual_markers_enabled": result.get("isaac_visual_markers_enabled"),
+                    "isaac_trajectory_trace_enabled": result.get("isaac_trajectory_trace_enabled"),
                 }
             )
             if not verified:
@@ -287,6 +312,68 @@ class IsaacSimOperator:
         evidence["completed_substep_count"] = completed
         evidence["simulated_robot_motion_executed"] = completed > 0
         evidence["final_simulated_tcp_pose"] = latest
+        final_status = self.gateway.status()
+        final_pose = _pose(final_status.get("current_tcp_pose")) or latest
+        initial_position = current_pose["position_m"]
+        final_position = final_pose["position_m"]
+        measured_delta = [
+            round(float(final_position[index]) - float(initial_position[index]), 6)
+            for index in range(3)
+        ]
+        target_final = (
+            evidence["substeps"][-1].get("target_tcp_pose")
+            if evidence["substeps"]
+            else None
+        )
+        final_error = (
+            _distance(final_position, target_final["position_m"])
+            if target_final is not None
+            else None
+        )
+        evidence["final_simulated_tcp_pose"] = final_pose
+        evidence["final_simulated_joint_state"] = final_status.get("joint_state")
+        evidence["target_final_tcp_pose"] = target_final
+        evidence["measured_delta_vector_m"] = measured_delta
+        evidence["final_position_error_m"] = round(final_error, 6) if final_error is not None else None
+        evidence["direction_check_passed"] = bool(
+            completed > 0
+            and _dot(measured_delta, delta) > EPS
+            and all(step.get("direction_check_passed") for step in evidence["substeps"])
+        )
+        evidence["joint_delta_summary"] = _joint_delta_summary(
+            before_status.get("joint_state"),
+            final_status.get("joint_state"),
+        )
+        evidence["isaac_initial_home_pose_applied"] = final_status.get(
+            "isaac_initial_home_pose_applied",
+            evidence.get("isaac_initial_home_pose_applied"),
+        )
+        evidence["isaac_initial_home_pose_source"] = final_status.get(
+            "isaac_initial_home_pose_source",
+            evidence.get("isaac_initial_home_pose_source"),
+        )
+        evidence["isaac_initial_home_joint_names"] = final_status.get(
+            "isaac_initial_home_joint_names"
+        )
+        evidence["isaac_initial_home_joint_positions_rad"] = final_status.get(
+            "isaac_initial_home_joint_positions_rad"
+        )
+        evidence["isaac_visual_markers_enabled"] = final_status.get(
+            "isaac_visual_markers_enabled",
+            evidence.get("isaac_visual_markers_enabled"),
+        )
+        evidence["isaac_trajectory_trace_enabled"] = final_status.get(
+            "isaac_trajectory_trace_enabled",
+            evidence.get("isaac_trajectory_trace_enabled"),
+        )
+        evidence["isaac_visual_timing"] = final_status.get(
+            "isaac_visual_timing"
+        ) or evidence.get("isaac_visual_timing")
+        evidence["visible_motion_hint"] = (
+            "cyan=current TCP, yellow=target TCP, blue=measured path"
+            if evidence["isaac_visual_markers_enabled"]
+            else "visual markers disabled; compare requested/measured delta in this summary"
+        )
         evidence["status"] = "PASS" if completed == len(step_deltas) else "ABORTED"
         return self._finish(evidence)
 
@@ -366,6 +453,23 @@ class IsaacSimOperator:
             "substeps": [],
             "abort_reason": None,
             "final_simulated_tcp_pose": before_status.get("current_tcp_pose"),
+            "final_simulated_joint_state": before_status.get("joint_state"),
+            "target_final_tcp_pose": None,
+            "measured_delta_vector_m": None,
+            "final_position_error_m": None,
+            "direction_check_passed": False,
+            "joint_delta_summary": [],
+            "isaac_initial_home_pose_applied": before_status.get("isaac_initial_home_pose_applied"),
+            "isaac_initial_home_pose_source": before_status.get("isaac_initial_home_pose_source"),
+            "isaac_initial_home_joint_names": before_status.get("isaac_initial_home_joint_names"),
+            "isaac_initial_home_joint_positions_rad": before_status.get(
+                "isaac_initial_home_joint_positions_rad"
+            ),
+            "isaac_visual_markers_enabled": before_status.get("isaac_visual_markers_enabled"),
+            "isaac_trajectory_trace_enabled": before_status.get("isaac_trajectory_trace_enabled"),
+            "isaac_visual_timing": before_status.get("isaac_visual_timing")
+            or _configured_visual_timing(self.config.raw, headless=self.headless),
+            "visible_motion_hint": None,
             "gui_mode_confirmation": {
                 "isaac_gui_required": not self.headless,
                 "headless_smoke_test": self.headless,
@@ -472,6 +576,51 @@ def _safety_flags() -> dict[str, bool]:
         "rtde_write_used": False,
         "moveit_execute_trajectory_called": False,
         "trajectory_sent": False,
+    }
+
+
+def _joint_delta_summary(before: Any, after: Any, *, threshold_rad: float = 1e-5) -> list[dict[str, Any]]:
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return []
+    before_names = before.get("names")
+    after_names = after.get("names")
+    before_positions = before.get("positions_rad")
+    after_positions = after.get("positions_rad")
+    if not all(isinstance(value, list) for value in (before_names, after_names, before_positions, after_positions)):
+        return []
+    before_map = {
+        str(name): float(position)
+        for name, position in zip(before_names, before_positions)
+    }
+    summary = []
+    for name, position in zip(after_names, after_positions):
+        name_text = str(name)
+        if name_text not in before_map:
+            continue
+        delta = float(position) - before_map[name_text]
+        if abs(delta) <= threshold_rad:
+            continue
+        summary.append(
+            {
+                "joint": name_text,
+                "before_rad": round(before_map[name_text], 6),
+                "after_rad": round(float(position), 6),
+                "delta_rad": round(delta, 6),
+            }
+        )
+    return summary
+
+
+def _configured_visual_timing(config: dict[str, Any], *, headless: bool) -> dict[str, Any]:
+    return {
+        "visual_demo_slowdown_enabled": bool(
+            config.get("visual_demo_slowdown_enabled", True)
+        )
+        and not headless,
+        "motion_duration_sec": float(config.get("motion_duration_sec") or 2.4),
+        "substep_pause_sec": float(config.get("substep_pause_sec") or 0.25),
+        "visual_demo_fps": float(config.get("visual_demo_fps") or 60.0),
+        "scope": "isaac_sim_only",
     }
 
 

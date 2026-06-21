@@ -32,6 +32,21 @@ isaac_sim_operator:
   ik_orientation_tolerance_rad: 0.05
   frames_per_substep: 90
   startup_render_frames: 30
+  apply_initial_home_pose: true
+  initial_home_pose_rad:
+    shoulder_pan_joint: 0.0
+    shoulder_lift_joint: -1.57
+    elbow_joint: 1.57
+    wrist_1_joint: -1.57
+    wrist_2_joint: -1.57
+    wrist_3_joint: 0.0
+  home_pose_settle_frames: 30
+  visual_demo_slowdown_enabled: true
+  motion_duration_sec: 2.4
+  substep_pause_sec: 0.25
+  visual_demo_fps: 60
+  visual_markers_enabled: true
+  trajectory_trace_enabled: true
   workspace_envelope:
     x: [-1.0, 1.0]
     y: [-1.0, 1.0]
