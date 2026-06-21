@@ -51,6 +51,40 @@ VECTOR_QWEN_RESPONSE = json.dumps(
 )
 
 
+def _single_axis_qwen_response(distance_m: float) -> str:
+    return json.dumps(
+        {
+            "schema_version": "teto_motion_semantics.v1",
+            "intent_status": "ok",
+            "intent_type": "relative_cartesian_motion",
+            "motion": {
+                "reference": "tcp",
+                "mode": "single_axis",
+                "direction_semantic": "up",
+                "delta": {
+                    "z": {
+                        "value": distance_m,
+                        "unit": "m",
+                        "meters": distance_m,
+                        "quality": "explicit",
+                    }
+                },
+                "distance": None,
+                "frame_hint": "base_link",
+            },
+            "clarification": {"required": False, "reason": ""},
+            "unsupported": {"reason": ""},
+            "confidence": {
+                "intent": 0.99,
+                "direction": 0.99,
+                "distance": 0.0,
+                "overall": 0.99,
+            },
+            "language": "en",
+        }
+    )
+
+
 def _load_console_module():
     spec = importlib.util.spec_from_file_location("teto_isaac_operator_console_test", CONSOLE_SCRIPT)
     module = importlib.util.module_from_spec(spec)
@@ -129,6 +163,31 @@ def test_vector_command_decomposes_executes_and_writes_simulation_evidence(tmp_p
     assert all(step["verification_result"] == "PASS" for step in result["substeps"])
     assert result["real_robot_motion_executed"] is False
     assert result["real_ur_connection_used"] is False
+    assert result["dashboard_used"] is False
+    assert result["rtde_write_used"] is False
+    assert result["moveit_execute_trajectory_called"] is False
+    assert result["trajectory_sent"] is False
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["move up 5 cm", "move up 0.05 meters", "raise the tcp by 0.05 meters"],
+)
+def test_single_axis_explicit_delta_executes_only_in_isaac_sim(command, tmp_path):
+    operator = IsaacSimOperator(
+        config=_config(),
+        gateway=SyntheticFakeGateway(),
+        headless=True,
+        output_dir=tmp_path,
+        qwen_callable=lambda _prompt: _single_axis_qwen_response(0.05),
+    )
+
+    result = operator.execute_text(command)
+
+    assert result["status"] == "PASS"
+    assert result["delta_vector_m"] == [0.0, 0.0, 0.05]
+    assert result["simulated_robot_motion_executed"] is True
+    assert result["real_robot_motion_executed"] is False
     assert result["dashboard_used"] is False
     assert result["rtde_write_used"] is False
     assert result["moveit_execute_trajectory_called"] is False

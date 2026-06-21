@@ -20,6 +20,46 @@ from src.qwen_motion_parser import (
 )
 
 
+def _single_axis_delta_payload(
+    *,
+    direction,
+    axis,
+    value,
+    unit,
+    meters,
+    distance_confidence=0.95,
+):
+    return {
+        "schema_version": "teto_motion_semantics.v1",
+        "intent_status": "ok",
+        "intent_type": "relative_cartesian_motion",
+        "motion": {
+            "reference": "tcp",
+            "mode": "single_axis",
+            "direction_semantic": direction,
+            "delta": {
+                axis: {
+                    "value": value,
+                    "unit": unit,
+                    "meters": meters,
+                    "quality": "explicit",
+                }
+            },
+            "distance": None,
+            "frame_hint": "base_link",
+        },
+        "clarification": {"required": False, "reason": ""},
+        "unsupported": {"reason": ""},
+        "confidence": {
+            "intent": 0.95,
+            "direction": 0.95,
+            "distance": distance_confidence,
+            "overall": 0.95,
+        },
+        "language": "en",
+    }
+
+
 def test_qwen_parser_uses_local_server_defaults(monkeypatch):
     monkeypatch.setattr("src.qwen_motion_parser._call_qwen", lambda **_kwargs: _json_success())
 
@@ -434,6 +474,141 @@ def test_qwen_semantic_json_produces_canonical_relative_delta():
     assert result["qwen_semantic_parse_used"] is True
     assert result["execution_permission_decided_by_parser"] is False
     assert result["safety_gate_still_required"] is True
+
+
+def test_qwen_single_axis_explicit_delta_canonicalizes_without_distance_object():
+    result = evaluate_qwen_motion_parser(
+        QwenMotionParserRequest(
+            user_text="move up 0.05 meters",
+            max_distance_m=0.05,
+            hard_safety_limit_m=0.05,
+            llm_callable=lambda _prompt: json.dumps(
+                _single_axis_delta_payload(
+                    direction="up",
+                    axis="z",
+                    value=0.05,
+                    unit="m",
+                    meters=0.05,
+                    distance_confidence=0.0,
+                )
+            ),
+        )
+    )
+
+    assert result["qwen_motion_parser_status"] == "PASS"
+    assert result["axis"] == "z"
+    assert result["direction"] == "+"
+    assert result["distance_m"] == 0.05
+    assert result["requested_distance_norm_m"] == 0.05
+    assert result["delta_m"] == [0.0, 0.0, 0.05]
+    assert result["vector_delta_m"] == {"x": 0.0, "y": 0.0, "z": 0.05}
+    assert result["vector_components_m"] == {"x": 0.0, "y": 0.0, "z": 0.05}
+    assert result["motion_contract_type"] == "single_axis_relative"
+    assert result["legacy_axis_compatible"] is True
+    assert result["normalized_contract"]["direction_axis"] == "z"
+    assert result["normalized_contract"]["direction_sign"] == "+"
+    assert result["normalized_contract"]["requested_distance_m"] == 0.05
+    assert result["normalized_contract"]["requested_distance_norm_m"] == 0.05
+    assert result["normalized_contract"]["vector_delta_m"] == {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.05,
+    }
+    assert result["normalized_contract"]["legacy_axis_compatible"] is True
+    assert "W_QWEN_DISTANCE_CONFIDENCE_ZERO_WITH_EXPLICIT_DELTA" in result["warnings"]
+
+
+def test_qwen_single_axis_delta_value_and_unit_are_convertible():
+    result = evaluate_qwen_motion_parser(
+        QwenMotionParserRequest(
+            user_text="move up 5 cm",
+            max_distance_m=0.05,
+            hard_safety_limit_m=0.05,
+            llm_callable=lambda _prompt: json.dumps(
+                _single_axis_delta_payload(
+                    direction="up",
+                    axis="z",
+                    value=5,
+                    unit="cm",
+                    meters=None,
+                )
+            ),
+        )
+    )
+
+    assert result["qwen_motion_parser_status"] == "PASS"
+    assert result["delta_m"] == [0.0, 0.0, 0.05]
+
+
+def test_qwen_single_axis_invalid_explicit_delta_stays_blocked():
+    result = evaluate_qwen_motion_parser(
+        QwenMotionParserRequest(
+            user_text="move up some distance",
+            max_distance_m=0.05,
+            hard_safety_limit_m=0.05,
+            llm_callable=lambda _prompt: json.dumps(
+                _single_axis_delta_payload(
+                    direction="up",
+                    axis="z",
+                    value=None,
+                    unit="unspecified",
+                    meters=None,
+                )
+            ),
+        )
+    )
+
+    assert result["qwen_motion_parser_status"] == "BLOCKED"
+    assert E_INVALID_DISTANCE in result["parser_blocking_reasons"]
+
+
+def test_qwen_single_axis_direction_delta_mismatch_stays_blocked():
+    result = evaluate_qwen_motion_parser(
+        QwenMotionParserRequest(
+            user_text="move up 0.05 meters",
+            max_distance_m=0.05,
+            hard_safety_limit_m=0.05,
+            llm_callable=lambda _prompt: json.dumps(
+                _single_axis_delta_payload(
+                    direction="up",
+                    axis="z",
+                    value=-0.05,
+                    unit="m",
+                    meters=-0.05,
+                )
+            ),
+        )
+    )
+
+    assert result["qwen_motion_parser_status"] == "BLOCKED"
+    assert E_INVALID_DIRECTION in result["parser_blocking_reasons"]
+
+
+def test_qwen_single_axis_mode_with_multiple_nonzero_axes_stays_blocked():
+    payload = _single_axis_delta_payload(
+        direction="up",
+        axis="z",
+        value=0.05,
+        unit="m",
+        meters=0.05,
+    )
+    payload["motion"]["delta"]["x"] = {
+        "value": 0.01,
+        "unit": "m",
+        "meters": 0.01,
+        "quality": "explicit",
+    }
+    result = evaluate_qwen_motion_parser(
+        QwenMotionParserRequest(
+            user_text="move up 0.05 meters",
+            max_distance_m=0.05,
+            hard_safety_limit_m=0.05,
+            llm_callable=lambda _prompt: json.dumps(payload),
+        )
+    )
+
+    assert result["qwen_motion_parser_status"] == "BLOCKED"
+    assert E_INVALID_DISTANCE in result["parser_blocking_reasons"]
 
 
 def test_qwen_semantic_fuzzy_small_uses_default_step():

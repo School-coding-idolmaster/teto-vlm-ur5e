@@ -146,6 +146,7 @@ def evaluate_qwen_motion_parser(request: QwenMotionParserRequest) -> Dict[str, A
             parser_source="qwen_llm",
             qwen_confidence_threshold=float(request.confidence_threshold),
         )
+        warnings.extend(normalized_language.get("canonicalization_warnings") or [])
         legacy_reasons = _legacy_payload_blocking_reasons(payload, confidence_threshold=float(request.confidence_threshold))
         blocking_reasons.extend(legacy_reasons)
 
@@ -183,9 +184,15 @@ def evaluate_qwen_motion_parser(request: QwenMotionParserRequest) -> Dict[str, A
                     "intent": INTENT_RELATIVE_CARTESIAN_MOTION,
                     "frame": DEFAULT_FRAME,
                     "delta_m": [round(float(value), 6) for value in delta_m],
+                    "direction_axis": normalized_language.get("direction_axis"),
+                    "direction_sign": normalized_language.get("direction_sign"),
+                    "distance_m": distance_m,
+                    "requested_distance_m": normalized_language.get("requested_distance_m"),
                     "motion_contract_type": normalized_language.get("motion_contract_type"),
+                    "vector_delta_m": normalized_language.get("vector_delta_m"),
                     "vector_components_m": normalized_language.get("vector_components_m"),
                     "requested_distance_norm_m": normalized_language.get("requested_distance_norm_m"),
+                    "legacy_axis_compatible": normalized_language.get("legacy_axis_compatible"),
                     "max_distance_m": float(request.max_distance_m),
                     "hard_safety_limit_m": float(request.hard_safety_limit_m),
                     "must_confirm": True,
@@ -499,6 +506,7 @@ def _language_result_fields(language: dict[str, Any]) -> dict[str, Any]:
         "qwen_fallback_conflict",
         "qwen_fallback_conflict_reason",
         "canonicalization_source",
+        "canonicalization_warnings",
     ]
     return {key: language.get(key) for key in keys}
 

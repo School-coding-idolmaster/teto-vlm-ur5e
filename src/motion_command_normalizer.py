@@ -13,6 +13,9 @@ DEFAULT_FRAME = "base_link"
 DEFAULT_SMALL_STEP_M = 0.01
 DEFAULT_QWEN_CONFIDENCE_THRESHOLD = 0.80
 EPS = 1e-9
+W_QWEN_DISTANCE_CONFIDENCE_ZERO_WITH_EXPLICIT_DELTA = (
+    "W_QWEN_DISTANCE_CONFIDENCE_ZERO_WITH_EXPLICIT_DELTA"
+)
 
 STATUS_PASS = "PASS"
 STATUS_NEEDS_CLARIFICATION = "NEEDS_CLARIFICATION"
@@ -358,6 +361,75 @@ def _normalize_qwen_semantic(
             ),
         }
 
+    axis, sign = _SEMANTIC_DIRECTION_TO_AXIS_SIGN[direction_semantic]
+    if motion_mode == "single_axis" and isinstance(motion.get("delta"), dict):
+        vector_delta = _semantic_vector_delta(motion.get("delta"))
+        nonzero = (
+            [index for index, value in enumerate(vector_delta) if abs(value) > EPS]
+            if vector_delta is not None
+            else []
+        )
+        if vector_delta is None or len(nonzero) != 1:
+            return {
+                "decision": "use_qwen",
+                "result": _blocked(
+                    {**base, "canonicalization_source": "clarification"},
+                    STATUS_NEEDS_CLARIFICATION,
+                    clarification="E_INVALID_DISTANCE",
+                ),
+            }
+        delta_axis = ("x", "y", "z")[nonzero[0]]
+        delta_sign = "+" if vector_delta[nonzero[0]] > 0.0 else "-"
+        if (delta_axis, delta_sign) != (axis, sign):
+            return {
+                "decision": "use_qwen",
+                "result": _blocked(
+                    {**base, "canonicalization_source": "clarification"},
+                    STATUS_NEEDS_CLARIFICATION,
+                    clarification="E_CONFLICTING_DIRECTIONS",
+                ),
+            }
+        component = motion["delta"].get(delta_axis)
+        if not isinstance(component, dict):
+            return {
+                "decision": "use_qwen",
+                "result": _blocked(
+                    {**base, "canonicalization_source": "clarification"},
+                    STATUS_NEEDS_CLARIFICATION,
+                    clarification="E_INVALID_DISTANCE",
+                ),
+            }
+        component_quality = (
+            str(component.get("quality") or "").strip().lower()
+        )
+        canonicalization_warnings = []
+        if (
+            component_quality == "explicit"
+            and qwen_fields.get("qwen_confidence_distance") == 0.0
+        ):
+            canonicalization_warnings.append(
+                W_QWEN_DISTANCE_CONFIDENCE_ZERO_WITH_EXPLICIT_DELTA
+            )
+        result = _vector_motion_result(
+            base,
+            vector_delta,
+            parser_source="qwen_llm",
+            vector_source="qwen_semantic_delta",
+            confidence=confidence_overall if confidence_overall is not None else 0.90,
+            canonicalization_source="qwen_semantic_delta",
+        )
+        result.update(
+            {
+                "distance_source": "explicit_delta",
+                "direction_source": "qwen_semantic_direction_and_delta",
+                "unit": (
+                    _string(component.get("unit")) or "m"
+                ),
+                "canonicalization_warnings": canonicalization_warnings,
+            }
+        )
+        return {"decision": "use_qwen", "result": result}
+
     distance_m, distance_source, unit = _semantic_distance_m(distance, default_small_step_m=default_small_step_m)
     if distance_m is None:
         clarification = "E_DISTANCE_MISSING" if distance_quality in {"", "missing"} else "E_INVALID_DISTANCE"
@@ -379,7 +451,6 @@ def _normalize_qwen_semantic(
             ),
         }
 
-    axis, sign = _SEMANTIC_DIRECTION_TO_AXIS_SIGN[direction_semantic]
     delta = _delta_from_axis_direction(axis, sign, distance_m)
     confidence = confidence_overall if confidence_overall is not None else 0.90
     return {
@@ -458,6 +529,7 @@ def _base_evidence(raw_command: str, normalized: str, *, frame: str, parser_sour
         "qwen_fallback_conflict": False,
         "qwen_fallback_conflict_reason": None,
         "canonicalization_source": None,
+        "canonicalization_warnings": [],
     }
 
 
@@ -827,8 +899,13 @@ def _extract_explicit_vector_delta(normalized: str) -> list[float] | None:
 def _semantic_vector_delta(value: Any) -> list[float] | None:
     if not isinstance(value, dict):
         return None
+    if any(axis not in {"x", "y", "z"} for axis in value):
+        return None
     components = []
     for axis in ("x", "y", "z"):
+        if axis not in value:
+            components.append(0.0)
+            continue
         component = value.get(axis)
         if isinstance(component, dict):
             meters = _semantic_distance_value(component)

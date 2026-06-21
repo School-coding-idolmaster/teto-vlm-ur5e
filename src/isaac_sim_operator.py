@@ -319,6 +319,8 @@ class IsaacSimOperator:
             "delta_m": delta,
             "vector_delta_m": delta,
             "motion_contract_type": parser_result.get("motion_contract_type"),
+            "direction_axis": parser_result.get("direction_axis"),
+            "direction_sign": parser_result.get("direction_sign"),
         }
         plan = plan_offline_autoregressive_motion(
             AutoregressiveMotionPlannerRequest(
