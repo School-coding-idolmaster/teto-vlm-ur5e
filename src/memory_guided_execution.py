@@ -34,10 +34,14 @@ class SceneMonitorResult:
     target_moved: bool | None = None
     depth_valid: bool | None = None
     tf_fresh: bool | None = None
+    tf_valid: bool | None = None
     unexpected_obstacle: bool | None = None
     scene_snapshot_id: str | None = None
     scene_freshness_status: str = "unknown"
+    frequency_mode: str = "unavailable"
+    snapshot_expired: bool | None = None
     requires_vlm_reobserve: bool = False
+    requires_llm_replan: bool = False
     monitor_latency_ms: float | None = None
     monitor_frequency_hz: float | None = None
 
@@ -78,11 +82,15 @@ def make_scene_monitor_result(
             "target_visible": _optional_bool(value.get("target_visible")),
             "target_moved": _optional_bool(value.get("target_moved")),
             "depth_valid": _optional_bool(value.get("depth_valid")),
-            "tf_fresh": _optional_bool(value.get("tf_fresh")),
+            "tf_fresh": _optional_bool(value.get("tf_fresh", value.get("tf_valid"))),
+            "tf_valid": _optional_bool(value.get("tf_valid", value.get("tf_fresh"))),
             "unexpected_obstacle": _optional_bool(value.get("unexpected_obstacle")),
             "scene_snapshot_id": _optional_string(value.get("scene_snapshot_id")),
             "scene_freshness_status": str(value.get("scene_freshness_status") or "unknown"),
+            "frequency_mode": str(value.get("frequency_mode") or "unavailable"),
+            "snapshot_expired": _optional_bool(value.get("snapshot_expired")),
             "requires_vlm_reobserve": value.get("requires_vlm_reobserve") is True,
+            "requires_llm_replan": value.get("requires_llm_replan") is True,
             "monitor_latency_ms": _optional_number(value.get("monitor_latency_ms")),
             "monitor_frequency_hz": _optional_number(value.get("monitor_frequency_hz")),
         }
@@ -100,6 +108,8 @@ def build_working_memory(
     target_delta_m: list[float] | None,
     target_point_base_m: list[float] | None = None,
     latest_verified_tcp_m: list[float] | None = None,
+    path_strategy: str = "decomposed_autoregressive_subgoals",
+    motion_mode: str = "unknown",
 ) -> dict[str, Any]:
     delta = _vector3(target_delta_m)
     return {
@@ -108,14 +118,22 @@ def build_working_memory(
         "goal_type": goal_type if goal_type in {"relative_motion", "move_to_object"} else "unknown",
         "target_delta_m": delta,
         "target_point_base_m": _vector3(target_point_base_m),
+        "path_strategy": str(path_strategy or "decomposed_autoregressive_subgoals"),
+        "motion_mode": str(motion_mode or "unknown"),
         "latest_verified_tcp_m": _vector3(latest_verified_tcp_m),
         "remaining_delta_m": list(delta) if delta is not None else None,
         "completed_substeps": 0,
+        "stable_substep_count": 0,
         "last_error_m": None,
+        "last_direction_check_passed": None,
         "scene_snapshot_id": None,
         "scene_freshness_status": "unknown",
+        "execution_load_mode": "full_observation",
+        "llm_call_suppressed": False,
+        "vlm_call_suppressed": False,
         "reobserve_required": False,
         "reobserve_reason": None,
+        "replan_required": False,
     }
 
 
@@ -128,12 +146,16 @@ def update_working_memory(
     last_error_m: float | None,
     scene_monitor_result: dict[str, Any] | SceneMonitorResult | None,
     reobservation_policy_result: dict[str, Any] | None,
+    adaptive_policy_result: dict[str, Any] | None = None,
+    stable_substep_count: int | None = None,
+    last_direction_check_passed: bool | None = None,
 ) -> dict[str, Any]:
     result = dict(memory if isinstance(memory, dict) else {})
     target_delta = _vector3(result.get("target_delta_m"))
     measured = _vector3(measured_total_delta_m)
     monitor = make_scene_monitor_result(scene_monitor_result)
     policy = reobservation_policy_result if isinstance(reobservation_policy_result, dict) else {}
+    adaptive = adaptive_policy_result if isinstance(adaptive_policy_result, dict) else {}
     result.update(
         {
             "working_memory_version": WORKING_MEMORY_VERSION,
@@ -144,11 +166,32 @@ def update_working_memory(
                 else target_delta
             ),
             "completed_substeps": max(0, int(completed_substeps)),
+            "stable_substep_count": max(
+                0,
+                int(
+                    stable_substep_count
+                    if stable_substep_count is not None
+                    else result.get("stable_substep_count") or 0
+                ),
+            ),
             "last_error_m": _optional_number(last_error_m),
+            "last_direction_check_passed": last_direction_check_passed,
             "scene_snapshot_id": monitor.get("scene_snapshot_id"),
             "scene_freshness_status": monitor.get("scene_freshness_status") or "unknown",
-            "reobserve_required": policy.get("reobserve_required") is True,
-            "reobserve_reason": policy.get("reobserve_reason"),
+            "execution_load_mode": adaptive.get(
+                "execution_load_mode",
+                result.get("execution_load_mode") or "full_observation",
+            ),
+            "llm_call_suppressed": adaptive.get("llm_call_policy") == "suppressed",
+            "vlm_call_suppressed": adaptive.get("vlm_call_policy")
+            in {"suppressed", "monitor_only"},
+            "reobserve_required": (
+                adaptive.get("reobserve_required") is True
+                if adaptive
+                else policy.get("reobserve_required") is True
+            ),
+            "reobserve_reason": adaptive.get("reobserve_reason") or policy.get("reobserve_reason"),
+            "replan_required": adaptive.get("replan_required") is True,
         }
     )
     return result

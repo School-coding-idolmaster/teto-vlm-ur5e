@@ -52,6 +52,7 @@ isaac_sim_operator:
   scene_monitor_type: none
   scene_monitor_frequency_hz: 5.0
   camera_monitor_unavailable_policy: warn_only
+  adaptive_reobservation_enabled: true
   workspace_envelope:
     x: [-1.0, 1.0]
     y: [-1.0, 1.0]

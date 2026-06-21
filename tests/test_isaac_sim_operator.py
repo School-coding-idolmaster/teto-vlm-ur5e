@@ -136,6 +136,7 @@ def test_example_config_loads_and_is_fail_closed():
     assert config.raw["scene_monitor_type"] == "none"
     assert config.raw["scene_monitor_frequency_hz"] == 5.0
     assert config.raw["camera_monitor_unavailable_policy"] == "warn_only"
+    assert config.raw["adaptive_reobservation_enabled"] is True
 
 
 def test_real_flag_is_refused():
@@ -155,6 +156,8 @@ def test_isaac_visual_options_do_not_appear_in_real_motion_script():
         "scene_monitor_frequency_hz",
         "camera_monitor_unavailable_policy",
         "scene_monitor_callable",
+        "adaptive_reobservation_enabled",
+        "adaptive_reobservation_policy",
     ):
         assert option not in real_script
 
@@ -272,11 +275,20 @@ def test_substeps_use_low_cost_monitor_without_recalling_qwen_or_vlm(tmp_path):
     assert calls == {"qwen": 1, "monitor": 3}
     assert result["completed_substep_count"] == 3
     assert result["reobserve_triggered"] is False
+    assert result["execution_load_mode"] == "lightweight_monitor"
+    assert result["llm_call_policy"] == "suppressed"
+    assert result["vlm_call_policy"] == "monitor_only"
+    assert result["camera_monitor_frequency_mode"] == "reduced"
+    assert result["load_reduction_active"] is True
     assert result["vlm_reobserve_called"] is False
     assert result["llm_reobserve_called"] is False
     assert result["working_memory_before"]["remaining_delta_m"] == [0.0, 0.0, 0.05]
     assert result["working_memory_after"]["remaining_delta_m"] == [0.0, 0.0, 0.0]
     assert result["working_memory_after"]["completed_substeps"] == 3
+    assert result["working_memory_after"]["stable_substep_count"] == 3
+    assert result["working_memory_after"]["execution_load_mode"] == "lightweight_monitor"
+    assert result["working_memory_after"]["llm_call_suppressed"] is True
+    assert result["working_memory_after"]["vlm_call_suppressed"] is True
     assert result["working_memory_after"]["scene_snapshot_id"] == "mock-3"
     assert all(step["camera_check_status"] == "PASS" for step in result["substeps"])
     assert all(step["vlm_reobserve_called"] is False for step in result["substeps"])
@@ -315,6 +327,11 @@ def test_scene_stale_stops_after_substep_and_requests_reobservation(tmp_path):
     assert result["reobserve_triggered"] is True
     assert result["reobserve_reason"] == "E_SCENE_STALE"
     assert result["replan_required"] is True
+    assert result["execution_load_mode"] == "recovery_reobserve"
+    assert result["llm_call_policy"] == "required_now"
+    assert result["vlm_call_policy"] == "required_now"
+    assert result["camera_monitor_frequency_mode"] == "elevated"
+    assert result["load_reduction_active"] is False
     assert result["vlm_reobserve_called"] is False
     assert result["llm_reobserve_called"] is False
     assert result["substeps"][0]["continue_allowed"] is False

@@ -10,6 +10,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
 
+from src.adaptive_reobservation_policy import (
+    STABLE_SUBGOAL_EXECUTION,
+    AdaptiveReobservationPolicyRequest,
+    evaluate_adaptive_reobservation_policy,
+)
 from src.autoregressive_motion_planner import (
     AutoregressiveMotionPlannerRequest,
     plan_offline_autoregressive_motion,
@@ -260,6 +265,9 @@ class IsaacSimOperator:
             goal_type="relative_motion",
             target_delta_m=delta,
             latest_verified_tcp_m=current_pose["position_m"],
+            motion_mode=str(
+                parser_result.get("motion_contract_type") or "single_axis_relative"
+            ),
         )
         evidence["working_memory_before"] = json.loads(json.dumps(working_memory))
         evidence["working_memory_after"] = json.loads(json.dumps(working_memory))
@@ -270,6 +278,7 @@ class IsaacSimOperator:
 
         latest = current_pose
         completed = 0
+        stable_substep_count = 0
         subgoal_failure_count = 0
         for index, step_delta in enumerate(step_deltas, start=1):
             before = _pose(self.gateway.status().get("current_tcp_pose"))
@@ -333,7 +342,39 @@ class IsaacSimOperator:
                     camera_unavailable_policy=self.config.camera_monitor_unavailable_policy,
                 )
             )
-            continue_allowed = verified and policy_result["continue_allowed"] is True
+            adaptive_policy_result = evaluate_adaptive_reobservation_policy(
+                AdaptiveReobservationPolicyRequest(
+                    working_memory=working_memory,
+                    current_execution_phase=STABLE_SUBGOAL_EXECUTION,
+                    subgoal_index=index,
+                    position_error_m=error_m,
+                    position_error_limit_m=self.config.position_tolerance_m,
+                    direction_check_passed=direction_ok,
+                    subgoal_failure_count=subgoal_failure_count,
+                    scene_monitor_result=scene_monitor_result,
+                    target_task_type="relative_motion",
+                    camera_monitor_available=scene_monitor_result.get(
+                        "camera_check_status"
+                    )
+                    not in {"NOT_AVAILABLE", "FAIL"},
+                    stable_substep_count=stable_substep_count,
+                    subgoal_failed=not verified,
+                    config={
+                        "camera_unavailable_policy": (
+                            self.config.camera_monitor_unavailable_policy
+                        ),
+                    },
+                )
+            )
+            scene_monitor_result["frequency_mode"] = adaptive_policy_result[
+                "camera_monitor_frequency_mode"
+            ]
+            continue_allowed = bool(
+                verified
+                and policy_result["continue_allowed"] is True
+                and adaptive_policy_result["reobserve_required"] is False
+                and adaptive_policy_result["abort_required"] is False
+            )
             evidence["substeps"].append(
                 {
                     "substep_index": index,
@@ -351,9 +392,19 @@ class IsaacSimOperator:
                     "monitor_frequency_hz": scene_monitor_result.get("monitor_frequency_hz"),
                     "scene_monitor_result": scene_monitor_result,
                     "reobservation_policy_result": policy_result,
-                    "reobserve_triggered": policy_result["reobserve_required"],
-                    "reobserve_reason": policy_result["reobserve_reason"],
-                    "replan_required": policy_result["replan_required"],
+                    "adaptive_reobservation_policy_result": adaptive_policy_result,
+                    "execution_load_mode": adaptive_policy_result["execution_load_mode"],
+                    "llm_call_policy": adaptive_policy_result["llm_call_policy"],
+                    "vlm_call_policy": adaptive_policy_result["vlm_call_policy"],
+                    "camera_monitor_frequency_mode": adaptive_policy_result[
+                        "camera_monitor_frequency_mode"
+                    ],
+                    "load_reduction_active": adaptive_policy_result[
+                        "load_reduction_active"
+                    ],
+                    "reobserve_triggered": adaptive_policy_result["reobserve_required"],
+                    "reobserve_reason": adaptive_policy_result["reobserve_reason"],
+                    "replan_required": adaptive_policy_result["replan_required"],
                     "vlm_reobserve_called": False,
                     "llm_reobserve_called": False,
                     "continue_allowed": continue_allowed,
@@ -366,6 +417,7 @@ class IsaacSimOperator:
             if verified:
                 completed += 1
                 latest = after
+            stable_substep_count = stable_substep_count + 1 if continue_allowed else 0
             measured_total_delta = (
                 [
                     round(after["position_m"][component] - current_pose["position_m"][component], 6)
@@ -382,18 +434,31 @@ class IsaacSimOperator:
                 last_error_m=error_m,
                 scene_monitor_result=scene_monitor_result,
                 reobservation_policy_result=policy_result,
+                adaptive_policy_result=adaptive_policy_result,
+                stable_substep_count=stable_substep_count,
+                last_direction_check_passed=direction_ok,
             )
             evidence["working_memory_after"] = json.loads(json.dumps(working_memory))
             evidence["scene_monitor_result"] = scene_monitor_result
             evidence["reobservation_policy_result"] = policy_result
-            if policy_result["reobserve_required"] is True:
+            evidence["adaptive_reobservation_policy_result"] = adaptive_policy_result
+            evidence["execution_load_mode"] = adaptive_policy_result["execution_load_mode"]
+            evidence["llm_call_policy"] = adaptive_policy_result["llm_call_policy"]
+            evidence["vlm_call_policy"] = adaptive_policy_result["vlm_call_policy"]
+            evidence["camera_monitor_frequency_mode"] = adaptive_policy_result[
+                "camera_monitor_frequency_mode"
+            ]
+            evidence["load_reduction_active"] = adaptive_policy_result[
+                "load_reduction_active"
+            ]
+            if adaptive_policy_result["reobserve_required"] is True:
                 evidence["reobserve_triggered"] = True
-                evidence["reobserve_reason"] = policy_result["reobserve_reason"]
-                evidence["replan_required"] = policy_result["replan_required"]
+                evidence["reobserve_reason"] = adaptive_policy_result["reobserve_reason"]
+                evidence["replan_required"] = adaptive_policy_result["replan_required"]
             if not continue_allowed:
                 evidence["abort_reason"] = (
                     result.get("abort_reason")
-                    or policy_result.get("reobserve_reason")
+                    or adaptive_policy_result.get("reobserve_reason")
                     or (
                         "E_SIMULATED_POST_STEP_DIRECTION_MISMATCH"
                         if not direction_ok
@@ -471,7 +536,10 @@ class IsaacSimOperator:
             "PASS"
             if completed == len(step_deltas) and not evidence["reobserve_triggered"]
             else "ABORTED"
-            if (evidence.get("reobservation_policy_result") or {}).get("abort_required") is True
+            if (evidence.get("adaptive_reobservation_policy_result") or {}).get(
+                "abort_required"
+            )
+            is True
             else "REOBSERVE_REQUIRED"
             if evidence["reobserve_triggered"]
             else "ABORTED"
@@ -558,6 +626,12 @@ class IsaacSimOperator:
                 monitor_frequency_hz=self.config.scene_monitor_frequency_hz
             ),
             "reobservation_policy_result": None,
+            "adaptive_reobservation_policy_result": None,
+            "execution_load_mode": "full_observation",
+            "llm_call_policy": "initial_only",
+            "vlm_call_policy": "initial_only",
+            "camera_monitor_frequency_mode": "unavailable",
+            "load_reduction_active": False,
             "reobserve_triggered": False,
             "reobserve_reason": None,
             "replan_required": False,
