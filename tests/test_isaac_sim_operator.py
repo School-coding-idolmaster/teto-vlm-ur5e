@@ -19,6 +19,7 @@ from src.isaac_sim_operator import (
     validate_no_real_robot_args,
     validate_no_real_robot_config,
 )
+from src.isaac_sim_bridge import _missing_local_usd_dependencies, _require_articulation
 
 CONSOLE_SCRIPT = Path("scripts/teto_isaac_operator_console.py")
 
@@ -281,6 +282,34 @@ def test_ur5e_asset_override_selects_usd_reference(monkeypatch, tmp_path):
     assert observed["asset_mode"] == "usd_reference"
     assert observed["asset_path"] == str(asset)
     assert observed["closed"] is True
+
+
+def test_missing_usd_dependency_is_reported_before_articulation_init(tmp_path):
+    asset = tmp_path / "ur5e.usd"
+    asset.write_text("#usda 1.0\n", encoding="utf-8")
+
+    class FakeLayer:
+        def GetExternalReferences(self):
+            return ["ur5e_isaac.usd", "tool_link.usd"]
+
+    sdf_module = SimpleNamespace(
+        Layer=SimpleNamespace(FindOrOpen=lambda _path: FakeLayer()),
+    )
+
+    missing = _missing_local_usd_dependencies(asset, sdf_module)
+    assert missing == [tmp_path / "tool_link.usd", tmp_path / "ur5e_isaac.usd"]
+
+
+def test_missing_articulation_has_explicit_error_code():
+    class InvalidPrim:
+        def IsValid(self):
+            return False
+
+    stage = SimpleNamespace(GetPrimAtPath=lambda _path: InvalidPrim())
+    usd_module = SimpleNamespace(PrimRange=lambda _prim: ())
+
+    with pytest.raises(RuntimeError, match="E_ISAAC_ARTICULATION_NOT_FOUND"):
+        _require_articulation(stage, "/World/TETO_UR5e", usd_module, object())
 
 
 def test_quit_closes_simulation_app_through_main(monkeypatch, tmp_path):

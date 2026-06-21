@@ -4,8 +4,40 @@ import json
 import os
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 from src.isaac_sim_operator import GATEWAY_SIMULATED_MEASURED
+
+
+def _missing_local_usd_dependencies(asset_path: Path, sdf_module) -> list[Path]:
+    layer = sdf_module.Layer.FindOrOpen(str(asset_path))
+    if layer is None:
+        return [asset_path]
+    missing: list[Path] = []
+    for dependency in layer.GetExternalReferences():
+        dependency_text = unquote(str(dependency))
+        if "://" in dependency_text:
+            continue
+        dependency_path = Path(dependency_text)
+        if not dependency_path.is_absolute():
+            dependency_path = asset_path.parent / dependency_path
+        dependency_path = dependency_path.resolve()
+        if not dependency_path.is_file():
+            missing.append(dependency_path)
+    return sorted(set(missing), key=str)
+
+
+def _require_articulation(stage, prim_path: str, usd_module, articulation_root_api) -> None:
+    root_prim = stage.GetPrimAtPath(prim_path)
+    if root_prim and root_prim.IsValid():
+        articulation_paths = [
+            prim.GetPath().pathString
+            for prim in usd_module.PrimRange(root_prim)
+            if prim.HasAPI(articulation_root_api)
+        ]
+        if articulation_paths:
+            return
+    raise RuntimeError(f"E_ISAAC_ARTICULATION_NOT_FOUND: prim_path={prim_path}")
 
 
 class IsaacSimMeasuredBridge:
@@ -36,6 +68,7 @@ class IsaacSimMeasuredBridge:
         from isaacsim.robot_motion.motion_generation.interface_config_loader import (
             load_supported_lula_kinematics_solver_config,
         )
+        from pxr import Sdf, Usd, UsdPhysics
 
         asset_mode = str(self.config.get("asset_mode") or "usd_reference")
         print(f"[TETO Isaac] bridge asset_mode={asset_mode}", flush=True)
@@ -72,9 +105,16 @@ class IsaacSimMeasuredBridge:
             self.config["robot_prim_path"] = prim_path
             self.config["resolved_asset_source"] = "isaac_urdf_imported_to_usd_stage"
         else:
+            missing_dependencies = _missing_local_usd_dependencies(asset_path, Sdf)
+            if missing_dependencies:
+                missing_text = ", ".join(str(path) for path in missing_dependencies)
+                raise RuntimeError(
+                    f"E_ISAAC_USD_DEPENDENCY_MISSING: asset={asset_path}; missing={missing_text}"
+                )
             print(f"[TETO Isaac] loading UR5e USD reference: {asset_path}", flush=True)
             add_reference_to_stage(usd_path=str(asset_path), prim_path=prim_path)
             self.config["resolved_asset_source"] = "local_usd_reference"
+            _require_articulation(self.world.stage, prim_path, Usd, UsdPhysics.ArticulationRootAPI)
         self.robot = self.world.scene.add(SingleArticulation(prim_path=prim_path, name="teto_isaac_ur5e"))
         self.world.reset()
         for _ in range(int(self.config.get("startup_render_frames", 30))):
