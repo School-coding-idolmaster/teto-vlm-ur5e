@@ -1,0 +1,24 @@
+[package]
+title = "TETO Isaac URDF Importer"
+description = "Minimal non-rendering Kit app for generated UR5e USD assets"
+version = "1.0.0"
+
+[dependencies]
+"omni.kit.asset_converter" = {}
+"omni.kit.commands" = {}
+"omni.usd.libs" = {}
+"omni.usd.schema.physx" = {}
+
+[settings.app]
+name = "TETO Isaac URDF Importer"
+fastShutdown = true
+file.ignoreUnsavedOnExit = true
+settings.persistent = false
+
+[settings.app.exts.folders]
+'++' = [
+    "${kit}/../apps",
+    "${kit}/../exts",
+    "${kit}/../extscache",
+    "${kit}/../extsDeprecated",
+]

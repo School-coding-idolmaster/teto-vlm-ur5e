@@ -312,6 +312,30 @@ def test_missing_articulation_has_explicit_error_code():
         _require_articulation(stage, "/World/TETO_UR5e", usd_module, object())
 
 
+def test_nested_generated_asset_articulation_path_is_selected():
+    class FakePath:
+        pathString = "/World/TETO_UR5e/root_joint/root_joint"
+
+    class FakePrim:
+        def IsValid(self):
+            return True
+
+        def HasAPI(self, _api):
+            return True
+
+        def GetPath(self):
+            return FakePath()
+
+    prim = FakePrim()
+    stage = SimpleNamespace(GetPrimAtPath=lambda _path: prim)
+    usd_module = SimpleNamespace(PrimRange=lambda _prim: (prim,))
+
+    assert (
+        _require_articulation(stage, "/World/TETO_UR5e", usd_module, object())
+        == "/World/TETO_UR5e/root_joint/root_joint"
+    )
+
+
 def test_quit_closes_simulation_app_through_main(monkeypatch, tmp_path):
     console = _load_console_module()
     config = _config()

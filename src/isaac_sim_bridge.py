@@ -27,7 +27,7 @@ def _missing_local_usd_dependencies(asset_path: Path, sdf_module) -> list[Path]:
     return sorted(set(missing), key=str)
 
 
-def _require_articulation(stage, prim_path: str, usd_module, articulation_root_api) -> None:
+def _require_articulation(stage, prim_path: str, usd_module, articulation_root_api) -> str:
     root_prim = stage.GetPrimAtPath(prim_path)
     if root_prim and root_prim.IsValid():
         articulation_paths = [
@@ -36,7 +36,7 @@ def _require_articulation(stage, prim_path: str, usd_module, articulation_root_a
             if prim.HasAPI(articulation_root_api)
         ]
         if articulation_paths:
-            return
+            return articulation_paths[0]
     raise RuntimeError(f"E_ISAAC_ARTICULATION_NOT_FOUND: prim_path={prim_path}")
 
 
@@ -114,7 +114,13 @@ class IsaacSimMeasuredBridge:
             print(f"[TETO Isaac] loading UR5e USD reference: {asset_path}", flush=True)
             add_reference_to_stage(usd_path=str(asset_path), prim_path=prim_path)
             self.config["resolved_asset_source"] = "local_usd_reference"
-            _require_articulation(self.world.stage, prim_path, Usd, UsdPhysics.ArticulationRootAPI)
+            prim_path = _require_articulation(
+                self.world.stage,
+                prim_path,
+                Usd,
+                UsdPhysics.ArticulationRootAPI,
+            )
+            self.config["robot_prim_path"] = prim_path
         self.robot = self.world.scene.add(SingleArticulation(prim_path=prim_path, name="teto_isaac_ur5e"))
         self.world.reset()
         for _ in range(int(self.config.get("startup_render_frames", 30))):
