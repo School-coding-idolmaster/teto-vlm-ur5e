@@ -133,6 +133,9 @@ def test_example_config_loads_and_is_fail_closed():
     assert config.raw["apply_initial_home_pose"] is True
     assert config.raw["visual_demo_slowdown_enabled"] is True
     assert config.raw["visual_markers_enabled"] is True
+    assert config.raw["scene_monitor_type"] == "none"
+    assert config.raw["scene_monitor_frequency_hz"] == 5.0
+    assert config.raw["camera_monitor_unavailable_policy"] == "warn_only"
 
 
 def test_real_flag_is_refused():
@@ -149,6 +152,9 @@ def test_isaac_visual_options_do_not_appear_in_real_motion_script():
         "--no-visual-markers",
         "visual_demo_slowdown_enabled",
         "isaac_initial_home_pose",
+        "scene_monitor_frequency_hz",
+        "camera_monitor_unavailable_policy",
+        "scene_monitor_callable",
     ):
         assert option not in real_script
 
@@ -232,6 +238,90 @@ def test_single_axis_explicit_delta_executes_only_in_isaac_sim(command, tmp_path
     assert result["final_position_error_m"] == 0.0
     assert result["direction_check_passed"] is True
     assert result["isaac_visual_timing"]["scope"] == "isaac_sim_only"
+
+
+def test_substeps_use_low_cost_monitor_without_recalling_qwen_or_vlm(tmp_path):
+    calls = {"qwen": 0, "monitor": 0}
+
+    def qwen(_prompt):
+        calls["qwen"] += 1
+        return _single_axis_qwen_response(0.05)
+
+    def monitor(context):
+        calls["monitor"] += 1
+        return {
+            "monitor_type": "mock",
+            "camera_check_status": "PASS",
+            "target_visible": None,
+            "depth_valid": True,
+            "tf_fresh": True,
+            "scene_snapshot_id": f"mock-{context['substep_index']}",
+            "scene_freshness_status": "fresh",
+        }
+
+    result = IsaacSimOperator(
+        config=_config(),
+        gateway=SyntheticFakeGateway(),
+        headless=True,
+        output_dir=tmp_path,
+        qwen_callable=qwen,
+        scene_monitor_callable=monitor,
+    ).execute_text("move up 0.05 meters")
+
+    assert result["status"] == "PASS"
+    assert calls == {"qwen": 1, "monitor": 3}
+    assert result["completed_substep_count"] == 3
+    assert result["reobserve_triggered"] is False
+    assert result["vlm_reobserve_called"] is False
+    assert result["llm_reobserve_called"] is False
+    assert result["working_memory_before"]["remaining_delta_m"] == [0.0, 0.0, 0.05]
+    assert result["working_memory_after"]["remaining_delta_m"] == [0.0, 0.0, 0.0]
+    assert result["working_memory_after"]["completed_substeps"] == 3
+    assert result["working_memory_after"]["scene_snapshot_id"] == "mock-3"
+    assert all(step["camera_check_status"] == "PASS" for step in result["substeps"])
+    assert all(step["vlm_reobserve_called"] is False for step in result["substeps"])
+    assert all(step["llm_reobserve_called"] is False for step in result["substeps"])
+    assert result["real_robot_motion_executed"] is False
+    assert result["trajectory_sent"] is False
+
+
+def test_scene_stale_stops_after_substep_and_requests_reobservation(tmp_path):
+    calls = {"qwen": 0, "monitor": 0}
+
+    def qwen(_prompt):
+        calls["qwen"] += 1
+        return _single_axis_qwen_response(0.05)
+
+    def stale_monitor(_context):
+        calls["monitor"] += 1
+        return {
+            "monitor_type": "mock",
+            "camera_check_status": "WARN",
+            "scene_freshness_status": "stale",
+        }
+
+    result = IsaacSimOperator(
+        config=_config(),
+        gateway=SyntheticFakeGateway(),
+        headless=True,
+        output_dir=tmp_path,
+        qwen_callable=qwen,
+        scene_monitor_callable=stale_monitor,
+    ).execute_text("move up 0.05 meters")
+
+    assert result["status"] == "REOBSERVE_REQUIRED"
+    assert calls == {"qwen": 1, "monitor": 1}
+    assert result["completed_substep_count"] == 1
+    assert result["reobserve_triggered"] is True
+    assert result["reobserve_reason"] == "E_SCENE_STALE"
+    assert result["replan_required"] is True
+    assert result["vlm_reobserve_called"] is False
+    assert result["llm_reobserve_called"] is False
+    assert result["substeps"][0]["continue_allowed"] is False
+    assert result["working_memory_after"]["reobserve_required"] is True
+    assert result["working_memory_after"]["remaining_delta_m"] == [0.0, 0.0, 0.03]
+    assert result["real_robot_motion_executed"] is False
+    assert result["trajectory_sent"] is False
 
 
 def test_qwen_delta_contract_is_identical_at_isaac_and_real_handoffs(tmp_path):

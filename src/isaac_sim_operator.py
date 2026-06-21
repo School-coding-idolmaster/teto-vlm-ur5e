@@ -14,6 +14,13 @@ from src.autoregressive_motion_planner import (
     AutoregressiveMotionPlannerRequest,
     plan_offline_autoregressive_motion,
 )
+from src.memory_guided_execution import (
+    ReobservationPolicyRequest,
+    build_working_memory,
+    evaluate_event_triggered_reobservation,
+    make_scene_monitor_result,
+    update_working_memory,
+)
 from src.qwen_motion_parser import QwenMotionParserRequest, evaluate_qwen_motion_parser
 
 
@@ -70,6 +77,15 @@ class IsaacOperatorConfig:
     @property
     def position_tolerance_m(self) -> float:
         return _positive(self.raw.get("position_tolerance_m"), 0.008)
+
+    @property
+    def scene_monitor_frequency_hz(self) -> float:
+        return _positive(self.raw.get("scene_monitor_frequency_hz"), 5.0)
+
+    @property
+    def camera_monitor_unavailable_policy(self) -> str:
+        value = str(self.raw.get("camera_monitor_unavailable_policy") or "warn_only")
+        return value if value in {"warn_only", "block"} else "warn_only"
 
     @property
     def workspace_bounds(self) -> dict[str, list[float]]:
@@ -149,12 +165,14 @@ class IsaacSimOperator:
         headless: bool = False,
         output_dir: str | Path = DEFAULT_OUTPUT_DIR,
         qwen_callable=None,
+        scene_monitor_callable=None,
     ) -> None:
         self.config = config
         self.gateway = gateway
         self.headless = bool(headless)
         self.output_dir = Path(output_dir)
         self.qwen_callable = qwen_callable
+        self.scene_monitor_callable = scene_monitor_callable
         self.last_result: dict[str, Any] | None = None
         self.last_evidence_path: str | None = None
         if gateway.gateway_type not in {GATEWAY_SIMULATED_MEASURED, GATEWAY_SYNTHETIC_FAKE}:
@@ -237,6 +255,14 @@ class IsaacSimOperator:
         evidence["delta_vector_m"] = delta
         evidence["requested_distance_norm_m"] = round(_norm(delta), 6)
         evidence["substep_count"] = len(step_deltas)
+        working_memory = build_working_memory(
+            task_goal=text,
+            goal_type="relative_motion",
+            target_delta_m=delta,
+            latest_verified_tcp_m=current_pose["position_m"],
+        )
+        evidence["working_memory_before"] = json.loads(json.dumps(working_memory))
+        evidence["working_memory_after"] = json.loads(json.dumps(working_memory))
         if not step_deltas:
             evidence["status"] = "BLOCKED"
             evidence["abort_reason"] = plan.get("final_blocking_reason") or "E_DECOMPOSITION_FAILED"
@@ -244,6 +270,7 @@ class IsaacSimOperator:
 
         latest = current_pose
         completed = 0
+        subgoal_failure_count = 0
         for index, step_delta in enumerate(step_deltas, start=1):
             before = _pose(self.gateway.status().get("current_tcp_pose"))
             if before is None:
@@ -280,6 +307,33 @@ class IsaacSimOperator:
                 and error_m <= self.config.position_tolerance_m + EPS
                 and direction_ok
             )
+            subgoal_failure_count = 0 if verified else subgoal_failure_count + 1
+            scene_monitor_result = self._run_scene_monitor(
+                {
+                    "task_goal": text,
+                    "goal_type": "relative_motion",
+                    "substep_index": index,
+                    "substep_count": len(step_deltas),
+                    "target_tcp_pose": target,
+                    "measured_tcp_before": before,
+                    "measured_tcp_after": after,
+                }
+            )
+            policy_result = evaluate_event_triggered_reobservation(
+                ReobservationPolicyRequest(
+                    working_memory=working_memory,
+                    latest_measured_tcp_m=after["position_m"] if after else None,
+                    subgoal_target_tcp_m=target["position_m"],
+                    position_error_m=error_m,
+                    position_error_limit_m=self.config.position_tolerance_m,
+                    direction_check_passed=direction_ok,
+                    scene_monitor_result=scene_monitor_result,
+                    subgoal_failed=not verified,
+                    subgoal_failure_count=subgoal_failure_count,
+                    camera_unavailable_policy=self.config.camera_monitor_unavailable_policy,
+                )
+            )
+            continue_allowed = verified and policy_result["continue_allowed"] is True
             evidence["substeps"].append(
                 {
                     "substep_index": index,
@@ -293,21 +347,60 @@ class IsaacSimOperator:
                     "position_tolerance_m": self.config.position_tolerance_m,
                     "direction_check_passed": direction_ok,
                     "verification_result": "PASS" if verified else "FAILED",
-                    "continue_allowed": verified,
+                    "camera_check_status": scene_monitor_result.get("camera_check_status"),
+                    "monitor_frequency_hz": scene_monitor_result.get("monitor_frequency_hz"),
+                    "scene_monitor_result": scene_monitor_result,
+                    "reobservation_policy_result": policy_result,
+                    "reobserve_triggered": policy_result["reobserve_required"],
+                    "reobserve_reason": policy_result["reobserve_reason"],
+                    "replan_required": policy_result["replan_required"],
+                    "vlm_reobserve_called": False,
+                    "llm_reobserve_called": False,
+                    "continue_allowed": continue_allowed,
                     "gateway_result": result,
                     "isaac_visual_timing": result.get("isaac_visual_timing"),
                     "isaac_visual_markers_enabled": result.get("isaac_visual_markers_enabled"),
                     "isaac_trajectory_trace_enabled": result.get("isaac_trajectory_trace_enabled"),
                 }
             )
-            if not verified:
+            if verified:
+                completed += 1
+                latest = after
+            measured_total_delta = (
+                [
+                    round(after["position_m"][component] - current_pose["position_m"][component], 6)
+                    for component in range(3)
+                ]
+                if after is not None
+                else None
+            )
+            working_memory = update_working_memory(
+                working_memory,
+                latest_verified_tcp_m=after["position_m"] if verified and after else latest["position_m"],
+                measured_total_delta_m=measured_total_delta,
+                completed_substeps=completed,
+                last_error_m=error_m,
+                scene_monitor_result=scene_monitor_result,
+                reobservation_policy_result=policy_result,
+            )
+            evidence["working_memory_after"] = json.loads(json.dumps(working_memory))
+            evidence["scene_monitor_result"] = scene_monitor_result
+            evidence["reobservation_policy_result"] = policy_result
+            if policy_result["reobserve_required"] is True:
+                evidence["reobserve_triggered"] = True
+                evidence["reobserve_reason"] = policy_result["reobserve_reason"]
+                evidence["replan_required"] = policy_result["replan_required"]
+            if not continue_allowed:
                 evidence["abort_reason"] = (
                     result.get("abort_reason")
-                    or ("E_SIMULATED_POST_STEP_DIRECTION_MISMATCH" if not direction_ok else "E_SIMULATED_POST_STEP_VERIFICATION_FAILED")
+                    or policy_result.get("reobserve_reason")
+                    or (
+                        "E_SIMULATED_POST_STEP_DIRECTION_MISMATCH"
+                        if not direction_ok
+                        else "E_SIMULATED_POST_STEP_VERIFICATION_FAILED"
+                    )
                 )
                 break
-            completed += 1
-            latest = after
 
         evidence["completed_substep_count"] = completed
         evidence["simulated_robot_motion_executed"] = completed > 0
@@ -374,7 +467,15 @@ class IsaacSimOperator:
             if evidence["isaac_visual_markers_enabled"]
             else "visual markers disabled; compare requested/measured delta in this summary"
         )
-        evidence["status"] = "PASS" if completed == len(step_deltas) else "ABORTED"
+        evidence["status"] = (
+            "PASS"
+            if completed == len(step_deltas) and not evidence["reobserve_triggered"]
+            else "ABORTED"
+            if (evidence.get("reobservation_policy_result") or {}).get("abort_required") is True
+            else "REOBSERVE_REQUIRED"
+            if evidence["reobserve_triggered"]
+            else "ABORTED"
+        )
         return self._finish(evidence)
 
     def home(self) -> dict[str, Any]:
@@ -451,6 +552,18 @@ class IsaacSimOperator:
             "substep_count": 0,
             "completed_substep_count": 0,
             "substeps": [],
+            "working_memory_before": None,
+            "working_memory_after": None,
+            "scene_monitor_result": make_scene_monitor_result(
+                monitor_frequency_hz=self.config.scene_monitor_frequency_hz
+            ),
+            "reobservation_policy_result": None,
+            "reobserve_triggered": False,
+            "reobserve_reason": None,
+            "replan_required": False,
+            "vlm_reobserve_called": False,
+            "llm_reobserve_called": False,
+            "monitor_frequency_hz": self.config.scene_monitor_frequency_hz,
             "abort_reason": None,
             "final_simulated_tcp_pose": before_status.get("current_tcp_pose"),
             "final_simulated_joint_state": before_status.get("joint_state"),
@@ -479,6 +592,25 @@ class IsaacSimOperator:
             "artifact_paths": {},
             **_safety_flags(),
         }
+
+    def _run_scene_monitor(self, context: dict[str, Any]) -> dict[str, Any]:
+        if self.scene_monitor_callable is None:
+            return make_scene_monitor_result(
+                monitor_frequency_hz=self.config.scene_monitor_frequency_hz
+            )
+        try:
+            value = self.scene_monitor_callable(context)
+        except Exception as exc:
+            value = {
+                "monitor_type": "mock",
+                "camera_check_status": "NOT_AVAILABLE",
+                "scene_freshness_status": "unknown",
+                "monitor_error": str(exc),
+            }
+        return make_scene_monitor_result(
+            value,
+            monitor_frequency_hz=self.config.scene_monitor_frequency_hz,
+        )
 
     def _finish(self, evidence: dict[str, Any]) -> dict[str, Any]:
         json_path, markdown_path = write_isaac_operator_evidence(evidence, self.output_dir)

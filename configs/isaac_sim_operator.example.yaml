@@ -47,6 +47,11 @@ isaac_sim_operator:
   visual_demo_fps: 60
   visual_markers_enabled: true
   trajectory_trace_enabled: true
+  # Low-cost scene checks may run per substep. They never call Qwen/VLM.
+  # "none" is a safe placeholder until an Isaac camera adapter is configured.
+  scene_monitor_type: none
+  scene_monitor_frequency_hz: 5.0
+  camera_monitor_unavailable_policy: warn_only
   workspace_envelope:
     x: [-1.0, 1.0]
     y: [-1.0, 1.0]
