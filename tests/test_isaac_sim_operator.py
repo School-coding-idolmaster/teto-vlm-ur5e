@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from scripts import text_to_ur5e_real_motion as real_motion_cli
 from src.isaac_sim_operator import (
     GATEWAY_SYNTHETIC_FAKE,
     IsaacOperatorConfig,
@@ -27,6 +28,7 @@ from src.isaac_sim_bridge import (
     _require_articulation,
     _visual_timing,
 )
+from src.qwen_motion_parser import QwenMotionParserRequest, evaluate_qwen_motion_parser
 
 CONSOLE_SCRIPT = Path("scripts/teto_isaac_operator_console.py")
 
@@ -230,6 +232,77 @@ def test_single_axis_explicit_delta_executes_only_in_isaac_sim(command, tmp_path
     assert result["final_position_error_m"] == 0.0
     assert result["direction_check_passed"] is True
     assert result["isaac_visual_timing"]["scope"] == "isaac_sim_only"
+
+
+def test_qwen_delta_contract_is_identical_at_isaac_and_real_handoffs(tmp_path):
+    command = "move up 0.05 meters"
+    raw_response = _single_axis_qwen_response(0.05)
+    parser_result = evaluate_qwen_motion_parser(
+        QwenMotionParserRequest(
+            user_text=command,
+            max_distance_m=0.35,
+            hard_safety_limit_m=0.35,
+            llm_callable=lambda _prompt: raw_response,
+        )
+    )
+    real_parsed = real_motion_cli._parsed_from_qwen_result(
+        command,
+        parser_result,
+        max_distance_m=0.35,
+        hard_safety_limit_m=0.35,
+    )
+    real_metadata = real_motion_cli._metadata_from_parser_result(
+        parser_result,
+        input_mode="command_line",
+        original_user_text=command,
+        parser_mode="qwen",
+    )
+    isaac_result = IsaacSimOperator(
+        config=_config(),
+        gateway=SyntheticFakeGateway(),
+        headless=True,
+        output_dir=tmp_path,
+        qwen_callable=lambda _prompt: raw_response,
+    ).execute_text(command)
+
+    expected_contract = {
+        "intent": "relative_cartesian_motion",
+        "frame": "base_link",
+        "direction_axis": "z",
+        "direction_sign": "+",
+        "distance_m": 0.05,
+        "requested_distance_m": 0.05,
+        "requested_distance_norm_m": 0.05,
+        "delta_m": [0.0, 0.0, 0.05],
+        "vector_delta_m": {"x": 0.0, "y": 0.0, "z": 0.05},
+        "motion_contract_type": "single_axis_relative",
+        "legacy_axis_compatible": True,
+    }
+    shared_fields = tuple(expected_contract)
+    parser_contract = parser_result["normalized_contract"]
+    isaac_contract = isaac_result["parsed_motion"]["normalized_contract"]
+    real_contract = real_metadata["normalized_contract"]
+
+    assert {key: parser_contract[key] for key in shared_fields} == expected_contract
+    assert {key: isaac_contract[key] for key in shared_fields} == expected_contract
+    assert {key: real_contract[key] for key in shared_fields} == expected_contract
+    assert parser_result["parser_source"] == "qwen_llm"
+    assert real_metadata["parser_source"] == "qwen_llm"
+    assert real_parsed.parser_source == "qwen_llm"
+    assert real_parsed.delta_m == expected_contract["delta_m"]
+    assert real_parsed.distance_m == expected_contract["distance_m"]
+    assert real_parsed.natural_language_evidence["direction_axis"] == "z"
+    assert real_parsed.natural_language_evidence["direction_sign"] == "+"
+    assert real_motion_cli._direction_parse_guard(
+        parser_metadata=real_metadata,
+        parsed=real_parsed,
+    ) is None
+    assert isaac_result["real_robot_motion_executed"] is False
+    assert isaac_result["real_ur_connection_used"] is False
+    assert isaac_result["dashboard_used"] is False
+    assert isaac_result["rtde_write_used"] is False
+    assert isaac_result["moveit_execute_trajectory_called"] is False
+    assert isaac_result["trajectory_sent"] is False
 
 
 def test_gui_operator_refuses_synthetic_gateway(tmp_path):
