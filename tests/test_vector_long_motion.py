@@ -19,7 +19,7 @@ def test_vector_norm_and_straight_line_decomposition():
     plan = _vector_plan()
 
     assert plan["final_plan_status"] == "PASS"
-    assert plan["motion_contract_type"] == "vector_relative"
+    assert plan["motion_contract_type"] == "decomposed_relative_motion"
     assert plan["requested_distance_norm_m"] == round(math.sqrt(0.10), 6)
     assert plan["substep_count"] == 16
     assert plan["substeps"][0]["substep_delta_m"] == {"x": 0.01875, "y": 0.00625, "z": 0.0}
@@ -38,7 +38,7 @@ def test_single_axis_backward_compatibility_keeps_ten_substeps():
         )
     )
 
-    assert canonical["motion_contract_type"] == "single_axis_relative"
+    assert canonical["motion_contract_type"] == "decomposed_relative_motion"
     assert plan["substep_count"] == 10
     assert plan["direction_axis"] == "x"
     assert plan["direction_sign"] == "+"
@@ -84,7 +84,7 @@ def test_mocked_qwen_vector_semantics_canonicalize_without_execution_permission(
     assert result["qwen_motion_parser_status"] == "PASS"
     assert result["delta_m"] == [0.3, 0.1, 0.0]
     assert result["vector_source"] == "qwen_semantic"
-    assert result["motion_contract_type"] == "vector_relative"
+    assert result["motion_contract_type"] == "decomposed_relative_motion"
     assert result["execution_permission_decided_by_parser"] is False
     assert result["safety_gate_still_required"] is True
 

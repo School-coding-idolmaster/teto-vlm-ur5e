@@ -18,6 +18,10 @@ from src.motion_command_normalizer import (
     STATUS_UNSUPPORTED_INTENT,
     normalize_motion_command,
 )
+from src.bounded_relative_motion import (
+    E_RELATIVE_MOTION_RANGE_EXCEEDED,
+    SHARED_MAX_RELATIVE_MOTION_DISTANCE_M,
+)
 
 
 CONTRACT_VERSION = "teto_qwen_motion_parser.v2"
@@ -165,12 +169,19 @@ def evaluate_qwen_motion_parser(request: QwenMotionParserRequest) -> Dict[str, A
                 blocking_reasons.append(E_INVALID_DIRECTION)
             else:
                 blocking_reasons.append(E_UNSUPPORTED_INTENT)
+        elif normalized_language.get("parse_status") == "BLOCKED":
+            blocking_reasons.append(
+                normalized_language.get("shared_envelope_error_code")
+                or E_UNSUPPORTED_INTENT
+            )
 
         axis = _string(normalized_language.get("direction_axis"))
         direction = _string(normalized_language.get("direction_sign"))
         distance_m = _optional_float(normalized_language.get("requested_distance_m"))
         confidence = _optional_float(normalized_language.get("motion_parse_confidence"))
-        if distance_m is not None and distance_m > float(request.hard_safety_limit_m) + EPS:
+        if distance_m is not None and distance_m > SHARED_MAX_RELATIVE_MOTION_DISTANCE_M + EPS:
+            blocking_reasons.append(E_RELATIVE_MOTION_RANGE_EXCEEDED)
+        elif distance_m is not None and distance_m > float(request.hard_safety_limit_m) + EPS:
             blocking_reasons.append(E_EXCESSIVE_CARTESIAN_MOTION)
         elif distance_m is not None and distance_m > float(request.max_distance_m) + EPS:
             blocking_reasons.append(E_EXCESSIVE_CARTESIAN_MOTION)
@@ -223,6 +234,46 @@ def evaluate_qwen_motion_parser(request: QwenMotionParserRequest) -> Dict[str, A
     if isinstance(normalized_language, dict):
         result.update(_language_result_fields(normalized_language))
     return result
+
+
+def evaluate_shared_motion_parser(
+    user_text: str,
+    *,
+    max_distance_m: float = SHARED_MAX_RELATIVE_MOTION_DISTANCE_M,
+) -> Dict[str, Any]:
+    normalized = normalize_motion_command(
+        user_text,
+        parser_source="shared_rule_based",
+    )
+    blocking = []
+    if normalized.get("parse_status") != NORMALIZER_STATUS_PASS:
+        blocking.append(
+            normalized.get("shared_envelope_error_code")
+            or normalized.get("clarification_reason")
+            or normalized.get("unsupported_intent_reason")
+            or "E_SHARED_MOTION_PARSE_BLOCKED"
+        )
+    distance = _optional_float(normalized.get("requested_distance_m"))
+    if distance is not None and distance > float(max_distance_m) + EPS:
+        blocking.append(
+            E_RELATIVE_MOTION_RANGE_EXCEEDED
+            if float(max_distance_m) >= SHARED_MAX_RELATIVE_MOTION_DISTANCE_M - EPS
+            else E_EXCESSIVE_CARTESIAN_MOTION
+        )
+    blocking = _unique(blocking)
+    return {
+        "contract_version": CONTRACT_VERSION,
+        "qwen_motion_parser_status": STATUS_BLOCKED if blocking else STATUS_PASS,
+        "parser_source": "shared_rule_based",
+        "llm_called": False,
+        "raw_llm_output": None,
+        "normalized_contract": normalized if not blocking else None,
+        "delta_m": normalized.get("delta_m"),
+        "distance_m": distance,
+        "parser_blocking_reasons": blocking,
+        "blocking_reasons": blocking,
+        **_language_result_fields(normalized),
+    }
 
 
 def build_qwen_motion_prompt(user_text: str) -> str:
@@ -507,6 +558,20 @@ def _language_result_fields(language: dict[str, Any]) -> dict[str, Any]:
         "qwen_fallback_conflict_reason",
         "canonicalization_source",
         "canonicalization_warnings",
+        "intent_name",
+        "requested_vector_m",
+        "normalized_direction_vector",
+        "shared_max_total_distance_m",
+        "shared_max_relative_motion_distance_m",
+        "distance_within_shared_envelope",
+        "decomposition_required",
+        "max_substep_m",
+        "subgoal_count",
+        "planned_subgoals",
+        "execution_backend",
+        "backend_policy_id",
+        "one_shot_execution_allowed",
+        "shared_envelope_error_code",
     ]
     return {key: language.get(key) for key in keys}
 

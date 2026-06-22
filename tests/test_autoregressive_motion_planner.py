@@ -190,11 +190,11 @@ def test_explicit_compound_motion_is_planned_as_vector_not_single_axis():
     )
 
     assert canonical["parse_status"] == "PASS"
-    assert canonical["motion_contract_type"] == "vector_relative"
+    assert canonical["motion_contract_type"] == "decomposed_relative_motion"
     assert canonical["delta_m"] == [0.0, -0.02, 0.05]
     assert result["final_plan_status"] == "PASS"
     assert result["direction_axis"] is None
-    assert result["motion_contract_type"] == "vector_relative"
+    assert result["motion_contract_type"] == "decomposed_relative_motion"
 
 
 def test_contract_only_semantics_are_explicit_for_every_substep():

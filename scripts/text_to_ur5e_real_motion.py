@@ -327,7 +327,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--long-step-threshold-m", type=float, default=0.05)
     parser.add_argument("--max-substep-distance-m", "--max-decomposed-substep-distance-m", type=float, default=0.02)
     parser.add_argument("--min-final-substep-distance-m", type=float, default=0.001)
-    parser.add_argument("--long-motion-total-limit-m", "--max-decomposed-total-distance-m", type=float, default=0.20)
+    parser.add_argument("--long-motion-total-limit-m", "--max-decomposed-total-distance-m", type=float, default=0.50)
     parser.add_argument("--substep-execution-mode", choices=["contract_only"], default="contract_only")
     parser.add_argument("--speed-scale", type=float, default=0.10)
     parser.add_argument("--acc-scale", type=float, default=0.10)
@@ -1634,7 +1634,7 @@ def _safety_policy_from_args(args: argparse.Namespace) -> dict[str, Any]:
         hard_safety_limit,
     )
     max_decomposed_substep = _optional_number(getattr(args, "max_substep_distance_m", None)) or 0.02
-    max_decomposed_total = _optional_number(getattr(args, "long_motion_total_limit_m", None)) or 0.20
+    max_decomposed_total = _optional_number(getattr(args, "long_motion_total_limit_m", None)) or 0.50
     return {
         "safety_policy_name": str(getattr(args, "safety_policy_name", None) or DEFAULT_SAFETY_POLICY_NAME),
         "safety_policy_source": DEFAULT_SAFETY_POLICY_SOURCE,
@@ -2029,6 +2029,12 @@ def _planner_acceptance(
         "controller_command_sent": controller_command_sent,
         "execute_trajectory_called": execute_called,
         "real_robot_motion_executed": real_robot_motion_executed,
+        "manual_confirmation_required": True,
+        "manual_confirmation_status": (
+            "ACCEPTED"
+            if execution.get("manual_confirmation_accepted") is True
+            else "NOT_RECEIVED"
+        ),
         "requested_delta_m": requested_delta if _vector3(requested_delta) else None,
         "requested_distance_m": requested_distance,
         "configured_max_distance_m": _first_not_none(
@@ -2055,6 +2061,17 @@ def _planner_acceptance(
         "decomposition_enabled": motion.get("decomposition_enabled"),
         "long_step_policy_name": motion.get("long_step_policy_name"),
         "requested_total_distance_m": motion.get("requested_total_distance_m"),
+        "intent_name": motion.get("intent_name"),
+        "motion_contract_type": motion.get("motion_contract_type"),
+        "requested_vector_m": motion.get("requested_vector_m"),
+        "normalized_direction_vector": motion.get("normalized_direction_vector"),
+        "shared_max_total_distance_m": motion.get("shared_max_total_distance_m"),
+        "distance_within_shared_envelope": motion.get("distance_within_shared_envelope"),
+        "decomposition_required": motion.get("decomposition_required"),
+        "execution_backend": motion.get("execution_backend"),
+        "backend_policy_id": motion.get("backend_policy_id"),
+        "one_shot_execution_allowed": motion.get("one_shot_execution_allowed"),
+        "planned_subgoals": motion.get("planned_subgoals"),
         "one_shot_distance_limit_m": motion.get("one_shot_distance_limit_m"),
         "max_one_shot_distance_m": motion.get("max_one_shot_distance_m"),
         "hard_single_step_safety_limit_m": motion.get("hard_single_step_safety_limit_m"),
@@ -2628,6 +2645,10 @@ def _evidence(
         "execute_trajectory_called": execute_trajectory_called,
         "controller_command_sent": controller_command_sent,
         "real_robot_motion_executed": real_robot_motion_executed,
+        "manual_confirmation_required": True,
+        "manual_confirmation_status": (
+            "ACCEPTED" if manual_confirmation_received else "NOT_RECEIVED"
+        ),
         **_real_small_motion_gate_fields(real_small_motion_gate),
         "requested_distance_m": planner_acceptance.get("requested_distance_m") if isinstance(planner_acceptance, dict) else None,
         "configured_max_distance_m": planner_acceptance.get("configured_max_distance_m") if isinstance(planner_acceptance, dict) else None,
@@ -2650,6 +2671,19 @@ def _evidence(
         "decomposition_enabled": planner_acceptance.get("decomposition_enabled") if isinstance(planner_acceptance, dict) else None,
         "long_step_policy_name": planner_acceptance.get("long_step_policy_name") if isinstance(planner_acceptance, dict) else None,
         "requested_total_distance_m": planner_acceptance.get("requested_total_distance_m") if isinstance(planner_acceptance, dict) else None,
+        "intent_name": planner_acceptance.get("intent_name") if isinstance(planner_acceptance, dict) else None,
+        "motion_contract_type": planner_acceptance.get("motion_contract_type") if isinstance(planner_acceptance, dict) else None,
+        "requested_vector_m": planner_acceptance.get("requested_vector_m") if isinstance(planner_acceptance, dict) else None,
+        "normalized_direction_vector": planner_acceptance.get("normalized_direction_vector") if isinstance(planner_acceptance, dict) else None,
+        "shared_max_total_distance_m": planner_acceptance.get("shared_max_total_distance_m") if isinstance(planner_acceptance, dict) else None,
+        "distance_within_shared_envelope": planner_acceptance.get("distance_within_shared_envelope") if isinstance(planner_acceptance, dict) else None,
+        "decomposition_required": planner_acceptance.get("decomposition_required") if isinstance(planner_acceptance, dict) else None,
+        "execution_backend": planner_acceptance.get("execution_backend") if isinstance(planner_acceptance, dict) else None,
+        "backend_policy_id": planner_acceptance.get("backend_policy_id") if isinstance(planner_acceptance, dict) else None,
+        "one_shot_execution_allowed": planner_acceptance.get("one_shot_execution_allowed") if isinstance(planner_acceptance, dict) else None,
+        "one_shot_target_pose_created": planner_acceptance.get("one_shot_target_pose_created") if isinstance(planner_acceptance, dict) else None,
+        "one_shot_real_motion_allowed": planner_acceptance.get("one_shot_real_motion_allowed") if isinstance(planner_acceptance, dict) else None,
+        "planned_subgoals": planner_acceptance.get("planned_subgoals") if isinstance(planner_acceptance, dict) else None,
         "one_shot_distance_limit_m": planner_acceptance.get("one_shot_distance_limit_m") if isinstance(planner_acceptance, dict) else None,
         "max_one_shot_distance_m": planner_acceptance.get("max_one_shot_distance_m") if isinstance(planner_acceptance, dict) else None,
         "hard_single_step_safety_limit_m": planner_acceptance.get("hard_single_step_safety_limit_m") if isinstance(planner_acceptance, dict) else None,

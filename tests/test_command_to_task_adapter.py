@@ -91,7 +91,7 @@ def test_qwen_llm_callable_cartesian_offset_examples_pass_validation():
 
 def test_cartesian_offset_excessive_invalid_frame_and_malformed_outputs_block():
     cases = [
-        ('{"intent":"cartesian_offset","frame":"base_link","dx":0.30,"dy":0.0,"dz":0.0,"confidence":0.95,"error_code":"OK"}', "E_EXCESSIVE_CARTESIAN_MOTION"),
+        ('{"intent":"cartesian_offset","frame":"base_link","dx":0.51,"dy":0.0,"dz":0.0,"confidence":0.95,"error_code":"OK"}', "E_EXCESSIVE_CARTESIAN_MOTION"),
         ('{"intent":"cartesian_offset","frame":"tool0","dx":0.01,"dy":0.0,"dz":0.0,"confidence":0.95,"error_code":"OK"}', "E_INVALID_FRAME"),
         ('{"intent":"cartesian_offset","frame":"base_link","dx":0.01,"dy":0.0,"confidence":0.95,"error_code":"OK"}', "E_CARTESIAN_OFFSET_REQUIRED"),
         ('{"intent":"cartesian_offset","frame":"base_link","dx":0.0,"dy":0.0,"dz":0.0,"confidence":0.95,"error_code":"OK"}', "E_INVALID_CARTESIAN_OFFSET"),

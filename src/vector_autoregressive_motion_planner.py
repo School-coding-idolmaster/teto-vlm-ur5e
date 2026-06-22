@@ -3,6 +3,10 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from src.bounded_relative_motion import (
+    E_RELATIVE_MOTION_RANGE_EXCEEDED,
+    SHARED_MAX_RELATIVE_MOTION_DISTANCE_M,
+)
 
 PLANNER_VERSION = "teto_v3_0_13_vector_autoregressive_long_motion_v1"
 ABORT_POLICY_VERSION = "teto_v3_0_13_vector_abort_policy_v1"
@@ -27,7 +31,7 @@ def plan_vector_autoregressive_motion(
     )
     max_total = _positive(
         config.get("max_decomposed_total_distance_m", config.get("long_motion_total_limit_m")),
-        0.20,
+        SHARED_MAX_RELATIVE_MOTION_DISTANCE_M,
     )
     execution_mode = _string(config.get("substep_execution_mode")) or "offline_preview"
     if execution_mode not in {"offline_preview", "contract_only"}:
@@ -62,7 +66,15 @@ def plan_vector_autoregressive_motion(
             "final_blocking_reason": "E_DECOMPOSITION_NOT_REQUIRED",
         }
     if norm > max_total + EPS:
-        return {**base, "final_plan_status": "BLOCKED", "final_blocking_reason": "E_LONG_MOTION_TOTAL_EXCEEDS_LIMIT"}
+        return {
+            **base,
+            "final_plan_status": "BLOCKED",
+            "final_blocking_reason": (
+                E_RELATIVE_MOTION_RANGE_EXCEEDED
+                if norm > SHARED_MAX_RELATIVE_MOTION_DISTANCE_M + EPS
+                else "E_LONG_MOTION_TOTAL_EXCEEDS_LIMIT"
+            ),
+        }
     inherited = _gateway_blockers(gateway_evidence)
     if inherited:
         return {
@@ -217,7 +229,7 @@ def _base(
         "execution_permission_decided_by_parser": False,
         "safety_gate_still_required": True,
         "vector_motion_supported": True,
-        "motion_contract_type": "vector_relative",
+        "motion_contract_type": "decomposed_relative_motion",
         "delta_m": list(delta),
         "vector_delta_m": _components(delta),
         "requested_distance_m": norm,

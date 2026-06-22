@@ -635,6 +635,45 @@ def test_gateway_accepts_twenty_cm_as_expanded_decomposed_contract_when_enabled(
     assert result["planned_substep_vectors_m"] == [[0.02, 0.0, 0.0]] * 10
     assert result["decomposed_substeps_m"] == [[0.02, 0.0, 0.0]] * 10
     assert result["decomposed_total_distance_m"] == 0.20
+
+
+def test_gateway_builds_shared_fifty_cm_contract_without_one_shot_target():
+    result = evaluate_cartesian_motion_gateway(
+        CartesianMotionGatewayRequest(
+            requested=True,
+            config={
+                **_long_step_config(),
+                "max_decomposed_total_distance_m": 0.50,
+                "hard_safety_limit_m": 0.05,
+            },
+            command_to_task_result=_task([0.50, 0.0, 0.0]),
+            current_tcp_pose=_pose([0.20, 0.0, 0.30]),
+        )
+    )
+
+    assert result["cartesian_motion_gateway_status"] == "PASS"
+    assert result["motion_contract_type"] == "decomposed_relative_motion"
+    assert result["shared_max_total_distance_m"] == 0.50
+    assert result["subgoal_count"] == 25
+    assert result["one_shot_execution_allowed"] is False
+    assert result["one_shot_real_motion_allowed"] is False
+    assert result["one_shot_target_pose_created"] is False
+    assert result["target_pose"] is None
+    assert result["real_robot_motion_executed"] is False
+
+
+def test_gateway_blocks_above_shared_relative_motion_envelope():
+    result = evaluate_cartesian_motion_gateway(
+        CartesianMotionGatewayRequest(
+            requested=True,
+            config={**_long_step_config(), "max_decomposed_total_distance_m": 0.50},
+            command_to_task_result=_task([0.51, 0.0, 0.0]),
+            current_tcp_pose=_pose([0.20, 0.0, 0.30]),
+        )
+    )
+
+    assert result["cartesian_motion_gateway_status"] == "BLOCKED"
+    assert result["decomposition_blocking_reason"] == "E_RELATIVE_MOTION_RANGE_EXCEEDED"
     assert result["substep_execution_mode"] == "contract_only"
     assert result["real_substep_execution_enabled"] is False
     assert result["target_pose"] is None

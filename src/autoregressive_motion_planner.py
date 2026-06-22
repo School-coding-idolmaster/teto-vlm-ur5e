@@ -5,6 +5,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from src.vector_autoregressive_motion_planner import plan_vector_autoregressive_motion
+from src.bounded_relative_motion import (
+    E_RELATIVE_MOTION_RANGE_EXCEEDED,
+    SHARED_MAX_RELATIVE_MOTION_DISTANCE_M,
+)
 
 
 PLANNER_VERSION = "teto_v3_0_13_vector_autoregressive_long_motion_v1"
@@ -60,7 +64,7 @@ def plan_offline_autoregressive_motion(
     )
     max_total = _positive_number(
         config.get("max_decomposed_total_distance_m", config.get("long_motion_total_limit_m")),
-        0.20,
+        SHARED_MAX_RELATIVE_MOTION_DISTANCE_M,
     )
     min_final = _positive_number(config.get("min_final_substep_distance_m"), 0.001)
     execution_mode = _string(config.get("substep_execution_mode")) or "offline_preview"
@@ -107,7 +111,11 @@ def plan_offline_autoregressive_motion(
             "decomposition_enabled": True,
             "decomposed_motion_allowed": False,
             "final_plan_status": STATUS_BLOCKED,
-            "final_blocking_reason": "E_LONG_MOTION_TOTAL_EXCEEDS_LIMIT",
+            "final_blocking_reason": (
+                E_RELATIVE_MOTION_RANGE_EXCEEDED
+                if requested_distance > SHARED_MAX_RELATIVE_MOTION_DISTANCE_M + EPS
+                else "E_LONG_MOTION_TOTAL_EXCEEDS_LIMIT"
+            ),
         }
     inherited_blockers = _gateway_blockers(gateway)
     if inherited_blockers:
@@ -295,7 +303,7 @@ def _base_evidence(
         "execution_permission_decided_by_parser": False,
         "safety_gate_still_required": True,
         "vector_motion_supported": True,
-        "motion_contract_type": "single_axis_relative",
+        "motion_contract_type": "decomposed_relative_motion",
         "delta_m": _delta_from_axis_sign(axis, sign, requested_distance),
         "vector_delta_m": _components(_delta_from_axis_sign(axis, sign, requested_distance)),
         "requested_distance_norm_m": requested_distance,

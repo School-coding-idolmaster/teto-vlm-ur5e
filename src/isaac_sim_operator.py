@@ -3,7 +3,6 @@ from __future__ import annotations
 import ipaddress
 import json
 import math
-import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -16,9 +15,9 @@ from src.adaptive_reobservation_policy import (
     AdaptiveReobservationPolicyRequest,
     evaluate_adaptive_reobservation_policy,
 )
-from src.autoregressive_motion_planner import (
-    AutoregressiveMotionPlannerRequest,
-    plan_offline_autoregressive_motion,
+from src.bounded_relative_motion import (
+    E_RELATIVE_MOTION_RANGE_EXCEEDED,
+    build_bounded_relative_motion_contract,
 )
 from src.memory_guided_execution import (
     ReobservationPolicyRequest,
@@ -27,7 +26,11 @@ from src.memory_guided_execution import (
     make_scene_monitor_result,
     update_working_memory,
 )
-from src.qwen_motion_parser import QwenMotionParserRequest, evaluate_qwen_motion_parser
+from src.qwen_motion_parser import (
+    QwenMotionParserRequest,
+    evaluate_qwen_motion_parser,
+    evaluate_shared_motion_parser,
+)
 
 
 CONTRACT_VERSION = "teto_isaac_sim_operator.v1"
@@ -237,15 +240,7 @@ class IsaacSimOperator:
             return {"status": "BLOCKED", "abort_reason": "E_EMPTY_COMMAND", **_safety_flags()}
         before_status = self.gateway.status()
         current_pose = _pose(before_status.get("current_tcp_pose"))
-        parser_result = (
-            _parse_isaac_demo_motion(
-                text,
-                max_distance_m=self.config.max_total_distance_m,
-            )
-            if self.qwen_callable is None
-            else None
-        )
-        if parser_result is None:
+        if self.qwen_callable is not None:
             parser_result = evaluate_qwen_motion_parser(
                 QwenMotionParserRequest(
                     user_text=text,
@@ -254,6 +249,11 @@ class IsaacSimOperator:
                     endpoint=self.config.qwen_endpoint,
                     llm_callable=self.qwen_callable,
                 )
+            )
+        else:
+            parser_result = evaluate_shared_motion_parser(
+                text,
+                max_distance_m=self.config.max_total_distance_m,
             )
         evidence = self._base_evidence(text, parser_result, before_status)
         if parser_result.get("qwen_motion_parser_status") != "PASS":
@@ -274,16 +274,16 @@ class IsaacSimOperator:
 
         step_deltas, plan = self._decompose(parser_result, current_pose, delta)
         evidence["autoregressive_plan"] = plan
+        evidence["parser_source"] = parser_result.get("parser_source")
         evidence["delta_vector_m"] = delta
         evidence["motion_contract_type"] = (
-            "long_range_approach"
-            if _norm(delta) > self.config.max_substep_distance_m + EPS
-            else parser_result.get("motion_contract_type") or "single_axis_relative"
+            parser_result.get("motion_contract_type") or "decomposed_relative_motion"
         )
         evidence["requested_total_distance_m"] = round(
             float(parser_result.get("requested_distance_m") or _norm(delta)),
             6,
         )
+        evidence["requested_distance_m"] = evidence["requested_total_distance_m"]
         evidence["requested_distance_norm_m"] = round(_norm(delta), 6)
         evidence["requested_vector_m"] = delta
         evidence["normalized_direction_vector"] = _normalized(delta)
@@ -292,6 +292,20 @@ class IsaacSimOperator:
         evidence["subgoal_count"] = len(step_deltas)
         evidence["planned_subgoals"] = plan.get("planned_subgoals", [])
         evidence["workspace_check_status"] = plan.get("workspace_check_status", "BLOCKED")
+        for key in (
+            "intent_name",
+            "shared_max_total_distance_m",
+            "shared_max_relative_motion_distance_m",
+            "distance_within_shared_envelope",
+            "decomposition_required",
+            "execution_backend",
+            "backend_policy_id",
+            "one_shot_execution_allowed",
+        ):
+            evidence[key] = plan.get(key)
+        evidence["safety_gate_status"] = "PASS"
+        evidence["manual_confirmation_required"] = False
+        evidence["manual_confirmation_status"] = "NOT_APPLICABLE_SIM"
         working_memory = build_working_memory(
             task_goal=text,
             goal_type="relative_motion",
@@ -617,7 +631,7 @@ class IsaacSimOperator:
         if norm > self.config.max_total_distance_m + EPS:
             return [], {
                 "final_plan_status": "BLOCKED",
-                "final_blocking_reason": "E_ISAAC_LONG_RANGE_LIMIT",
+                "final_blocking_reason": E_RELATIVE_MOTION_RANGE_EXCEEDED,
                 "workspace_check_status": "NOT_RUN",
                 "planned_subgoals": [],
             }
@@ -628,83 +642,19 @@ class IsaacSimOperator:
                 "workspace_check_status": "BLOCKED",
                 "planned_subgoals": [],
             }
-        if (
-            parser_result.get("parser_source") != "isaac_sim_demo_local"
-            and norm > self.config.max_substep_distance_m + EPS
-        ):
-            canonical = {
-                "parse_status": "PASS",
-                "intent": "relative_cartesian_motion",
-                "motion_frame": parser_result.get("motion_frame") or "base_link",
-                "requested_distance_m": norm,
-                "requested_distance_norm_m": norm,
-                "delta_m": delta,
-                "vector_delta_m": delta,
-                "motion_contract_type": parser_result.get("motion_contract_type"),
-                "direction_axis": parser_result.get("direction_axis"),
-                "direction_sign": parser_result.get("direction_sign"),
-            }
-            plan = plan_offline_autoregressive_motion(
-                AutoregressiveMotionPlannerRequest(
-                    canonical_motion_intent=canonical,
-                    current_tcp_pose=current_pose,
-                    config={
-                        "enable_long_step_decomposition": True,
-                        "max_one_shot_distance_m": self.config.max_substep_distance_m,
-                        "max_decomposed_substep_distance_m": self.config.max_substep_distance_m,
-                        "max_decomposed_total_distance_m": self.config.max_total_distance_m,
-                        "substep_execution_mode": "offline_preview",
-                        "workspace_bounds": self.config.workspace_bounds,
-                    },
-                )
-            )
-            if plan.get("final_plan_status") != "PASS":
-                return [], plan
-            vectors = [
-                vector
-                for vector in (
-                    _vector(item)
-                    for item in (
-                        plan.get("decomposed_substeps_m")
-                        or plan.get("planned_substep_vectors_m")
-                        or []
-                    )
-                )
-                if vector is not None
-            ]
-            plan["planned_subgoals"] = _planned_subgoals(current_pose, vectors)
-            plan["workspace_check_status"] = "PASS"
-            return vectors, plan
-        if norm <= self.config.max_substep_distance_m + EPS:
-            target = _target_pose(current_pose, final_position)
-            return [delta], {
-                "final_plan_status": "PASS",
-                "planned_execution_style": "isaac_sim_one_substep",
-                "substep_count": 1,
-                "decomposed_substeps_m": [delta],
-                "workspace_check_status": "PASS",
-                "planned_subgoals": [{"subgoal_index": 1, "planned_pose": target}],
-            }
-        count = max(int(math.ceil(norm / self.config.max_substep_distance_m)), 1)
-        regular_step = [round(component / count, 6) for component in delta]
-        vectors = [list(regular_step) for _ in range(count - 1)]
-        vectors.append(
-            [
-                round(delta[axis] - sum(vector[axis] for vector in vectors), 6)
-                for axis in range(3)
-            ]
+        contract = build_bounded_relative_motion_contract(
+            delta,
+            max_substep_m=self.config.max_substep_distance_m,
+            execution_backend="isaac_sim",
+            backend_policy_id="isaac_measured_gateway_v1",
+            start_pose=current_pose,
         )
-        planned_subgoals = _planned_subgoals(current_pose, vectors)
+        vectors = contract["decomposed_substeps_m"]
         return vectors, {
+            **contract,
             "final_plan_status": "PASS",
-            "planned_execution_style": "isaac_sim_long_range_approach",
-            "motion_contract_type": "long_range_approach",
+            "planned_execution_style": "shared_decomposed_relative_motion",
             "safety_gate_scope": "isaac_sim_decomposed_contract",
-            "requested_total_distance_m": round(norm, 6),
-            "max_substep_m": self.config.max_substep_distance_m,
-            "substep_count": count,
-            "decomposed_substeps_m": vectors,
-            "planned_subgoals": planned_subgoals,
             "workspace_check_status": "PASS",
         }
 
@@ -722,6 +672,7 @@ class IsaacSimOperator:
             "runtime_mode": "headless_smoke_test" if self.headless else "gui",
             "input_text": text,
             "qwen_raw_response": parser_result.get("raw_llm_output"),
+            "parser_source": parser_result.get("parser_source"),
             "parsed_motion": parser_result,
             "gateway_type": self.gateway.gateway_type,
             "initial_simulated_tcp_pose": before_status.get("current_tcp_pose"),
@@ -729,6 +680,7 @@ class IsaacSimOperator:
             "delta_vector_m": None,
             "motion_contract_type": None,
             "requested_total_distance_m": None,
+            "requested_distance_m": None,
             "requested_vector_m": None,
             "normalized_direction_vector": None,
             "requested_distance_norm_m": None,
@@ -741,6 +693,17 @@ class IsaacSimOperator:
             "substeps": [],
             "final_displacement_m": 0.0,
             "workspace_check_status": "NOT_RUN",
+            "intent_name": "relative_cartesian_motion",
+            "shared_max_total_distance_m": self.config.max_total_distance_m,
+            "shared_max_relative_motion_distance_m": self.config.max_total_distance_m,
+            "distance_within_shared_envelope": None,
+            "decomposition_required": None,
+            "execution_backend": "isaac_sim",
+            "backend_policy_id": "isaac_measured_gateway_v1",
+            "one_shot_execution_allowed": False,
+            "safety_gate_status": "NOT_RUN",
+            "manual_confirmation_required": False,
+            "manual_confirmation_status": "NOT_APPLICABLE_SIM",
             "working_memory_before": None,
             "working_memory_after": None,
             "scene_monitor_result": make_scene_monitor_result(
@@ -909,101 +872,11 @@ def _safety_flags() -> dict[str, bool]:
     }
 
 
-_ISAAC_DEMO_COMMAND = re.compile(
-    r"^move\s+(forward|backward|left|right|up|down)"
-    r"(?:\s+and\s+(forward|backward|left|right|up|down))?"
-    r"\s+([0-9]+(?:\.[0-9]+)?)\s*(?:m|meter|meters)$",
-    re.IGNORECASE,
-)
-_ISAAC_DIRECTION_VECTORS = {
-    "forward": [1.0, 0.0, 0.0],
-    "backward": [-1.0, 0.0, 0.0],
-    "left": [0.0, 1.0, 0.0],
-    "right": [0.0, -1.0, 0.0],
-    "up": [0.0, 0.0, 1.0],
-    "down": [0.0, 0.0, -1.0],
-}
-
-
-def _parse_isaac_demo_motion(text: str, *, max_distance_m: float) -> dict[str, Any] | None:
-    match = _ISAAC_DEMO_COMMAND.fullmatch(text.strip())
-    if match is None:
-        return None
-    first, second, raw_distance = match.groups()
-    distance = float(raw_distance)
-    names = [first.lower(), second.lower() if second else None]
-    vectors = [_ISAAC_DIRECTION_VECTORS[name] for name in names if name]
-    combined = [sum(vector[axis] for vector in vectors) for axis in range(3)]
-    combined_norm = _norm(combined)
-    if combined_norm <= EPS:
-        blocking_reasons = ["E_CONFLICTING_DIRECTION"]
-        delta = None
-    else:
-        unit = [component / combined_norm for component in combined]
-        delta = [round(component * distance, 6) for component in unit]
-        blocking_reasons = (
-            ["E_ISAAC_LONG_RANGE_LIMIT"]
-            if distance > float(max_distance_m) + EPS
-            else []
-        )
-    return {
-        "contract_version": "teto_isaac_demo_parser.v1",
-        "qwen_motion_parser_status": "BLOCKED" if blocking_reasons else "PASS",
-        "parser_source": "isaac_sim_demo_local",
-        "llm_called": False,
-        "raw_llm_output": None,
-        "blocking_reasons": blocking_reasons,
-        "parser_blocking_reasons": blocking_reasons,
-        "delta_m": delta,
-        "distance_m": round(distance, 6),
-        "requested_distance_m": round(distance, 6),
-        "requested_distance_norm_m": round(distance, 6),
-        "motion_contract_type": "decomposed_relative_motion",
-        "motion_frame": "base_link",
-        "normalized_contract": {
-            "intent": "relative_cartesian_motion",
-            "frame": "base_link",
-            "delta_m": delta,
-            "requested_distance_m": round(distance, 6),
-            "requested_distance_norm_m": round(distance, 6),
-            "motion_contract_type": "decomposed_relative_motion",
-            "isaac_sim_only": True,
-        }
-        if delta is not None
-        else None,
-    }
-
-
 def _normalized(vector: list[float]) -> list[float]:
     length = _norm(vector)
     if length <= EPS:
         return [0.0, 0.0, 0.0]
     return [round(component / length, 6) for component in vector]
-
-
-def _target_pose(source_pose: dict[str, Any], position: list[float]) -> dict[str, Any]:
-    return {
-        "frame": source_pose["frame"],
-        "position_m": [round(float(value), 6) for value in position],
-        "orientation_xyzw": list(source_pose["orientation_xyzw"]),
-    }
-
-
-def _planned_subgoals(
-    current_pose: dict[str, Any],
-    vectors: list[list[float]],
-) -> list[dict[str, Any]]:
-    planned = []
-    accumulated = list(current_pose["position_m"])
-    for index, vector in enumerate(vectors, start=1):
-        accumulated = _add(accumulated, vector)
-        planned.append(
-            {
-                "subgoal_index": index,
-                "planned_pose": _target_pose(current_pose, accumulated),
-            }
-        )
-    return planned
 
 
 def _joint_delta_summary(before: Any, after: Any, *, threshold_rad: float = 1e-5) -> list[dict[str, Any]]:

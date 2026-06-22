@@ -279,7 +279,7 @@ def test_isaac_long_range_axis_commands_are_decomposed(command, expected, tmp_pa
     ).execute_text(command)
 
     assert result["status"] == "PASS"
-    assert result["motion_contract_type"] == "long_range_approach"
+    assert result["motion_contract_type"] == "decomposed_relative_motion"
     assert result["requested_total_distance_m"] == 0.5
     assert result["requested_vector_m"] == expected
     assert result["substep_count"] == 10
@@ -336,7 +336,7 @@ def test_isaac_one_meter_is_blocked_by_sim_only_limit(tmp_path):
     ).execute_text("move forward 1.0 meters")
 
     assert result["status"] == "BLOCKED"
-    assert result["abort_reason"] == "E_ISAAC_LONG_RANGE_LIMIT"
+    assert result["abort_reason"] == "E_RELATIVE_MOTION_RANGE_EXCEEDED"
     assert result["simulated_robot_motion_executed"] is False
 
 
@@ -479,7 +479,7 @@ def test_qwen_delta_contract_is_identical_at_isaac_and_real_handoffs(tmp_path):
         "requested_distance_norm_m": 0.05,
         "delta_m": [0.0, 0.0, 0.05],
         "vector_delta_m": {"x": 0.0, "y": 0.0, "z": 0.05},
-        "motion_contract_type": "single_axis_relative",
+        "motion_contract_type": "decomposed_relative_motion",
         "legacy_axis_compatible": True,
     }
     shared_fields = tuple(expected_contract)

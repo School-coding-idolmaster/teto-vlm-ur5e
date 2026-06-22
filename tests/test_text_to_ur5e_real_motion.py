@@ -1127,7 +1127,7 @@ def test_ten_cm_accepts_as_decomposed_contract_when_enabled(monkeypatch, capsys)
     assert evidence["decomposition_enabled"] is True
     assert evidence["max_one_shot_distance_m"] == 0.05
     assert evidence["max_decomposed_substep_distance_m"] == 0.02
-    assert evidence["max_decomposed_total_distance_m"] == 0.20
+    assert evidence["max_decomposed_total_distance_m"] == 0.50
     assert evidence["requested_distance_m"] == 0.10
     assert evidence["substep_count"] == 5
     assert evidence["decomposed_substeps_m"] == [[0.0, 0.0, 0.02]] * 5
@@ -1212,6 +1212,32 @@ def test_twenty_cm_accepts_as_expanded_decomposed_contract_when_enabled(monkeypa
     assert evidence["planned_substep_vectors_m"] == [[0.0, 0.0, 0.02]] * 10
     assert evidence["decomposed_substeps_m"] == [[0.0, 0.0, 0.02]] * 10
     assert evidence["decomposed_total_distance_m"] == 0.20
+
+
+def test_fifty_cm_real_path_builds_decomposed_contract_without_one_shot(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_lookup_current_tcp_pose", lambda timeout_s: _pose())
+
+    exit_code = cli.main(
+        [
+            "--parser",
+            "rule",
+            "--enable-long-step-decomposition",
+            "--cmd",
+            "move forward 0.5 meters",
+        ]
+    )
+
+    evidence = _final_evidence(capsys.readouterr().out)
+    assert exit_code == 0
+    assert evidence["final_status"] == "PASS"
+    assert evidence["motion_contract_type"] == "decomposed_relative_motion"
+    assert evidence["shared_max_total_distance_m"] == 0.50
+    assert evidence["distance_within_shared_envelope"] is True
+    assert evidence["one_shot_execution_allowed"] is False
+    assert evidence["max_one_shot_distance_m"] == 0.05
+    assert evidence["one_shot_target_pose_created"] is not True
+    assert evidence["manual_confirmation_required"] is True
+    assert evidence["real_robot_motion_executed"] is False
     assert evidence["substep_execution_mode"] == "contract_only"
     assert evidence["real_substep_execution_enabled"] is False
     assert evidence["target_pose"] is None

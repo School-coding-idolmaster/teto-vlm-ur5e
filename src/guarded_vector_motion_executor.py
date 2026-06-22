@@ -77,7 +77,10 @@ def execute_guarded_vector_motion(request: GuardedVectorExecutionRequest) -> dic
             "final_abort_reason": preflight_blockers[0],
             "preflight_blocking_reasons": preflight_blockers,
         }
-    if plan.get("final_plan_status") != "PASS" or plan.get("motion_contract_type") != "vector_relative":
+    if plan.get("final_plan_status") != "PASS" or plan.get("motion_contract_type") not in {
+        "vector_relative",
+        "decomposed_relative_motion",
+    }:
         return {
             **base,
             "final_real_execution_status": "BLOCKED",

@@ -503,7 +503,7 @@ def test_qwen_single_axis_explicit_delta_canonicalizes_without_distance_object()
     assert result["delta_m"] == [0.0, 0.0, 0.05]
     assert result["vector_delta_m"] == {"x": 0.0, "y": 0.0, "z": 0.05}
     assert result["vector_components_m"] == {"x": 0.0, "y": 0.0, "z": 0.05}
-    assert result["motion_contract_type"] == "single_axis_relative"
+    assert result["motion_contract_type"] == "decomposed_relative_motion"
     assert result["legacy_axis_compatible"] is True
     assert result["normalized_contract"]["direction_axis"] == "z"
     assert result["normalized_contract"]["direction_sign"] == "+"

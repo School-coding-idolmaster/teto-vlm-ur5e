@@ -28,6 +28,11 @@ from src.moveit_pose_executor import (
     evaluate_moveit_pose_execute,
     evaluate_moveit_pose_plan,
 )
+from src.bounded_relative_motion import (
+    E_RELATIVE_MOTION_RANGE_EXCEEDED,
+    SHARED_MAX_RELATIVE_MOTION_DISTANCE_M,
+    build_bounded_relative_motion_contract,
+)
 
 
 CONTRACT_VERSION = "teto_cartesian_motion_gateway.v1"
@@ -47,7 +52,7 @@ DEFAULT_LONG_STEP_POLICY_NAME = "lab_long_step_decomposition_v1"
 DEFAULT_MOTION_PERMISSION_ENVELOPE_VERSION = "teto_v3_0_9_expanded_decomposed_contract_preview"
 DEFAULT_MAX_SUBSTEP_DISTANCE_M = 0.02
 DEFAULT_HARD_SINGLE_STEP_SAFETY_LIMIT_M = 0.05
-DEFAULT_LONG_MOTION_TOTAL_LIMIT_M = 0.20
+DEFAULT_LONG_MOTION_TOTAL_LIMIT_M = SHARED_MAX_RELATIVE_MOTION_DISTANCE_M
 DEFAULT_MIN_FINAL_SUBSTEP_DISTANCE_M = 0.001
 MOTION_LIMIT_EPS = 1e-9
 DEFAULT_CONFIRMATION_TOKEN = "CONFIRM_REAL_UR5_CARTESIAN"
@@ -367,8 +372,20 @@ def evaluate_cartesian_motion_gateway(request: CartesianMotionGatewayRequest | N
     warnings = _unique(warnings)
     status = STATUS_PASS if not blocking_reasons else STATUS_BLOCKED
     task_id = _task_id(task, offset)
+    shared_contract = (
+        build_bounded_relative_motion_contract(
+            offset,
+            max_substep_m=max_substep_distance_m,
+            execution_backend="real_ur5e",
+            backend_policy_id=motion_permission_envelope_version,
+            start_pose=current_pose,
+        )
+        if offset is not None and _valid_vector3(offset)
+        else {}
+    )
 
     return {
+        **shared_contract,
         "contract_version": CONTRACT_VERSION,
         "schema_version": CONTRACT_VERSION,
         "teto_version": CURRENT_CARTESIAN_MOTION_VERSION,
@@ -386,7 +403,11 @@ def evaluate_cartesian_motion_gateway(request: CartesianMotionGatewayRequest | N
         "direction_axis": direction_axis,
         "direction_sign": direction_sign,
         "vector_motion_supported": True,
-        "motion_contract_type": motion_contract_type,
+        "motion_contract_type": (
+            "decomposed_relative_motion"
+            if decomposed_motion_allowed
+            else motion_contract_type
+        ),
         "delta_m": _round_vector(offset),
         "vector_delta_m": (
             {"x": round(float(offset[0]), 6), "y": round(float(offset[1]), 6), "z": round(float(offset[2]), 6)}
@@ -948,7 +969,11 @@ def build_long_step_decomposition_contract(
     session_ok = session_radius_within_limit is not False
     blocking_reason = None
     if not total_within_limit:
-        blocking_reason = E_LONG_MOTION_TOTAL_EXCEEDS_LIMIT
+        blocking_reason = (
+            E_RELATIVE_MOTION_RANGE_EXCEEDED
+            if requested_total > SHARED_MAX_RELATIVE_MOTION_DISTANCE_M + MOTION_LIMIT_EPS
+            else E_LONG_MOTION_TOTAL_EXCEEDS_LIMIT
+        )
     elif not substep_within_limit:
         blocking_reason = E_SUBSTEP_DISTANCE_EXCEEDS_LIMIT
     elif not substep_within_hard_limit:

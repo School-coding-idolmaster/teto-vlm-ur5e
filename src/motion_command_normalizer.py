@@ -4,6 +4,11 @@ import math
 import re
 from typing import Any
 
+from src.bounded_relative_motion import (
+    DEFAULT_MAX_SUBSTEP_M,
+    E_RELATIVE_MOTION_RANGE_EXCEEDED,
+    build_bounded_relative_motion_contract,
+)
 
 POLICY_VERSION = "teto_v3_0_11_llm_first_motion_semantics_v1"
 SEMANTIC_ALIGNMENT_VERSION = "teto_v3_0_11_llm_first_motion_semantics_v1"
@@ -54,12 +59,12 @@ _DIRECTION_PATTERNS = [
     ("right", "y", "-", "explicit_direction_word", [r"\bright\b", r"向右", r"往右", r"右移"]),
     ("forward", "x", "+", "explicit_direction_word", [r"\bforward\b", r"\bforwards\b", r"\bahead\b", r"往前", r"向前", r"前移"]),
     ("backward", "x", "-", "explicit_direction_word", [r"\bbackward\b", r"\bbackwards\b", r"\bback\b", r"往后", r"向后", r"後ろ", r"后移"]),
-    ("+x", "x", "+", "explicit_direction_word", [r"(?:^|\s)\+\s*x\b", r"\bx\s*\+"]),
-    ("-x", "x", "-", "explicit_direction_word", [r"(?:^|\s)-\s*x\b", r"\bx\s*-"]),
-    ("+y", "y", "+", "explicit_direction_word", [r"(?:^|\s)\+\s*y\b", r"\by\s*\+"]),
-    ("-y", "y", "-", "explicit_direction_word", [r"(?:^|\s)-\s*y\b", r"\by\s*-"]),
-    ("+z", "z", "+", "explicit_direction_word", [r"(?:^|\s)\+\s*z\b", r"\bz\s*\+"]),
-    ("-z", "z", "-", "explicit_direction_word", [r"(?:^|\s)-\s*z\b", r"\bz\s*-"]),
+    ("+x", "x", "+", "explicit_direction_word", [r"(?:^|\s)\+\s*x\b", r"\bx\s*\+", r"\bx\s+positive\b"]),
+    ("-x", "x", "-", "explicit_direction_word", [r"(?:^|\s)-\s*x\b", r"\bx\s*-", r"\bx\s+negative\b"]),
+    ("+y", "y", "+", "explicit_direction_word", [r"(?:^|\s)\+\s*y\b", r"\by\s*\+", r"\by\s+positive\b"]),
+    ("-y", "y", "-", "explicit_direction_word", [r"(?:^|\s)-\s*y\b", r"\by\s*-", r"\by\s+negative\b"]),
+    ("+z", "z", "+", "explicit_direction_word", [r"(?:^|\s)\+\s*z\b", r"\bz\s*\+", r"\bz\s+positive\b"]),
+    ("-z", "z", "-", "explicit_direction_word", [r"(?:^|\s)-\s*z\b", r"\bz\s*-", r"\bz\s+negative\b"]),
 ]
 
 _VISION_OR_OBJECT_PATTERNS = [
@@ -130,11 +135,11 @@ def normalize_motion_command(
         parser_source=parser_source,
     )
     if not isinstance(qwen_semantic, dict):
-        return {
+        return _apply_shared_envelope({
             **fallback,
             "fallback_parse_used": True,
             "canonicalization_source": "fallback_rule" if fallback.get("parse_status") == STATUS_PASS else fallback.get("canonicalization_source"),
-        }
+        })
 
     semantic = _normalize_qwen_semantic(
         raw_command,
@@ -147,11 +152,11 @@ def normalize_motion_command(
     if semantic["decision"] == "use_qwen":
         result = semantic["result"]
         conflict, reason = _qwen_fallback_conflict(result, fallback)
-        return {
+        return _apply_shared_envelope({
             **result,
             "qwen_fallback_conflict": conflict,
             "qwen_fallback_conflict_reason": reason,
-        }
+        })
 
     result = {
         **fallback,
@@ -167,7 +172,7 @@ def normalize_motion_command(
     elif semantic["decision"] == "invalid_schema":
         result["qwen_fallback_conflict"] = fallback.get("parse_status") != STATUS_PASS
         result["qwen_fallback_conflict_reason"] = semantic.get("invalid_reason")
-    return result
+    return _apply_shared_envelope(result)
 
 
 def _normalize_rule_based(
@@ -205,8 +210,21 @@ def _normalize_rule_based(
             confidence=0.90,
         )
 
-    direction = _extract_direction(normalized)
     distance = _extract_distance(normalized)
+    combined_delta = _extract_combined_direction_delta(normalized, distance)
+    if combined_delta is not None:
+        result = _vector_motion_result(
+            base,
+            combined_delta,
+            parser_source=parser_source,
+            vector_source="fallback_combined_direction",
+            confidence=0.92,
+        )
+        result["requested_distance_m"] = round(float(distance["distance_m"]), 6)
+        result["requested_distance_norm_m"] = round(float(distance["distance_m"]), 6)
+        return result
+
+    direction = _extract_direction(normalized)
     fuzzy = _matches_any(normalized, _FUZZY_PATTERNS)
 
     if direction["status"] == "conflict":
@@ -840,8 +858,8 @@ def _vector_contract_fields(delta: list[float], *, vector_source: str) -> dict[s
     nonzero = sum(abs(value) > EPS for value in vector)
     norm = round(_vector_norm(vector), 6)
     return {
+        **build_bounded_relative_motion_contract(vector),
         "vector_motion_supported": True,
-        "motion_contract_type": "single_axis_relative" if nonzero == 1 else "vector_relative",
         "vector_delta_m": {"x": vector[0], "y": vector[1], "z": vector[2]},
         "requested_distance_norm_m": norm,
         "vector_components_m": {"x": vector[0], "y": vector[1], "z": vector[2]},
@@ -854,6 +872,15 @@ def _vector_contract_fields(delta: list[float], *, vector_source: str) -> dict[s
 
 
 def _extract_explicit_vector_delta(normalized: str) -> list[float] | None:
+    bracket = re.search(
+        r"\bvector\s*\[\s*([-+]?\d+(?:\.\d+)?)\s*,\s*"
+        r"([-+]?\d+(?:\.\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?)\s*\]"
+        r"\s*(mm|cm|m|meter|meters)?",
+        normalized,
+    )
+    if bracket:
+        scale = 0.001 if bracket.group(4) == "mm" else 0.01 if bracket.group(4) == "cm" else 1.0
+        return [round(float(bracket.group(index)) * scale, 6) for index in (1, 2, 3)]
     axis_matches = re.findall(
         r"\b([xyz])\s*[:=]?\s*([-+]?\d+(?:\.\d+)?)\s*(mm|cm|m)?\b",
         normalized,
@@ -894,6 +921,58 @@ def _extract_explicit_vector_delta(normalized: str) -> list[float] | None:
         components[axis] = sign * meters
         used_axes.add(axis)
     return [components["x"], components["y"], components["z"]]
+
+
+def _extract_combined_direction_delta(
+    normalized: str,
+    distance: dict[str, Any],
+) -> list[float] | None:
+    if distance.get("status") != "pass":
+        return None
+    direction_map = {
+        "forward": (0, 1.0),
+        "backward": (0, -1.0),
+        "left": (1, 1.0),
+        "right": (1, -1.0),
+        "up": (2, 1.0),
+        "down": (2, -1.0),
+    }
+    names = re.findall(r"\b(forward|backward|left|right|up|down)\b", normalized)
+    if len(names) < 2:
+        return None
+    components = [0.0, 0.0, 0.0]
+    used = set()
+    for name in names:
+        axis, sign = direction_map[name]
+        if axis in used:
+            return None
+        used.add(axis)
+        components[axis] = sign
+    length = _vector_norm(components)
+    requested = float(distance["distance_m"])
+    return [round(component / length * requested, 6) for component in components]
+
+
+def _apply_shared_envelope(result: dict[str, Any]) -> dict[str, Any]:
+    delta = result.get("delta_m")
+    if not isinstance(delta, list) or len(delta) != 3:
+        return result
+    contract = build_bounded_relative_motion_contract(delta, max_substep_m=DEFAULT_MAX_SUBSTEP_M)
+    requested = result.get("requested_distance_m")
+    if isinstance(requested, (int, float)) and abs(float(requested) - contract["requested_distance_m"]) <= 2e-6:
+        contract["requested_distance_m"] = round(float(requested), 6)
+        contract["requested_distance_norm_m"] = round(float(requested), 6)
+    merged = {**result, **contract}
+    if result.get("parse_status") == STATUS_PASS and not contract["distance_within_shared_envelope"]:
+        merged.update(
+            {
+                "parse_status": STATUS_BLOCKED,
+                "clarification_required": False,
+                "clarification_reason": E_RELATIVE_MOTION_RANGE_EXCEEDED,
+                "shared_envelope_error_code": E_RELATIVE_MOTION_RANGE_EXCEEDED,
+            }
+        )
+    return merged
 
 
 def _semantic_vector_delta(value: Any) -> list[float] | None:
