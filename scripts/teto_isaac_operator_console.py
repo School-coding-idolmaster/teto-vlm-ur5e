@@ -178,8 +178,8 @@ def _interactive_loop(operator: IsaacSimOperator, gateway, simulation_app) -> in
             break
         if normalized == "status":
             print(json.dumps(_status_summary(operator.status()), ensure_ascii=False, indent=2), flush=True)
-        elif normalized == "home":
-            print(json.dumps(operator.home(), ensure_ascii=False, indent=2), flush=True)
+        elif normalized in {"home", "reset home", "demo_center", "demo center"}:
+            print(json.dumps(operator.demo_center(), ensure_ascii=False, indent=2), flush=True)
         elif normalized == "reset":
             print(json.dumps(operator.reset(), ensure_ascii=False, indent=2), flush=True)
         elif normalized:
@@ -208,11 +208,17 @@ def _summary(result: dict) -> dict:
         "status": result.get("status"),
         "abort_reason": result.get("abort_reason"),
         "substeps": f"{result.get('completed_substep_count')}/{result.get('substep_count')}",
+        "subgoal_count": result.get("subgoal_count"),
         "requested_delta_m": result.get("delta_vector_m"),
+        "motion_contract_type": result.get("motion_contract_type"),
+        "requested_total_distance_m": result.get("requested_total_distance_m"),
+        "max_substep_m": result.get("max_substep_m"),
         "measured_delta_m": result.get("measured_delta_vector_m"),
+        "final_displacement_m": result.get("final_displacement_m"),
         "target_final_tcp": result.get("target_final_tcp_pose"),
         "measured_final_tcp": result.get("final_simulated_tcp_pose"),
         "position_error_m": result.get("final_position_error_m"),
+        "workspace_check_status": result.get("workspace_check_status"),
         "direction_check_passed": result.get("direction_check_passed"),
         "joint_delta_summary": result.get("joint_delta_summary"),
         "visible_motion_hint": result.get("visible_motion_hint"),

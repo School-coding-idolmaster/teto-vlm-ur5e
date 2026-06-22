@@ -3,6 +3,7 @@ from __future__ import annotations
 import ipaddress
 import json
 import math
+import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -59,6 +60,13 @@ class SimulatedMeasuredGateway(Protocol):
 
     def reset(self) -> dict[str, Any]: ...
 
+    def begin_relative_motion(
+        self,
+        *,
+        initial_tcp_pose: dict[str, Any],
+        planned_subgoals: list[dict[str, Any]],
+    ) -> None: ...
+
 
 @dataclass(frozen=True)
 class IsaacOperatorConfig:
@@ -73,11 +81,11 @@ class IsaacOperatorConfig:
 
     @property
     def max_substep_distance_m(self) -> float:
-        return _positive(self.raw.get("max_substep_distance_m"), 0.02)
+        return _positive(self.raw.get("max_substep_distance_m"), 0.05)
 
     @property
     def max_total_distance_m(self) -> float:
-        return _positive(self.raw.get("max_total_distance_m"), 0.35)
+        return _positive(self.raw.get("max_total_distance_m"), 0.50)
 
     @property
     def position_tolerance_m(self) -> float:
@@ -229,15 +237,24 @@ class IsaacSimOperator:
             return {"status": "BLOCKED", "abort_reason": "E_EMPTY_COMMAND", **_safety_flags()}
         before_status = self.gateway.status()
         current_pose = _pose(before_status.get("current_tcp_pose"))
-        parser_result = evaluate_qwen_motion_parser(
-            QwenMotionParserRequest(
-                user_text=text,
+        parser_result = (
+            _parse_isaac_demo_motion(
+                text,
                 max_distance_m=self.config.max_total_distance_m,
-                hard_safety_limit_m=self.config.max_total_distance_m,
-                endpoint=self.config.qwen_endpoint,
-                llm_callable=self.qwen_callable,
             )
+            if self.qwen_callable is None
+            else None
         )
+        if parser_result is None:
+            parser_result = evaluate_qwen_motion_parser(
+                QwenMotionParserRequest(
+                    user_text=text,
+                    max_distance_m=self.config.max_total_distance_m,
+                    hard_safety_limit_m=self.config.max_total_distance_m,
+                    endpoint=self.config.qwen_endpoint,
+                    llm_callable=self.qwen_callable,
+                )
+            )
         evidence = self._base_evidence(text, parser_result, before_status)
         if parser_result.get("qwen_motion_parser_status") != "PASS":
             evidence["status"] = "BLOCKED"
@@ -258,8 +275,23 @@ class IsaacSimOperator:
         step_deltas, plan = self._decompose(parser_result, current_pose, delta)
         evidence["autoregressive_plan"] = plan
         evidence["delta_vector_m"] = delta
+        evidence["motion_contract_type"] = (
+            "long_range_approach"
+            if _norm(delta) > self.config.max_substep_distance_m + EPS
+            else parser_result.get("motion_contract_type") or "single_axis_relative"
+        )
+        evidence["requested_total_distance_m"] = round(
+            float(parser_result.get("requested_distance_m") or _norm(delta)),
+            6,
+        )
         evidence["requested_distance_norm_m"] = round(_norm(delta), 6)
+        evidence["requested_vector_m"] = delta
+        evidence["normalized_direction_vector"] = _normalized(delta)
+        evidence["max_substep_m"] = self.config.max_substep_distance_m
         evidence["substep_count"] = len(step_deltas)
+        evidence["subgoal_count"] = len(step_deltas)
+        evidence["planned_subgoals"] = plan.get("planned_subgoals", [])
+        evidence["workspace_check_status"] = plan.get("workspace_check_status", "BLOCKED")
         working_memory = build_working_memory(
             task_goal=text,
             goal_type="relative_motion",
@@ -276,6 +308,13 @@ class IsaacSimOperator:
             evidence["abort_reason"] = plan.get("final_blocking_reason") or "E_DECOMPOSITION_FAILED"
             return self._finish(evidence)
 
+        begin_relative_motion = getattr(self.gateway, "begin_relative_motion", None)
+        if callable(begin_relative_motion):
+            begin_relative_motion(
+                initial_tcp_pose=current_pose,
+                planned_subgoals=evidence["planned_subgoals"],
+            )
+
         latest = current_pose
         completed = 0
         stable_substep_count = 0
@@ -291,7 +330,8 @@ class IsaacSimOperator:
                 "orientation_xyzw": list(before["orientation_xyzw"]),
             }
             if not _in_workspace(target["position_m"], self.config.workspace_bounds):
-                evidence["abort_reason"] = "E_DECOMPOSED_WORKSPACE_ENVELOPE_EXCEEDED"
+                evidence["workspace_check_status"] = "BLOCKED"
+                evidence["abort_reason"] = "E_OUT_OF_SIM_WORKSPACE"
                 break
             result = self.gateway.execute_relative_substep(
                 delta_m=step_delta,
@@ -414,6 +454,15 @@ class IsaacSimOperator:
                     "isaac_trajectory_trace_enabled": result.get("isaac_trajectory_trace_enabled"),
                 }
             )
+            evidence["measured_subgoals"].append(
+                {
+                    "subgoal_index": index,
+                    "planned_pose": target,
+                    "measured_pose": after,
+                    "position_error_m": round(error_m, 6) if error_m is not None else None,
+                    "verification_result": "PASS" if verified else "FAILED",
+                }
+            )
             if verified:
                 completed += 1
                 latest = after
@@ -492,6 +541,7 @@ class IsaacSimOperator:
         evidence["final_simulated_joint_state"] = final_status.get("joint_state")
         evidence["target_final_tcp_pose"] = target_final
         evidence["measured_delta_vector_m"] = measured_delta
+        evidence["final_displacement_m"] = round(_norm(measured_delta), 6)
         evidence["final_position_error_m"] = round(final_error, 6) if final_error is not None else None
         evidence["direction_check_passed"] = bool(
             completed > 0
@@ -528,7 +578,7 @@ class IsaacSimOperator:
             "isaac_visual_timing"
         ) or evidence.get("isaac_visual_timing")
         evidence["visible_motion_hint"] = (
-            "cyan=current TCP, yellow=target TCP, blue=measured path"
+            "cyan=current TCP, yellow=final target, blue=full planned path, green=measured path"
             if evidence["isaac_visual_markers_enabled"]
             else "visual markers disabled; compare requested/measured delta in this summary"
         )
@@ -552,6 +602,10 @@ class IsaacSimOperator:
     def reset(self) -> dict[str, Any]:
         return self.gateway.reset()
 
+    def demo_center(self) -> dict[str, Any]:
+        result = self.gateway.home()
+        return {**result, "operator_command": "demo_center"}
+
     def _decompose(
         self,
         parser_result: dict[str, Any],
@@ -559,43 +613,100 @@ class IsaacSimOperator:
         delta: list[float],
     ) -> tuple[list[list[float]], dict[str, Any]]:
         norm = _norm(delta)
+        final_position = _add(current_pose["position_m"], delta)
+        if norm > self.config.max_total_distance_m + EPS:
+            return [], {
+                "final_plan_status": "BLOCKED",
+                "final_blocking_reason": "E_ISAAC_LONG_RANGE_LIMIT",
+                "workspace_check_status": "NOT_RUN",
+                "planned_subgoals": [],
+            }
+        if not _in_workspace(final_position, self.config.workspace_bounds):
+            return [], {
+                "final_plan_status": "BLOCKED",
+                "final_blocking_reason": "E_OUT_OF_SIM_WORKSPACE",
+                "workspace_check_status": "BLOCKED",
+                "planned_subgoals": [],
+            }
+        if (
+            parser_result.get("parser_source") != "isaac_sim_demo_local"
+            and norm > self.config.max_substep_distance_m + EPS
+        ):
+            canonical = {
+                "parse_status": "PASS",
+                "intent": "relative_cartesian_motion",
+                "motion_frame": parser_result.get("motion_frame") or "base_link",
+                "requested_distance_m": norm,
+                "requested_distance_norm_m": norm,
+                "delta_m": delta,
+                "vector_delta_m": delta,
+                "motion_contract_type": parser_result.get("motion_contract_type"),
+                "direction_axis": parser_result.get("direction_axis"),
+                "direction_sign": parser_result.get("direction_sign"),
+            }
+            plan = plan_offline_autoregressive_motion(
+                AutoregressiveMotionPlannerRequest(
+                    canonical_motion_intent=canonical,
+                    current_tcp_pose=current_pose,
+                    config={
+                        "enable_long_step_decomposition": True,
+                        "max_one_shot_distance_m": self.config.max_substep_distance_m,
+                        "max_decomposed_substep_distance_m": self.config.max_substep_distance_m,
+                        "max_decomposed_total_distance_m": self.config.max_total_distance_m,
+                        "substep_execution_mode": "offline_preview",
+                        "workspace_bounds": self.config.workspace_bounds,
+                    },
+                )
+            )
+            if plan.get("final_plan_status") != "PASS":
+                return [], plan
+            vectors = [
+                vector
+                for vector in (
+                    _vector(item)
+                    for item in (
+                        plan.get("decomposed_substeps_m")
+                        or plan.get("planned_substep_vectors_m")
+                        or []
+                    )
+                )
+                if vector is not None
+            ]
+            plan["planned_subgoals"] = _planned_subgoals(current_pose, vectors)
+            plan["workspace_check_status"] = "PASS"
+            return vectors, plan
         if norm <= self.config.max_substep_distance_m + EPS:
+            target = _target_pose(current_pose, final_position)
             return [delta], {
                 "final_plan_status": "PASS",
                 "planned_execution_style": "isaac_sim_one_substep",
                 "substep_count": 1,
                 "decomposed_substeps_m": [delta],
+                "workspace_check_status": "PASS",
+                "planned_subgoals": [{"subgoal_index": 1, "planned_pose": target}],
             }
-        canonical = {
-            "parse_status": "PASS",
-            "intent": "relative_cartesian_motion",
-            "motion_frame": parser_result.get("motion_frame") or "base_link",
-            "requested_distance_m": norm,
-            "requested_distance_norm_m": norm,
-            "delta_m": delta,
-            "vector_delta_m": delta,
-            "motion_contract_type": parser_result.get("motion_contract_type"),
-            "direction_axis": parser_result.get("direction_axis"),
-            "direction_sign": parser_result.get("direction_sign"),
-        }
-        plan = plan_offline_autoregressive_motion(
-            AutoregressiveMotionPlannerRequest(
-                canonical_motion_intent=canonical,
-                current_tcp_pose=current_pose,
-                config={
-                    "enable_long_step_decomposition": True,
-                    "max_one_shot_distance_m": self.config.max_substep_distance_m,
-                    "max_decomposed_substep_distance_m": self.config.max_substep_distance_m,
-                    "max_decomposed_total_distance_m": self.config.max_total_distance_m,
-                    "substep_execution_mode": "offline_preview",
-                    "workspace_bounds": self.config.workspace_bounds,
-                },
-            )
+        count = max(int(math.ceil(norm / self.config.max_substep_distance_m)), 1)
+        regular_step = [round(component / count, 6) for component in delta]
+        vectors = [list(regular_step) for _ in range(count - 1)]
+        vectors.append(
+            [
+                round(delta[axis] - sum(vector[axis] for vector in vectors), 6)
+                for axis in range(3)
+            ]
         )
-        if plan.get("final_plan_status") != "PASS":
-            return [], plan
-        vectors = plan.get("decomposed_substeps_m") or plan.get("planned_substep_vectors_m") or []
-        return [vector for vector in (_vector(item) for item in vectors) if vector is not None], plan
+        planned_subgoals = _planned_subgoals(current_pose, vectors)
+        return vectors, {
+            "final_plan_status": "PASS",
+            "planned_execution_style": "isaac_sim_long_range_approach",
+            "motion_contract_type": "long_range_approach",
+            "safety_gate_scope": "isaac_sim_decomposed_contract",
+            "requested_total_distance_m": round(norm, 6),
+            "max_substep_m": self.config.max_substep_distance_m,
+            "substep_count": count,
+            "decomposed_substeps_m": vectors,
+            "planned_subgoals": planned_subgoals,
+            "workspace_check_status": "PASS",
+        }
 
     def _base_evidence(
         self,
@@ -616,10 +727,20 @@ class IsaacSimOperator:
             "initial_simulated_tcp_pose": before_status.get("current_tcp_pose"),
             "initial_simulated_joint_state": before_status.get("joint_state"),
             "delta_vector_m": None,
+            "motion_contract_type": None,
+            "requested_total_distance_m": None,
+            "requested_vector_m": None,
+            "normalized_direction_vector": None,
             "requested_distance_norm_m": None,
+            "max_substep_m": self.config.max_substep_distance_m,
             "substep_count": 0,
+            "subgoal_count": 0,
             "completed_substep_count": 0,
+            "planned_subgoals": [],
+            "measured_subgoals": [],
             "substeps": [],
+            "final_displacement_m": 0.0,
+            "workspace_check_status": "NOT_RUN",
             "working_memory_before": None,
             "working_memory_after": None,
             "scene_monitor_result": make_scene_monitor_result(
@@ -728,6 +849,9 @@ class SyntheticFakeGateway:
             "synthetic_fake_test_only": True,
         }
 
+    def begin_relative_motion(self, *, initial_tcp_pose, planned_subgoals) -> None:
+        return None
+
     def home(self) -> dict[str, Any]:
         self.pose = json.loads(json.dumps(self.home_pose))
         return {"status": "PASS", "simulated_only": True}
@@ -783,6 +907,103 @@ def _safety_flags() -> dict[str, bool]:
         "moveit_execute_trajectory_called": False,
         "trajectory_sent": False,
     }
+
+
+_ISAAC_DEMO_COMMAND = re.compile(
+    r"^move\s+(forward|backward|left|right|up|down)"
+    r"(?:\s+and\s+(forward|backward|left|right|up|down))?"
+    r"\s+([0-9]+(?:\.[0-9]+)?)\s*(?:m|meter|meters)$",
+    re.IGNORECASE,
+)
+_ISAAC_DIRECTION_VECTORS = {
+    "forward": [1.0, 0.0, 0.0],
+    "backward": [-1.0, 0.0, 0.0],
+    "left": [0.0, 1.0, 0.0],
+    "right": [0.0, -1.0, 0.0],
+    "up": [0.0, 0.0, 1.0],
+    "down": [0.0, 0.0, -1.0],
+}
+
+
+def _parse_isaac_demo_motion(text: str, *, max_distance_m: float) -> dict[str, Any] | None:
+    match = _ISAAC_DEMO_COMMAND.fullmatch(text.strip())
+    if match is None:
+        return None
+    first, second, raw_distance = match.groups()
+    distance = float(raw_distance)
+    names = [first.lower(), second.lower() if second else None]
+    vectors = [_ISAAC_DIRECTION_VECTORS[name] for name in names if name]
+    combined = [sum(vector[axis] for vector in vectors) for axis in range(3)]
+    combined_norm = _norm(combined)
+    if combined_norm <= EPS:
+        blocking_reasons = ["E_CONFLICTING_DIRECTION"]
+        delta = None
+    else:
+        unit = [component / combined_norm for component in combined]
+        delta = [round(component * distance, 6) for component in unit]
+        blocking_reasons = (
+            ["E_ISAAC_LONG_RANGE_LIMIT"]
+            if distance > float(max_distance_m) + EPS
+            else []
+        )
+    return {
+        "contract_version": "teto_isaac_demo_parser.v1",
+        "qwen_motion_parser_status": "BLOCKED" if blocking_reasons else "PASS",
+        "parser_source": "isaac_sim_demo_local",
+        "llm_called": False,
+        "raw_llm_output": None,
+        "blocking_reasons": blocking_reasons,
+        "parser_blocking_reasons": blocking_reasons,
+        "delta_m": delta,
+        "distance_m": round(distance, 6),
+        "requested_distance_m": round(distance, 6),
+        "requested_distance_norm_m": round(distance, 6),
+        "motion_contract_type": "decomposed_relative_motion",
+        "motion_frame": "base_link",
+        "normalized_contract": {
+            "intent": "relative_cartesian_motion",
+            "frame": "base_link",
+            "delta_m": delta,
+            "requested_distance_m": round(distance, 6),
+            "requested_distance_norm_m": round(distance, 6),
+            "motion_contract_type": "decomposed_relative_motion",
+            "isaac_sim_only": True,
+        }
+        if delta is not None
+        else None,
+    }
+
+
+def _normalized(vector: list[float]) -> list[float]:
+    length = _norm(vector)
+    if length <= EPS:
+        return [0.0, 0.0, 0.0]
+    return [round(component / length, 6) for component in vector]
+
+
+def _target_pose(source_pose: dict[str, Any], position: list[float]) -> dict[str, Any]:
+    return {
+        "frame": source_pose["frame"],
+        "position_m": [round(float(value), 6) for value in position],
+        "orientation_xyzw": list(source_pose["orientation_xyzw"]),
+    }
+
+
+def _planned_subgoals(
+    current_pose: dict[str, Any],
+    vectors: list[list[float]],
+) -> list[dict[str, Any]]:
+    planned = []
+    accumulated = list(current_pose["position_m"])
+    for index, vector in enumerate(vectors, start=1):
+        accumulated = _add(accumulated, vector)
+        planned.append(
+            {
+                "subgoal_index": index,
+                "planned_pose": _target_pose(current_pose, accumulated),
+            }
+        )
+    return planned
 
 
 def _joint_delta_summary(before: Any, after: Any, *, threshold_rad: float = 1e-5) -> list[dict[str, Any]]:

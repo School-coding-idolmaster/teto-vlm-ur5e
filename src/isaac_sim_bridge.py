@@ -113,6 +113,9 @@ class IsaacSimMeasuredBridge:
         self.visual_markers_enabled = False
         self.trajectory_trace_enabled = False
         self.last_visual_timing = _visual_timing(self.config, headless=self.headless, substep_count=1)
+        self.planned_path_points: list[tuple[float, float, float]] = []
+        self.measured_path_points: list[tuple[float, float, float]] = []
+        self.final_target_point: tuple[float, float, float] | None = None
         self._initialize()
 
     def _initialize(self) -> None:
@@ -191,6 +194,7 @@ class IsaacSimMeasuredBridge:
         lula = LulaKinematicsSolver(**kinematics_config)
         end_effector = str(self.config.get("tool_frame") or "tool0")
         self.ik_solver = ArticulationKinematicsSolver(self.robot, lula, end_effector)
+        self._apply_demo_center_pose()
         self.home_joint_positions = self._joint_positions()
         self._setup_visual_debug()
         base_position = np.asarray(self.config.get("robot_base_position_m") or [0.0, 0.0, 0.0], dtype=float)
@@ -317,6 +321,7 @@ class IsaacSimMeasuredBridge:
             if sleep_per_pause_frame > 0.0:
                 time.sleep(sleep_per_pause_frame)
         after = self._tcp_pose()
+        self.measured_path_points.append(tuple(after["position_m"]))
         self._draw_motion_trace(before["position_m"], after["position_m"], target_tcp_pose["position_m"])
         return {
             "execution_status": "PASS",
@@ -334,6 +339,23 @@ class IsaacSimMeasuredBridge:
             "isaac_trajectory_trace_enabled": self.trajectory_trace_enabled,
         }
 
+    def begin_relative_motion(
+        self,
+        *,
+        initial_tcp_pose: dict[str, Any],
+        planned_subgoals: list[dict[str, Any]],
+    ) -> None:
+        initial = tuple(initial_tcp_pose["position_m"])
+        planned = [
+            tuple(item["planned_pose"]["position_m"])
+            for item in planned_subgoals
+            if isinstance(item, dict) and isinstance(item.get("planned_pose"), dict)
+        ]
+        self.planned_path_points = [initial, *planned]
+        self.measured_path_points = [initial]
+        self.final_target_point = planned[-1] if planned else initial
+        self._draw_full_motion_plan()
+
     def home(self) -> dict[str, Any]:
         if not self.home_joint_positions:
             return {"status": "BLOCKED", "abort_reason": "E_HOME_STATE_UNAVAILABLE", "simulated_only": True}
@@ -345,6 +367,7 @@ class IsaacSimMeasuredBridge:
         self.controller.apply_action(ArticulationAction(joint_positions=positions))
         for _ in range(30):
             self.world.step(render=not self.headless)
+        self._clear_motion_visualization()
         return {"status": "PASS", "current_tcp_pose": self._tcp_pose(), "simulated_only": True}
 
     def reset(self) -> dict[str, Any]:
@@ -354,6 +377,7 @@ class IsaacSimMeasuredBridge:
         self._apply_initial_home_pose()
         for _ in range(30):
             self.world.step(render=not self.headless)
+        self._clear_motion_visualization()
         return {"status": "PASS", "current_tcp_pose": self._tcp_pose(), "simulated_only": True}
 
     def render_once(self) -> bool:
@@ -389,6 +413,36 @@ class IsaacSimMeasuredBridge:
         self.initial_home_joint_names = applied_names
         self.initial_home_joint_positions = [round(value, 8) for value in applied_positions]
 
+    def _apply_demo_center_pose(self) -> None:
+        import numpy as np
+
+        configured = self.config.get("demo_center_tcp_position_m")
+        if not isinstance(configured, (list, tuple)) or len(configured) != 3:
+            return
+        current = self._tcp_pose()
+        orientation = current["orientation_xyzw"]
+        action, success = self.ik_solver.compute_inverse_kinematics(
+            target_position=np.asarray(configured, dtype=float),
+            target_orientation=np.asarray(
+                [orientation[3], orientation[0], orientation[1], orientation[2]],
+                dtype=float,
+            ),
+            position_tolerance=float(self.config.get("ik_position_tolerance_m", 0.002)),
+            orientation_tolerance=float(self.config.get("ik_orientation_tolerance_rad", 0.05)),
+        )
+        if not success:
+            raise RuntimeError(
+                f"E_ISAAC_DEMO_CENTER_IK_DID_NOT_CONVERGE: target={list(configured)}"
+            )
+        self.controller.apply_action(action)
+        for _ in range(max(int(self.config.get("home_pose_settle_frames", 30)), 1)):
+            self.world.step(render=not self.headless)
+        self.initial_home_pose_source = "config.demo_center_tcp_position_m"
+        self.initial_home_joint_names = [str(item) for item in (self.robot.dof_names or [])]
+        self.initial_home_joint_positions = [
+            round(value, 8) for value in self._joint_positions()
+        ]
+
     def _setup_visual_debug(self) -> None:
         requested = bool(self.config.get("visual_markers_enabled", True)) and not self.headless
         if not requested:
@@ -412,9 +466,9 @@ class IsaacSimMeasuredBridge:
             return
         self.visual_debug.clear_points()
         self.visual_debug.draw_points(
-            [tuple(current), tuple(target)],
-            [(0.0, 1.0, 0.0, 1.0), (1.0, 0.8, 0.0, 1.0)],
-            [12.0, 16.0],
+            [tuple(current), tuple(target), self.final_target_point or tuple(target)],
+            [(0.0, 1.0, 1.0, 1.0), (1.0, 0.5, 0.0, 1.0), (1.0, 0.9, 0.0, 1.0)],
+            [12.0, 10.0, 18.0],
         )
 
     def _draw_motion_trace(self, before: list[float], after: list[float], target: list[float]) -> None:
@@ -422,17 +476,51 @@ class IsaacSimMeasuredBridge:
             return
         self.visual_debug.clear_points()
         self.visual_debug.draw_points(
-            [tuple(after), tuple(target)],
-            [(0.0, 1.0, 1.0, 1.0), (1.0, 0.8, 0.0, 1.0)],
-            [12.0, 16.0],
+            [tuple(after), self.final_target_point or tuple(target)],
+            [(0.0, 1.0, 1.0, 1.0), (1.0, 0.9, 0.0, 1.0)],
+            [12.0, 18.0],
         )
         if self.trajectory_trace_enabled:
-            self.visual_debug.draw_lines(
-                [tuple(before)],
-                [tuple(after)],
-                [(0.0, 0.7, 1.0, 1.0)],
-                [4.0],
+            self._draw_path_lines(self.planned_path_points, (0.1, 0.4, 1.0, 1.0), 3.0)
+            self._draw_path_lines(self.measured_path_points, (0.0, 1.0, 0.3, 1.0), 5.0)
+
+    def _draw_full_motion_plan(self) -> None:
+        if self.visual_debug is None:
+            return
+        self.visual_debug.clear_lines()
+        self.visual_debug.clear_points()
+        if self.final_target_point is not None:
+            self.visual_debug.draw_points(
+                [self.measured_path_points[-1], self.final_target_point],
+                [(0.0, 1.0, 1.0, 1.0), (1.0, 0.9, 0.0, 1.0)],
+                [12.0, 18.0],
             )
+        self._draw_path_lines(self.planned_path_points, (0.1, 0.4, 1.0, 1.0), 3.0)
+
+    def _draw_path_lines(
+        self,
+        points: list[tuple[float, float, float]],
+        color: tuple[float, float, float, float],
+        width: float,
+    ) -> None:
+        if self.visual_debug is None or len(points) < 2:
+            return
+        self.visual_debug.draw_lines(
+            points[:-1],
+            points[1:],
+            [color] * (len(points) - 1),
+            [width] * (len(points) - 1),
+        )
+
+    def _clear_motion_visualization(self) -> None:
+        self.planned_path_points = []
+        self.measured_path_points = []
+        self.final_target_point = None
+        if self.visual_debug is not None:
+            self.visual_debug.clear_lines()
+            self.visual_debug.clear_points()
+            current = tuple(self._tcp_pose()["position_m"])
+            self.visual_debug.draw_points([current], [(0.0, 1.0, 1.0, 1.0)], [12.0])
 
     def _tcp_pose(self) -> dict[str, Any]:
         from isaacsim.core.utils.rotations import rot_matrix_to_quat

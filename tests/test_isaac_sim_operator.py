@@ -94,6 +94,20 @@ def _single_axis_qwen_response(distance_m: float) -> str:
     )
 
 
+def _demo_config() -> IsaacOperatorConfig:
+    return IsaacOperatorConfig(
+        raw={
+            "gui_required": True,
+            "real_robot_disabled": True,
+            "max_substep_distance_m": 0.05,
+            "max_total_distance_m": 0.50,
+            "position_tolerance_m": 0.001,
+            "qwen_endpoint": "http://127.0.0.1:18080/api/generate",
+            "workspace_envelope": {"x": [-1, 1], "y": [-1, 1], "z": [0, 2]},
+        }
+    )
+
+
 def _load_console_module():
     spec = importlib.util.spec_from_file_location("teto_isaac_operator_console_test", CONSOLE_SCRIPT)
     module = importlib.util.module_from_spec(spec)
@@ -137,6 +151,9 @@ def test_example_config_loads_and_is_fail_closed():
     assert config.raw["scene_monitor_frequency_hz"] == 5.0
     assert config.raw["camera_monitor_unavailable_policy"] == "warn_only"
     assert config.raw["adaptive_reobservation_enabled"] is True
+    assert config.raw["demo_center_tcp_position_m"] == [0.20, 0.0, 0.35]
+    assert config.max_substep_distance_m == 0.05
+    assert config.max_total_distance_m == 0.50
 
 
 def test_real_flag_is_refused():
@@ -241,6 +258,86 @@ def test_single_axis_explicit_delta_executes_only_in_isaac_sim(command, tmp_path
     assert result["final_position_error_m"] == 0.0
     assert result["direction_check_passed"] is True
     assert result["isaac_visual_timing"]["scope"] == "isaac_sim_only"
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ("move forward 0.5 meters", [0.5, 0.0, 0.0]),
+        ("move backward 0.5 meters", [-0.5, 0.0, 0.0]),
+        ("move left 0.5 meters", [0.0, 0.5, 0.0]),
+        ("move right 0.5 meters", [0.0, -0.5, 0.0]),
+        ("move up 0.5 meters", [0.0, 0.0, 0.5]),
+    ],
+)
+def test_isaac_long_range_axis_commands_are_decomposed(command, expected, tmp_path):
+    result = IsaacSimOperator(
+        config=_demo_config(),
+        gateway=SyntheticFakeGateway(),
+        headless=True,
+        output_dir=tmp_path,
+    ).execute_text(command)
+
+    assert result["status"] == "PASS"
+    assert result["motion_contract_type"] == "long_range_approach"
+    assert result["requested_total_distance_m"] == 0.5
+    assert result["requested_vector_m"] == expected
+    assert result["substep_count"] == 10
+    assert result["subgoal_count"] == 10
+    assert result["max_substep_m"] == 0.05
+    assert len(result["planned_subgoals"]) == 10
+    assert len(result["measured_subgoals"]) == 10
+    assert result["final_displacement_m"] == 0.5
+    assert result["final_position_error_m"] == 0.0
+    assert result["workspace_check_status"] == "PASS"
+    assert result["llm_reobserve_called"] is False
+    assert result["vlm_reobserve_called"] is False
+    assert result["real_robot_motion_executed"] is False
+    assert result["real_ur_connection_used"] is False
+    assert result["dashboard_used"] is False
+    assert result["rtde_write_used"] is False
+
+
+def test_isaac_long_range_diagonal_has_normalized_total_distance(tmp_path):
+    result = IsaacSimOperator(
+        config=_demo_config(),
+        gateway=SyntheticFakeGateway(),
+        headless=True,
+        output_dir=tmp_path,
+    ).execute_text("move forward and left 0.5 meters")
+
+    assert result["status"] == "PASS"
+    assert result["requested_total_distance_m"] == 0.5
+    assert result["normalized_direction_vector"] == [0.707107, 0.707107, 0.0]
+    assert result["substep_count"] == 10
+    assert result["final_displacement_m"] == pytest.approx(0.5, abs=1e-6)
+
+
+def test_isaac_down_out_of_workspace_is_blocked_without_fake_execution(tmp_path):
+    result = IsaacSimOperator(
+        config=_demo_config(),
+        gateway=SyntheticFakeGateway(),
+        headless=True,
+        output_dir=tmp_path,
+    ).execute_text("move down 0.5 meters")
+
+    assert result["status"] == "BLOCKED"
+    assert result["abort_reason"] == "E_OUT_OF_SIM_WORKSPACE"
+    assert result["workspace_check_status"] == "BLOCKED"
+    assert result["simulated_robot_motion_executed"] is False
+
+
+def test_isaac_one_meter_is_blocked_by_sim_only_limit(tmp_path):
+    result = IsaacSimOperator(
+        config=_demo_config(),
+        gateway=SyntheticFakeGateway(),
+        headless=True,
+        output_dir=tmp_path,
+    ).execute_text("move forward 1.0 meters")
+
+    assert result["status"] == "BLOCKED"
+    assert result["abort_reason"] == "E_ISAAC_LONG_RANGE_LIMIT"
+    assert result["simulated_robot_motion_executed"] is False
 
 
 def test_substeps_use_low_cost_monitor_without_recalling_qwen_or_vlm(tmp_path):
@@ -427,6 +524,11 @@ def test_home_and_reset_are_simulation_only(tmp_path):
     operator = IsaacSimOperator(config=_config(), gateway=gateway, headless=True, output_dir=tmp_path)
     assert operator.home() == {"status": "PASS", "simulated_only": True}
     assert operator.reset() == {"status": "PASS", "simulated_only": True}
+    assert operator.demo_center() == {
+        "status": "PASS",
+        "simulated_only": True,
+        "operator_command": "demo_center",
+    }
 
 
 def test_natural_home_pose_maps_only_named_isaac_joints():
