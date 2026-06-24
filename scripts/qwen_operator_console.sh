@@ -4,6 +4,12 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
 
+MODE="unified"
+if [[ "${1:-}" == "--legacy-manual" ]]; then
+  MODE="legacy-manual"
+  shift
+fi
+
 if [ -f /opt/ros/humble/setup.bash ]; then
   set +u
   # shellcheck source=/dev/null
@@ -18,10 +24,14 @@ if [ -f .venv_lab/bin/activate ]; then
   set -u
 fi
 
+if [[ "${MODE}" == "unified" ]]; then
+  exec python scripts/teto_operator_console.py --backend real "$@"
+fi
+
 interrupted=0
 trap 'interrupted=1; echo' INT
 
-echo "TETO/Qwen operator console"
+echo "TETO/Qwen legacy manual operator console"
 echo "Type a natural-language command, or type quit/exit to leave."
 echo "Each command uses the existing guarded real-small-motion workflow."
 echo "No --yes is used; manual confirmation remains yours."

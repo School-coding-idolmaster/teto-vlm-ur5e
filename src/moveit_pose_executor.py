@@ -62,6 +62,12 @@ E_MOVEIT_EXECUTE_FAILED = "E_MOVEIT_EXECUTE_FAILED"
 E_MOVEIT_API_ERROR = "E_MOVEIT_API_ERROR"
 E_SMALL_MOTION_TOLERANCE_POLICY_VIOLATION = "E_SMALL_MOTION_TOLERANCE_POLICY_VIOLATION"
 E_PLANNER_RISK_POLICY_BLOCKED = "E_PLANNER_RISK_POLICY_BLOCKED"
+E_AUTONOMOUS_SEGMENTED_SAFETY_GATE_REQUIRED = "E_AUTONOMOUS_SEGMENTED_SAFETY_GATE_REQUIRED"
+E_AUTHORITATIVE_STATE_CHECK_REQUIRED = "E_AUTHORITATIVE_STATE_CHECK_REQUIRED"
+E_VISION_GUARD_REQUIRED = "E_VISION_GUARD_REQUIRED"
+E_CONTROLLER_ACTIVE_REQUIRED = "E_CONTROLLER_ACTIVE_REQUIRED"
+E_EXTERNAL_CONTROL_PLAYING_REQUIRED = "E_EXTERNAL_CONTROL_PLAYING_REQUIRED"
+E_DASHBOARD_STATE_REQUIRED = "E_DASHBOARD_STATE_REQUIRED"
 
 W_MAX_JOINT_DELTA_HIGH = "W_MAX_JOINT_DELTA_HIGH"
 W_MAX_WRIST_DELTA_HIGH = "W_MAX_WRIST_DELTA_HIGH"
@@ -322,10 +328,15 @@ def _validate_request(
         blocking_reasons.extend(_robot_state_blockers(config, robot_state if isinstance(robot_state, dict) else {}))
 
     if execute:
-        if config.get("manual_confirmation_required", True) is not True:
-            blocking_reasons.append(E_MANUAL_CONFIRMATION_REQUIRED)
-        if not isinstance(confirmation, dict) or confirmation.get("manual_confirmation_accepted") is not True:
-            blocking_reasons.append(E_MANUAL_CONFIRMATION_REQUIRED)
+        if config.get("autonomous_segmented_execution") is True:
+            blocking_reasons.extend(
+                _autonomous_segmented_execution_blockers(config, robot_state)
+            )
+        else:
+            if config.get("manual_confirmation_required", True) is not True:
+                blocking_reasons.append(E_MANUAL_CONFIRMATION_REQUIRED)
+            if not isinstance(confirmation, dict) or confirmation.get("manual_confirmation_accepted") is not True:
+                blocking_reasons.append(E_MANUAL_CONFIRMATION_REQUIRED)
 
     if _forbidden_artifact(config):
         blocking_reasons.append(E_FORBIDDEN_CONTROL_ARTIFACT)
@@ -356,9 +367,53 @@ def _validate_request(
         "workspace_check_passed": bool(target_pose and _point_in_workspace(target_pose["position_m"], workspace_bounds)),
         "requested_start_tcp_pose": current_pose,
         "requested_target_tcp_pose": target_pose,
+        "manual_confirmation_required": config.get(
+            "manual_confirmation_required", True
+        )
+        is True,
+        "autonomous_segmented_execution": config.get(
+            "autonomous_segmented_execution"
+        )
+        is True,
+        "safety_gate_still_required": config.get(
+            "safety_gate_still_required", True
+        )
+        is True,
         **_target_orientation_evidence(target_pose=target_pose, current_pose=current_pose, config=config),
         **tolerance,
     }
+
+
+def _autonomous_segmented_execution_blockers(
+    config: Dict[str, Any],
+    robot_state: Dict[str, Any] | None,
+) -> list[str]:
+    state = robot_state if isinstance(robot_state, dict) else {}
+    blockers: list[str] = []
+    if config.get("manual_confirmation_required") is not False:
+        blockers.append(E_AUTONOMOUS_SEGMENTED_SAFETY_GATE_REQUIRED)
+    if config.get("safety_gate_still_required") is not True:
+        blockers.append(E_AUTONOMOUS_SEGMENTED_SAFETY_GATE_REQUIRED)
+    if _flag_from(config, state, "authoritative_state_check", False) is not True:
+        blockers.append(E_AUTHORITATIVE_STATE_CHECK_REQUIRED)
+    if _flag_from(config, state, "vision_guard_passed", False) is not True:
+        blockers.append(E_VISION_GUARD_REQUIRED)
+    if _flag_from(config, state, "controller_active", False) is not True:
+        blockers.append(E_CONTROLLER_ACTIVE_REQUIRED)
+    if _flag_from(config, state, "external_control_playing", False) is not True:
+        blockers.append(E_EXTERNAL_CONTROL_PLAYING_REQUIRED)
+    if (
+        _flag_from(config, state, "dashboard_robot_mode_running", False)
+        is not True
+        or _flag_from(config, state, "dashboard_safety_mode_ok", False)
+        is not True
+        or _flag_from(config, state, "dashboard_safety_status_ok", False)
+        is not True
+        or _flag_from(config, state, "dashboard_program_state_playing", False)
+        is not True
+    ):
+        blockers.append(E_DASHBOARD_STATE_REQUIRED)
+    return blockers
 
 
 def _plan_with_move_group_action(target_pose: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
@@ -644,6 +699,18 @@ def _common_result(*, config: Dict[str, Any], target_pose: Dict[str, Any] | None
         "motion_check_eps": validation.get("motion_check_eps"),
         "workspace_bounds": validation.get("workspace_bounds"),
         "workspace_check_passed": validation.get("workspace_check_passed") is True,
+        "manual_confirmation_required": validation.get(
+            "manual_confirmation_required"
+        )
+        is True,
+        "autonomous_segmented_execution": validation.get(
+            "autonomous_segmented_execution"
+        )
+        is True,
+        "safety_gate_still_required": validation.get(
+            "safety_gate_still_required"
+        )
+        is True,
         **_empty_plan_audit(),
         **evaluate_planner_audit_risk(
             {**config, **_planner_mode_evidence(config), **_start_state_evidence(config), **_empty_plan_audit()}

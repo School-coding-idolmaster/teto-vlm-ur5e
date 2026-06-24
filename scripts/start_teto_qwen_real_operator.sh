@@ -13,16 +13,21 @@ while [[ "$#" -gt 0 ]]; do
     --console)
       MODE="console"
       ;;
+    --legacy-manual-console)
+      MODE="legacy-manual-console"
+      ;;
     --status)
       MODE="status"
       ;;
     --help|-h)
       cat <<'EOF'
 Usage:
-  bash scripts/start_teto_qwen_real_operator.sh [--console|--bringup-only|--status]
+  bash scripts/start_teto_qwen_real_operator.sh [--console|--legacy-manual-console|--bringup-only|--status]
 
 Options:
-  --console        Start/check dependencies, then open the TETO/Qwen operator console. Default.
+  --console        Open the unified segmented real operator console. Default.
+  --legacy-manual-console
+                   Open the legacy real-small-motion console with per-command y confirmation.
   --bringup-only   Start/check all dependencies, then exit before opening the operator console.
   --status         Check current status only; do not start Qwen, launch MoveIt, or switch controllers.
 EOF
@@ -47,8 +52,11 @@ MOVEIT_PID_PATH="${TETO_MOVEIT_OPERATOR_PID:-outputs/moveit_operator_startup.pid
 MOVEIT_WAIT_S="${TETO_MOVEIT_WAIT_S:-60}"
 QWEN_WAIT_S="${TETO_QWEN_WAIT_S:-120}"
 CONTROLLER_WAIT_S="${TETO_CONTROLLER_WAIT_S:-20}"
+TCP_POSE_TOPIC="${TETO_TCP_POSE_TOPIC:-/tcp_pose}"
 
+exec 3>&1 4>&2
 exec > >(tee -a "${STARTUP_LOG}") 2>&1
+STARTUP_TEE_PID="${!:-}"
 
 log() {
   printf '[%s] %s\n' "$(date -Iseconds)" "$*"
@@ -59,6 +67,14 @@ fail() {
   shift
   log "ERROR ${code}: $*"
   exit 1
+}
+
+restore_console_io() {
+  exec 1>&3 2>&4
+  exec 3>&- 4>&-
+  if [[ -n "${STARTUP_TEE_PID}" ]]; then
+    wait "${STARTUP_TEE_PID}" 2>/dev/null || true
+  fi
 }
 
 source_if_exists() {
@@ -271,12 +287,20 @@ fi
 ros2 node list >/dev/null 2>&1 || fail "E_ROS2_NOT_AVAILABLE" "ROS2 graph is not available"
 ros_node_available "/controller_manager" || fail "E_CONTROLLER_MANAGER_NOT_AVAILABLE" "/controller_manager node is missing"
 
-ros_topic_available "/tcp_pose_broadcaster/pose" || fail "E_TCP_POSE_NOT_AVAILABLE" "/tcp_pose_broadcaster/pose topic is missing"
-timeout 5 ros2 topic echo /tcp_pose_broadcaster/pose --once >/tmp/teto_operator_tcp_pose_once.txt \
-  || fail "E_TCP_POSE_NOT_AVAILABLE" "/tcp_pose_broadcaster/pose did not publish within timeout"
+if ! ros_topic_available "${TCP_POSE_TOPIC}"; then
+  if ros_topic_available "/tcp_pose_broadcaster/pose"; then
+    TCP_POSE_TOPIC="/tcp_pose_broadcaster/pose"
+  else
+    fail "E_TCP_POSE_NOT_AVAILABLE" "${TCP_POSE_TOPIC} and /tcp_pose_broadcaster/pose are missing"
+  fi
+fi
+export TETO_TCP_POSE_TOPIC="${TCP_POSE_TOPIC}"
+timeout 5 ros2 topic echo "${TCP_POSE_TOPIC}" --once >/tmp/teto_operator_tcp_pose_once.txt \
+  || fail "E_TCP_POSE_NOT_AVAILABLE" "${TCP_POSE_TOPIC} did not publish within timeout"
 
-ros_topic_available "/io_and_status_controller/robot_program_running" \
-  || fail "E_UR_MIDDLEWARE_NOT_AVAILABLE" "/io_and_status_controller/robot_program_running topic is missing"
+if ! ros_topic_available "/io_and_status_controller/robot_program_running"; then
+  log "WARNING: /io_and_status_controller/robot_program_running is missing; unified console will use Dashboard programState."
+fi
 
 if ros_node_available "/move_group" && ros_action_available "/move_action"; then
   moveit_status="reused existing MoveIt"
@@ -358,15 +382,27 @@ if ros_action_available "/execute_trajectory"; then
 else
   log "- /execute_trajectory available: no"
 fi
-log "- real TCP pose topic available: yes"
+log "- real TCP pose topic available: yes (${TCP_POSE_TOPIC})"
 log "- scaled_joint_trajectory_controller active: yes (${controller_status})"
 log "- calibration mismatch: ${calibration_status}"
-log "- startup does not run a robot command; real motion still requires user input and manual confirmation"
+log "- startup does not run a robot command"
+if [[ "${MODE}" == "legacy-manual-console" ]]; then
+  log "- console mode: legacy real-small-motion with manual confirmation"
+else
+  log "- console mode: unified segmented operator; Dashboard/controller/TCP/D455 gates run per segment"
+fi
 
 if [[ "${MODE}" == "bringup-only" ]]; then
   log "Bringup-only mode complete; exiting before TETO/Qwen operator console."
   exit 0
 fi
 
-log "Starting TETO/Qwen operator console"
-bash scripts/qwen_operator_console.sh
+if [[ "${MODE}" == "legacy-manual-console" ]]; then
+  log "Starting legacy TETO/Qwen manual operator console"
+  restore_console_io
+  bash scripts/qwen_operator_console.sh --legacy-manual
+else
+  log "Starting unified TETO segmented operator console"
+  restore_console_io
+  bash scripts/qwen_operator_console.sh
+fi
