@@ -103,7 +103,7 @@ def test_manual_acceptance_auto_start_calls_bootstrap_before_dry_run(tmp_path):
     completed = _run(
         [
             "bash",
-            "scripts/run_qwen_manual_acceptance.sh",
+            "scripts/legacy/run_qwen_manual_acceptance.sh",
             "--cmd",
             "raise the tcp by 2 millimeters",
             "--dry-run",
@@ -118,7 +118,7 @@ def test_manual_acceptance_auto_start_calls_bootstrap_before_dry_run(tmp_path):
     assert completed.returncode == 0, completed.stderr
     assert order_path.read_text(encoding="utf-8").splitlines() == ["bootstrap", "python"]
     args = args_path.read_text(encoding="utf-8").splitlines()
-    assert args[:3] == ["scripts/text_to_ur5e_real_motion.py", "--acceptance", "--parser"]
+    assert args[:3] == ["scripts/legacy/text_to_ur5e_real_motion.py", "--acceptance", "--parser"]
     assert "qwen" in args
     assert "--dry-run" in args
     assert "--auto-start-qwen" not in args
@@ -143,7 +143,7 @@ def test_manual_acceptance_no_auto_start_preserves_existing_behavior(tmp_path):
     completed = _run(
         [
             "bash",
-            "scripts/run_qwen_manual_acceptance.sh",
+            "scripts/legacy/run_qwen_manual_acceptance.sh",
             "--cmd",
             "raise the tcp by 2 millimeters",
             "--dry-run",

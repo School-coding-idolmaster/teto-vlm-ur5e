@@ -1,4 +1,4 @@
-from scripts.run_first_simulation_execution import build_parser
+from scripts.harnesses.run_shadow_simulation_contract import build_parser
 from src.moveit_plan_only_contract import (
     E_MOVEIT_EXECUTION_NOT_ALLOWED,
     E_OUT_OF_WORKSPACE,

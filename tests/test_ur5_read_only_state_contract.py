@@ -1,4 +1,4 @@
-from scripts.run_first_simulation_execution import build_parser
+from scripts.harnesses.run_shadow_simulation_contract import build_parser
 from src.ur5_read_only_state_contract import (
     E_DASHBOARD_COMMAND_NOT_ALLOWED,
     E_READ_ONLY_MODE_REQUIRED,

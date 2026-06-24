@@ -99,15 +99,15 @@ through the real backend and measured gates.
 
 Legacy manual real path:
 
-- `scripts/text_to_ur5e_real_motion.py`
-- `scripts/run_qwen_manual_acceptance.sh`
+- `scripts/legacy/text_to_ur5e_real_motion.py`
+- `scripts/legacy/run_qwen_manual_acceptance.sh`
 - `--legacy-manual`
 - `--legacy-manual-console`
 
 Retained historical / safety tools:
 
-- `scripts/run_first_simulation_execution.py`
-- `scripts/run_real_long_motion_test.py`
+- `scripts/harnesses/run_shadow_simulation_contract.py`
+- `scripts/safety_harnesses/run_real_long_motion_safety_check.py`
 
 Current real default remains `scripts/start_teto_real_full_stack.sh` /
 `scripts/teto_operator_console.py`. Current Isaac default remains

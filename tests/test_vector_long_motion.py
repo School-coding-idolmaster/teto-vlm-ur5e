@@ -3,7 +3,7 @@ import math
 
 import pytest
 
-from scripts import run_real_long_motion_test as real_cli
+from scripts.safety_harnesses import run_real_long_motion_safety_check as real_cli
 from src.autoregressive_motion_planner import (
     AutoregressiveMotionPlannerRequest,
     plan_offline_autoregressive_motion,

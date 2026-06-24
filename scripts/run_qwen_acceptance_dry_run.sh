@@ -35,4 +35,4 @@ if [[ -z "${CMD}" ]]; then
 fi
 
 cd "${REPO_ROOT}"
-bash scripts/run_qwen_manual_acceptance.sh --cmd "${CMD}" --dry-run --auto-start-qwen
+bash scripts/legacy/run_qwen_manual_acceptance.sh --cmd "${CMD}" --dry-run --auto-start-qwen

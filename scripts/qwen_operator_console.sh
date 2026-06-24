@@ -54,7 +54,7 @@ while true; do
   esac
 
   interrupted=0
-  bash scripts/run_qwen_manual_acceptance.sh \
+  bash scripts/legacy/run_qwen_manual_acceptance.sh \
     --cmd "${USER_CMD}" \
     --real-small-motion \
     --auto-start-qwen

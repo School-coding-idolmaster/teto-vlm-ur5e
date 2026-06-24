@@ -1,6 +1,6 @@
 import json
 
-from scripts.run_first_simulation_execution import build_parser
+from scripts.harnesses.run_shadow_simulation_contract import build_parser
 from src.simulation_runtime import (
     CURRENT_TETO_VERSION,
     DEFAULT_CUBE_POSITION,

@@ -1,6 +1,6 @@
 import json
 
-from scripts.run_first_simulation_execution import build_parser
+from scripts.harnesses.run_shadow_simulation_contract import build_parser
 from src.planner_gateway_shadow import (
     PLANNER_INPUT_READY,
     build_planner_gateway_shadow_request,

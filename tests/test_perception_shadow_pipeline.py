@@ -279,7 +279,7 @@ def test_report_contains_no_motion_safety_statement():
 
 
 def test_cli_perception_shadow_arguments_parse():
-    from scripts.run_first_simulation_execution import build_parser
+    from scripts.harnesses.run_shadow_simulation_contract import build_parser
 
     parser = build_parser()
     args = parser.parse_args(

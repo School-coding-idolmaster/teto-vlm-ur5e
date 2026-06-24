@@ -1,6 +1,6 @@
 import json
 
-from scripts.run_first_simulation_execution import build_parser
+from scripts.harnesses.run_shadow_simulation_contract import build_parser
 from src.ros2_interface_readiness import (
     E_FRAME_DECLARATION_MISSING,
     E_MOVEIT_NOT_ALLOWED_IN_READINESS,

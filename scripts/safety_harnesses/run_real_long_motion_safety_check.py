@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-# HISTORICAL/DEBUG long-motion real test harness.
+# SAFETY REGRESSION long-motion real-path harness.
 # This is not the current default real path. Current real default:
 # scripts/start_teto_real_full_stack.sh / scripts/teto_operator_console.py.
 # Current Isaac default: scripts/start_teto_isaac_gui_operator.sh.
@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts import text_to_ur5e_real_motion as real_motion_cli
+from scripts.legacy import text_to_ur5e_real_motion as real_motion_cli
 from src.isaac_sim_operator import (
     GATEWAY_SYNTHETIC_FAKE,
     IsaacOperatorConfig,
@@ -162,7 +162,7 @@ def test_real_flag_is_refused():
 
 
 def test_isaac_visual_options_do_not_appear_in_real_motion_script():
-    real_script = Path("scripts/text_to_ur5e_real_motion.py").read_text(encoding="utf-8")
+    real_script = Path("scripts/legacy/text_to_ur5e_real_motion.py").read_text(encoding="utf-8")
     for option in (
         "--motion-duration-sec",
         "--substep-pause-sec",

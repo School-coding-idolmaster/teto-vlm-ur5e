@@ -1,7 +1,7 @@
 import json
 import math
 
-from scripts.run_first_simulation_execution import build_parser
+from scripts.harnesses.run_shadow_simulation_contract import build_parser
 from src.planner_gateway_shadow import (
     E_EXECUTION_NOT_ALLOWED_IN_SHADOW,
     E_INVALID_WORLD_POINT,

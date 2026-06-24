@@ -21,7 +21,7 @@ def test_dry_run_execution_writes_evidence_artifacts(tmp_path):
         move_object=True,
         output_dir=tmp_path,
         write_report=True,
-        demo_command="python3 scripts/run_first_simulation_execution.py --dry-run --steps 3 --move-object",
+        demo_command="python3 scripts/harnesses/run_shadow_simulation_contract.py --dry-run --steps 3 --move-object",
     )
 
     report_path = tmp_path / "simulation_execution_result.json"
@@ -121,7 +121,7 @@ def test_evidence_exporter_writes_micro_motion_manifest_and_summary(tmp_path):
         output_dir=tmp_path,
         write_report=True,
         demo_command=(
-            "python3 scripts/run_first_simulation_execution.py --dry-run --steps 3 "
+            "python3 scripts/harnesses/run_shadow_simulation_contract.py --dry-run --steps 3 "
             "--execute-simulation-micro-motion --micro-motion-joint wrist_3_joint --micro-motion-delta-rad 0.01"
         ),
     )
@@ -175,7 +175,7 @@ def test_evidence_exporter_writes_semantic_bridge_manifest_and_summary(tmp_path)
         output_dir=tmp_path,
         write_report=True,
         demo_command=(
-            "python3 scripts/run_first_simulation_execution.py --dry-run --steps 3 "
+            "python3 scripts/harnesses/run_shadow_simulation_contract.py --dry-run --steps 3 "
             "--semantic-simulation-bridge --semantic-task-json tests/fixtures/semantic_contracts/eligible_hover_to_object.json"
         ),
     )
@@ -261,7 +261,7 @@ def test_evidence_exporter_writes_robot_asset_metadata(tmp_path):
         check_robot_asset=True,
         output_dir=tmp_path,
         write_report=True,
-        demo_command="python3 scripts/run_first_simulation_execution.py --dry-run --steps 1 --check-robot-asset",
+        demo_command="python3 scripts/harnesses/run_shadow_simulation_contract.py --dry-run --steps 1 --check-robot-asset",
     )
 
     summary = (tmp_path / "summary.md").read_text(encoding="utf-8")
@@ -300,7 +300,7 @@ def test_evidence_exporter_writes_robot_prim_inspection_metadata(tmp_path):
         inspect_robot_prim=True,
         output_dir=tmp_path,
         write_report=True,
-        demo_command="python3 scripts/run_first_simulation_execution.py --dry-run --steps 1 --inspect-robot-prim",
+        demo_command="python3 scripts/harnesses/run_shadow_simulation_contract.py --dry-run --steps 1 --inspect-robot-prim",
     )
 
     summary = (tmp_path / "summary.md").read_text(encoding="utf-8")
@@ -357,7 +357,7 @@ def test_evidence_exporter_writes_articulation_readiness_metadata(tmp_path):
         output_dir=tmp_path,
         write_report=True,
         demo_command=(
-            "python3 scripts/run_first_simulation_execution.py --dry-run --steps 1 "
+            "python3 scripts/harnesses/run_shadow_simulation_contract.py --dry-run --steps 1 "
             "--inspect-robot-prim --check-articulation-readiness"
         ),
     )
@@ -399,7 +399,7 @@ def test_evidence_exporter_writes_articulation_state_metadata(tmp_path):
         observe_articulation_state=True,
         output_dir=tmp_path,
         write_report=True,
-        demo_command="python3 scripts/run_first_simulation_execution.py --dry-run --steps 1 --observe-articulation-state",
+        demo_command="python3 scripts/harnesses/run_shadow_simulation_contract.py --dry-run --steps 1 --observe-articulation-state",
     )
 
     summary = (tmp_path / "summary.md").read_text(encoding="utf-8")
@@ -446,7 +446,7 @@ def test_evidence_exporter_writes_simulation_motion_precheck_metadata(tmp_path):
         output_dir=tmp_path,
         write_report=True,
         demo_command=(
-            "python3 scripts/run_first_simulation_execution.py --dry-run --steps 1 "
+            "python3 scripts/harnesses/run_shadow_simulation_contract.py --dry-run --steps 1 "
             "--check-simulation-motion-precheck"
         ),
     )

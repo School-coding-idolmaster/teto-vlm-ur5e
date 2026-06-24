@@ -285,7 +285,7 @@ vector substeps with a nominal delta of
 The minimal one-command test entrypoint is:
 
 ```bash
-python3 scripts/run_real_long_motion_test.py \
+python3 scripts/safety_harnesses/run_real_long_motion_safety_check.py \
   --delta-json '{"x":0.30,"y":0.10,"z":0.0}' \
   --max-total-distance-m 0.35 \
   --max-substep-distance-m 0.02 \
@@ -905,7 +905,7 @@ TETO V2.0.0 starts the V2 line with the smallest runtime execution step:
 The command-line entry point is:
 
 ```bash
-python3 scripts/run_first_simulation_execution.py --dry-run
+python3 scripts/harnesses/run_shadow_simulation_contract.py --dry-run
 ```
 
 Dry-run and no-Isaac modes do not import Isaac Sim and are intended for normal
@@ -934,7 +934,7 @@ angles, trajectories, `tcp_pose_world`, `moveit_goal`, or real robot motion.
 If Isaac Sim is available, run the real runtime manually:
 
 ```bash
-python3 scripts/run_first_simulation_execution.py
+python3 scripts/harnesses/run_shadow_simulation_contract.py
 ```
 
 ## TETO V2.0.1 World to Cube
@@ -947,7 +947,7 @@ Use `--spawn-cube` to request the cube path explicitly while keeping the
 V2.0.0 no-object command path available:
 
 ```bash
-python3 scripts/run_first_simulation_execution.py --dry-run --steps 3 --spawn-cube
+python3 scripts/harnesses/run_shadow_simulation_contract.py --dry-run --steps 3 --spawn-cube
 ```
 
 Dry-run and no-Isaac modes still avoid Isaac imports, but when `--spawn-cube`
@@ -975,7 +975,7 @@ This option implies the default fixture spawn step because a pose update needs
 an object handle:
 
 ```bash
-python3 scripts/run_first_simulation_execution.py --dry-run --steps 3 --move-object
+python3 scripts/harnesses/run_shadow_simulation_contract.py --dry-run --steps 3 --move-object
 ```
 
 `--move-cube` remains as a backward-compatible alias for the same generic
@@ -1055,7 +1055,7 @@ and this project does not depend on network assets for tests or acceptance.
 Use `--check-robot-asset` for the default diagnostic path:
 
 ```bash
-python3 scripts/run_first_simulation_execution.py --dry-run --steps 1 --check-robot-asset
+python3 scripts/harnesses/run_shadow_simulation_contract.py --dry-run --steps 1 --check-robot-asset
 ```
 
 When no local robot asset path is provided, the run is still a successful
@@ -1125,13 +1125,13 @@ control capability.
 Use dry-run mode to verify the report/evidence shape without Isaac:
 
 ```bash
-python3 scripts/run_first_simulation_execution.py --dry-run --steps 1 --inspect-robot-prim
+python3 scripts/harnesses/run_shadow_simulation_contract.py --dry-run --steps 1 --inspect-robot-prim
 ```
 
 Use true Isaac mode with a local UR5e USD to inspect the loaded prim:
 
 ```bash
-PYTHONPATH=. /home/newusername/Storage/home/wu-zijian/下载/isaac-sim-standalone-5.1.0-linux-x86_64/python.sh scripts/run_first_simulation_execution.py \
+PYTHONPATH=. /home/newusername/Storage/home/wu-zijian/下载/isaac-sim-standalone-5.1.0-linux-x86_64/python.sh scripts/harnesses/run_shadow_simulation_contract.py \
   --steps 1 \
   --load-robot-asset \
   --robot-asset-path /home/newusername/Storage/isaac_assets/Isaac/Robots/UniversalRobots/ur5e/ur5e.usd \
@@ -1202,13 +1202,13 @@ keeps:
 Run the dry-run evidence shape check without Isaac:
 
 ```bash
-python3 scripts/run_first_simulation_execution.py --dry-run --steps 1 --inspect-robot-prim --check-articulation-readiness
+python3 scripts/harnesses/run_shadow_simulation_contract.py --dry-run --steps 1 --inspect-robot-prim --check-articulation-readiness
 ```
 
 Run true Isaac with the locally cached UR5e USD:
 
 ```bash
-PYTHONPATH=. /home/newusername/Storage/home/wu-zijian/下载/isaac-sim-standalone-5.1.0-linux-x86_64/python.sh scripts/run_first_simulation_execution.py \
+PYTHONPATH=. /home/newusername/Storage/home/wu-zijian/下载/isaac-sim-standalone-5.1.0-linux-x86_64/python.sh scripts/harnesses/run_shadow_simulation_contract.py \
   --steps 1 \
   --load-robot-asset \
   --robot-asset-path /home/newusername/Storage/isaac_assets/Isaac/Robots/UniversalRobots/ur5e/ur5e.usd \
@@ -1269,13 +1269,13 @@ only. The V2.3.0 report always keeps:
 Run the dry-run observation shape check without Isaac:
 
 ```bash
-python3 scripts/run_first_simulation_execution.py --dry-run --steps 1 --observe-articulation-state
+python3 scripts/harnesses/run_shadow_simulation_contract.py --dry-run --steps 1 --observe-articulation-state
 ```
 
 Run true Isaac with the locally cached UR5e USD and the full read-only chain:
 
 ```bash
-PYTHONPATH=. /home/newusername/Storage/home/wu-zijian/下载/isaac-sim-standalone-5.1.0-linux-x86_64/python.sh scripts/run_first_simulation_execution.py \
+PYTHONPATH=. /home/newusername/Storage/home/wu-zijian/下载/isaac-sim-standalone-5.1.0-linux-x86_64/python.sh scripts/harnesses/run_shadow_simulation_contract.py \
   --steps 1 \
   --check-robot-asset \
   --inspect-robot-prim \
@@ -1353,13 +1353,13 @@ assessment only. It explicitly keeps:
 Run the dry-run precheck shape without Isaac:
 
 ```bash
-python3 scripts/run_first_simulation_execution.py --dry-run --steps 1 --check-simulation-motion-precheck
+python3 scripts/harnesses/run_shadow_simulation_contract.py --dry-run --steps 1 --check-simulation-motion-precheck
 ```
 
 Run true Isaac with the full read-only chain:
 
 ```bash
-PYTHONPATH=. /home/newusername/Storage/home/wu-zijian/下载/isaac-sim-standalone-5.1.0-linux-x86_64/python.sh scripts/run_first_simulation_execution.py \
+PYTHONPATH=. /home/newusername/Storage/home/wu-zijian/下载/isaac-sim-standalone-5.1.0-linux-x86_64/python.sh scripts/harnesses/run_shadow_simulation_contract.py \
   --steps 1 \
   --check-robot-asset \
   --inspect-robot-prim \
@@ -1449,7 +1449,7 @@ the local Isaac Sim simulation API.
 Run dry-run evidence without claiming real Isaac motion:
 
 ```bash
-python3 scripts/run_first_simulation_execution.py \
+python3 scripts/harnesses/run_shadow_simulation_contract.py \
   --dry-run \
   --steps 3 \
   --execute-simulation-micro-motion \
@@ -1460,7 +1460,7 @@ python3 scripts/run_first_simulation_execution.py \
 Run true Isaac simulation micro-motion:
 
 ```bash
-PYTHONPATH=. /home/newusername/Storage/home/wu-zijian/下载/isaac-sim-standalone-5.1.0-linux-x86_64/python.sh scripts/run_first_simulation_execution.py \
+PYTHONPATH=. /home/newusername/Storage/home/wu-zijian/下载/isaac-sim-standalone-5.1.0-linux-x86_64/python.sh scripts/harnesses/run_shadow_simulation_contract.py \
   --steps 1 \
   --check-robot-asset \
   --inspect-robot-prim \
@@ -1537,7 +1537,7 @@ completion.
 Run the dry-run demo bridge:
 
 ```bash
-python3 scripts/run_first_simulation_execution.py \
+python3 scripts/harnesses/run_shadow_simulation_contract.py \
   --dry-run \
   --steps 3 \
   --semantic-simulation-bridge \
@@ -1547,7 +1547,7 @@ python3 scripts/run_first_simulation_execution.py \
 Run with a fixture semantic contract:
 
 ```bash
-python3 scripts/run_first_simulation_execution.py \
+python3 scripts/harnesses/run_shadow_simulation_contract.py \
   --dry-run \
   --steps 3 \
   --semantic-simulation-bridge \
@@ -1594,7 +1594,7 @@ are recommendations only; V2.7.0 does not execute automatic repeated motion.
 Run the safe execution dry-run demo:
 
 ```bash
-python3 scripts/run_first_simulation_execution.py \
+python3 scripts/harnesses/run_shadow_simulation_contract.py \
   --dry-run \
   --steps 3 \
   --semantic-simulation-bridge \
@@ -1672,7 +1672,7 @@ IP addresses, camera serial numbers, tokens, or local paths.
 Run a no-motion readiness evidence check:
 
 ```bash
-python3 scripts/run_first_simulation_execution.py \
+python3 scripts/harnesses/run_shadow_simulation_contract.py \
   --check-lab-readiness \
   --check-camera-readiness \
   --check-live-vlm-readiness \
@@ -1739,7 +1739,7 @@ The snapshot contract validates declared fields only:
 Example manifest:
 
 ```bash
-python3 scripts/run_first_simulation_execution.py \
+python3 scripts/harnesses/run_shadow_simulation_contract.py \
   --check-camera-snapshot \
   --camera-snapshot-config configs/camera_snapshot.example.yaml \
   --camera-snapshot-report \
@@ -1783,7 +1783,7 @@ The shadow pipeline validates:
 Positive shadow smoke:
 
 ```bash
-python3 scripts/run_first_simulation_execution.py \
+python3 scripts/harnesses/run_shadow_simulation_contract.py \
   --run-real-scene-shadow \
   --real-scene-shadow-config configs/real_scene_shadow.example.yaml \
   --real-scene-shadow-report \
@@ -1793,7 +1793,7 @@ python3 scripts/run_first_simulation_execution.py \
 No-target shadow smoke:
 
 ```bash
-python3 scripts/run_first_simulation_execution.py \
+python3 scripts/harnesses/run_shadow_simulation_contract.py \
   --run-real-scene-shadow \
   --real-scene-shadow-config configs/real_scene_shadow.example.yaml \
   --grounding-result examples/grounding_result_no_target_example.json \
@@ -1835,7 +1835,7 @@ automatic retry motion, or any real execution request.
 Positive geometry validity smoke:
 
 ```bash
-python3 scripts/run_first_simulation_execution.py \
+python3 scripts/harnesses/run_shadow_simulation_contract.py \
   --check-geometry-validity \
   --geometry-validity-config configs/geometry_validity.example.yaml \
   --geometry-validity-report \
@@ -1845,7 +1845,7 @@ python3 scripts/run_first_simulation_execution.py \
 Invalid bbox geometry smoke:
 
 ```bash
-python3 scripts/run_first_simulation_execution.py \
+python3 scripts/harnesses/run_shadow_simulation_contract.py \
   --check-geometry-validity \
   --geometry-validity-config configs/geometry_validity.example.yaml \
   --grounding-result examples/grounding_result_invalid_bbox_example.json \
@@ -1890,7 +1890,7 @@ automatic retry motion, or any real execution request.
 Positive projector shadow smoke:
 
 ```bash
-python3 scripts/run_first_simulation_execution.py \
+python3 scripts/harnesses/run_shadow_simulation_contract.py \
   --check-projector-shadow \
   --projector-shadow-config configs/projector_shadow.example.yaml \
   --projector-shadow-report \
@@ -1900,7 +1900,7 @@ python3 scripts/run_first_simulation_execution.py \
 Invalid depth projector shadow smoke:
 
 ```bash
-python3 scripts/run_first_simulation_execution.py \
+python3 scripts/harnesses/run_shadow_simulation_contract.py \
   --check-projector-shadow \
   --projector-shadow-config examples/projector_invalid_depth_example.json \
   --projector-shadow-report \
@@ -1945,7 +1945,7 @@ Supported source modes:
 Offline camera source smoke:
 
 ```bash
-python3 scripts/run_first_simulation_execution.py \
+python3 scripts/harnesses/run_shadow_simulation_contract.py \
   --check-camera-source-adapter \
   --camera-source-config configs/camera_source_offline.example.yaml \
   --camera-source-report \
@@ -1955,7 +1955,7 @@ python3 scripts/run_first_simulation_execution.py \
 Manual snapshot smoke:
 
 ```bash
-python3 scripts/run_first_simulation_execution.py \
+python3 scripts/harnesses/run_shadow_simulation_contract.py \
   --check-camera-source-adapter \
   --camera-source-config configs/camera_source_manual.example.yaml \
   --camera-source-report \
@@ -1965,7 +1965,7 @@ python3 scripts/run_first_simulation_execution.py \
 Live capture remains blocked unless explicitly allowed:
 
 ```bash
-python3 scripts/run_first_simulation_execution.py \
+python3 scripts/harnesses/run_shadow_simulation_contract.py \
   --check-camera-source-adapter \
   --camera-source-config configs/camera_source_offline.example.yaml \
   --camera-source-mode optional_realsense_one_shot \
@@ -2009,7 +2009,7 @@ Supported adapter modes:
 Mock VLM grounding smoke:
 
 ```bash
-python3 scripts/run_first_simulation_execution.py \
+python3 scripts/harnesses/run_shadow_simulation_contract.py \
   --check-vlm-grounding-adapter \
   --vlm-grounding-config configs/vlm_grounding_mock.example.yaml \
   --vlm-grounding-report \
@@ -2020,7 +2020,7 @@ python3 scripts/run_first_simulation_execution.py \
 Offline grounding JSON smoke:
 
 ```bash
-python3 scripts/run_first_simulation_execution.py \
+python3 scripts/harnesses/run_shadow_simulation_contract.py \
   --check-vlm-grounding-adapter \
   --vlm-grounding-config configs/vlm_grounding_offline.example.yaml \
   --vlm-grounding-report \
@@ -2058,7 +2058,7 @@ and does not use a real robot backend.
 Full perception positive smoke:
 
 ```bash
-python3 scripts/run_first_simulation_execution.py \
+python3 scripts/harnesses/run_shadow_simulation_contract.py \
   --run-perception-shadow-pipeline \
   --perception-shadow-config configs/perception_shadow_mock_positive.example.yaml \
   --perception-shadow-report \
@@ -2099,7 +2099,7 @@ robot commands.
 Planner Gateway shadow positive smoke:
 
 ```bash
-python3 scripts/run_first_simulation_execution.py \
+python3 scripts/harnesses/run_shadow_simulation_contract.py \
   --check-planner-gateway-shadow \
   --planner-gateway-shadow-config configs/planner_gateway_shadow_positive.example.yaml \
   --planner-gateway-shadow-report \
@@ -2141,7 +2141,7 @@ reported as a warning while the smoke remains no-motion and shadow-only.
 ROS2 interface readiness smoke:
 
 ```bash
-python3 scripts/run_first_simulation_execution.py \
+python3 scripts/harnesses/run_shadow_simulation_contract.py \
   --check-ros2-interface-readiness \
   --ros2-interface-config configs/ros2_interface.example.yaml \
   --ros2-interface-report \
@@ -2172,7 +2172,7 @@ commands, and does not control a real UR5.
 ROS2 message export positive smoke:
 
 ```bash
-python3 scripts/run_first_simulation_execution.py \
+python3 scripts/harnesses/run_shadow_simulation_contract.py \
   --check-planner-gateway-shadow \
   --planner-gateway-shadow-config configs/planner_gateway_shadow_positive.example.yaml \
   --planner-gateway-shadow-report \
@@ -2212,7 +2212,7 @@ not move a real UR5.
 Full robot-system shadow bridge positive smoke:
 
 ```bash
-python3 scripts/run_first_simulation_execution.py \
+python3 scripts/harnesses/run_shadow_simulation_contract.py \
   --check-planner-gateway-shadow \
   --planner-gateway-shadow-config configs/planner_gateway_shadow_positive.example.yaml \
   --planner-gateway-shadow-report \
@@ -2412,7 +2412,7 @@ allows a low-speed hover above the object.
 Run the CI-safe software/no-robot smoke path with:
 
 ```bash
-python3 scripts/run_first_simulation_execution.py \
+python3 scripts/harnesses/run_shadow_simulation_contract.py \
   --run-v3-hover-demo \
   --v3-user-command "hover over the red mug" \
   --v3-hover-config configs/v3_hover_demo.example.yaml \

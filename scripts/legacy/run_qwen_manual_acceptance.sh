@@ -10,7 +10,7 @@ set -eo pipefail
 # legacy manual routing plus measured real execution evidence.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 usage() {
   cat <<'EOF'
@@ -31,11 +31,11 @@ Initial future real acceptance commands:
   move up 5 mm
 
 Examples:
-  bash scripts/run_qwen_manual_acceptance.sh --cmd "raise the tcp by 2 millimeters" --dry-run
-  bash scripts/run_qwen_manual_acceptance.sh --cmd "raise the tcp by 2 millimeters" --dry-run --auto-start-qwen --mock-current-tcp-pose
-  bash scripts/run_qwen_manual_acceptance.sh --cmd "raise the tcp by 2 millimeters" --dry-run --auto-start-qwen
-  bash scripts/run_qwen_manual_acceptance.sh --cmd "raise the tcp by 2 millimeters" --plan-only-smoke
-  bash scripts/run_qwen_manual_acceptance.sh --cmd "raise the tcp by 2 millimeters" --real-small-motion
+  bash scripts/legacy/run_qwen_manual_acceptance.sh --cmd "raise the tcp by 2 millimeters" --dry-run
+  bash scripts/legacy/run_qwen_manual_acceptance.sh --cmd "raise the tcp by 2 millimeters" --dry-run --auto-start-qwen --mock-current-tcp-pose
+  bash scripts/legacy/run_qwen_manual_acceptance.sh --cmd "raise the tcp by 2 millimeters" --dry-run --auto-start-qwen
+  bash scripts/legacy/run_qwen_manual_acceptance.sh --cmd "raise the tcp by 2 millimeters" --plan-only-smoke
+  bash scripts/legacy/run_qwen_manual_acceptance.sh --cmd "raise the tcp by 2 millimeters" --real-small-motion
 EOF
 }
 
@@ -79,4 +79,4 @@ if [[ ! -x "${PYTHON}" ]]; then
   PYTHON=/usr/bin/python3
 fi
 
-"${PYTHON}" scripts/text_to_ur5e_real_motion.py --acceptance --parser qwen "${ARGS[@]}"
+"${PYTHON}" scripts/legacy/text_to_ur5e_real_motion.py --acceptance --parser qwen "${ARGS[@]}"

@@ -1,4 +1,4 @@
-"""HISTORICAL/DEBUG simulation execution entrypoint.
+"""FORMAL NO-MOTION/SHADOW simulation contract harness.
 
 This is not the current default real or Isaac operator path. Current real
 default: `scripts/start_teto_real_full_stack.sh` /
@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 

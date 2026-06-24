@@ -235,7 +235,7 @@ def test_runtime_manifest_contains_camera_source_evidence_fields(tmp_path):
 
 
 def test_cli_camera_source_arguments_parse():
-    from scripts.run_first_simulation_execution import build_parser
+    from scripts.harnesses.run_shadow_simulation_contract import build_parser
 
     parser = build_parser()
     args = parser.parse_args(
