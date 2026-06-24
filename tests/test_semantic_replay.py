@@ -1,6 +1,4 @@
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -537,64 +535,3 @@ def test_semantic_replay_result_record_index_out_of_range_reports_error(tmp_path
 
     assert detail["ok"] is False
     assert "result_record_index out of range" in detail["message"]
-
-
-def test_semantic_replay_cli_lists_records(tmp_path):
-    run_dir = _make_replay_run(tmp_path)
-
-    completed = subprocess.run(
-        [sys.executable, "scripts/semantic_replay.py", str(run_dir), "--list"],
-        cwd=Path(__file__).resolve().parents[1],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-
-    assert completed.returncode == 0
-    assert "[0] scene=run_20260529_150000_item_001" in completed.stdout
-    assert "label=camera" in completed.stdout
-    assert "positive=True" in completed.stdout
-    assert "hard_negative=True" in completed.stdout
-    assert "rejection=E_NO_TARGET" in completed.stdout
-
-
-def test_semantic_replay_limit_invalid_value_reports_error(tmp_path):
-    run_dir = _make_replay_run(tmp_path)
-
-    completed = subprocess.run(
-        [sys.executable, "scripts/semantic_replay.py", str(run_dir), "--list", "--limit", "0"],
-        cwd=Path(__file__).resolve().parents[1],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-
-    assert completed.returncode == 1
-    assert "--limit must be a positive integer" in completed.stdout
-    assert "Traceback" not in completed.stderr
-
-
-def test_semantic_replay_cli_exports_hard_negatives(tmp_path):
-    run_dir = _make_replay_run(tmp_path)
-    export_path = tmp_path / "cli_hard_negatives.jsonl"
-
-    completed = subprocess.run(
-        [
-            sys.executable,
-            "scripts/semantic_replay.py",
-            str(run_dir),
-            "--hard-negative",
-            "--export",
-            str(export_path),
-        ],
-        cwd=Path(__file__).resolve().parents[1],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-
-    assert completed.returncode == 0
-    assert "Exported 2 replay records" in completed.stdout
-    rows = [json.loads(line) for line in export_path.read_text(encoding="utf-8").splitlines()]
-    assert len(rows) == 2
-    assert all(row["hard_negative_sample"] is True for row in rows)

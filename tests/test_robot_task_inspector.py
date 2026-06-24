@@ -17,7 +17,6 @@ from src.robot_task_inspector import (
     write_scene_and_replay_indexes,
     write_smoke_report,
 )
-import teto_V1
 
 
 pytestmark = [pytest.mark.legacy, pytest.mark.debug]
@@ -888,55 +887,3 @@ def test_inspector_does_not_write_results_files(tmp_path):
 
     after = {path.name: path.read_text(encoding="utf-8") for path in run_dir.iterdir()}
     assert after == before
-
-
-def test_launcher_does_not_trigger_inspector_for_regular_batch(monkeypatch):
-    called = False
-
-    def fake_inspect(run_dir=None):
-        nonlocal called
-        called = True
-        return {"ok": True, "summary": {}, "items": []}
-
-    monkeypatch.setattr(teto_V1, "inspect_robot_task_run", fake_inspect)
-
-    teto_V1.maybe_show_robot_task_inspection({"prompt_type": "describe_image", "run_dir": "/tmp/run"})
-
-    assert called is False
-
-
-def test_launcher_uses_robot_task_run_dir_for_inspector(monkeypatch, capsys):
-    captured_run_dir = ""
-
-    def fake_inspect(run_dir=None):
-        nonlocal captured_run_dir
-        captured_run_dir = run_dir
-        return {
-            "ok": True,
-            "run_dir": str(run_dir),
-            "results_path": str(Path(run_dir) / "results.jsonl"),
-            "summary": {
-                "total": 0,
-                "parse_success": 0,
-                "parse_failed": 0,
-                "validation_passed": 0,
-                "validation_warning": 0,
-                "validation_failed": 0,
-                "unsafe_count": 0,
-                "rejected_count": 0,
-                "grounding_count": 0,
-                "grounding_missing_count": 0,
-                "no_target_count": 0,
-            },
-            "items": [],
-        }
-
-    monkeypatch.setattr(teto_V1, "inspect_robot_task_run", fake_inspect)
-    monkeypatch.setattr("builtins.input", lambda prompt="": "")
-
-    teto_V1.maybe_show_robot_task_inspection(
-        {"prompt_type": "robot_task_json", "run_dir": "/tmp/correct_run", "output_dir": "/tmp/wrong_run"}
-    )
-
-    assert captured_run_dir == "/tmp/correct_run"
-    assert "TETO robot_task_json inspector" in capsys.readouterr().out

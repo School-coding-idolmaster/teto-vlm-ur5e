@@ -6,7 +6,6 @@ from src.autoregressive_motion_planner import (
     plan_offline_autoregressive_motion,
 )
 from src.motion_command_normalizer import normalize_motion_command
-from scripts import run_long_motion_autoregressive_preview as preview_cli
 
 
 pytestmark = [pytest.mark.legacy, pytest.mark.historical]
@@ -211,27 +210,6 @@ def test_contract_only_semantics_are_explicit_for_every_substep():
     assert result["real_substep_execution_enabled"] is False
     assert all(step["execution_status"] == "SKIPPED_CONTRACT_ONLY" for step in result["substeps"])
     _assert_no_execution(result)
-
-
-def test_offline_preview_cli_writes_json_and_markdown_without_execution(tmp_path, capsys):
-    exit_code = preview_cli.main(
-        [
-            "--parser",
-            "rule",
-            "--mock-current-tcp-pose",
-            "--cmd",
-            "move forward 10 cm",
-            "--output-dir",
-            str(tmp_path),
-        ]
-    )
-
-    output = capsys.readouterr().out
-    assert exit_code == 0
-    assert '"final_plan_status": "PASS"' in output
-    assert '"any_execution_attempted": false' in output
-    assert len(list(tmp_path.glob("*.json"))) == 1
-    assert len(list(tmp_path.glob("*.md"))) == 1
 
 
 def _plan(

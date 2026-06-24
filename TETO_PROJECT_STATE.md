@@ -87,6 +87,7 @@ Old / not recommended:
 
 - removed Just Chat path
 - removed `src/teto_chat.py`
+- removed legacy RGB-only launcher/demo/replay/preview entrypoints in H6 Round 1A
 - old RGB-only paths are legacy/debug only, not formal real execution
 
 ## Legacy / Debug Entrypoints
@@ -103,17 +104,9 @@ Legacy manual real path:
 - `--legacy-manual`
 - `--legacy-manual-console`
 
-RGB-only debug tools:
-
-- `teto_V1.py`
-- `scripts/run_demo.py`
-- `scripts/batch_recognize.py`
-- `scripts/semantic_replay.py`
-
-Historical long-motion / simulation preview tools:
+Retained historical / safety tools:
 
 - `scripts/run_first_simulation_execution.py`
-- `scripts/run_long_motion_autoregressive_preview.py`
 - `scripts/run_real_long_motion_test.py`
 
 Current real default remains `scripts/start_teto_real_full_stack.sh` /

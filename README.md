@@ -262,17 +262,9 @@ fallback normalizer supplies only canonical motion semantics:
 `execution_permission_decided_by_parser=false`. The downstream safety gate
 remains authoritative.
 
-Generate an offline report with:
-
-```bash
-python3 scripts/run_long_motion_autoregressive_preview.py \
-  --parser rule \
-  --mock-current-tcp-pose \
-  --cmd "move forward 10 cm"
-```
-
-JSON and Markdown evidence is written under
-`outputs/autoregressive_motion_previews/` by default.
+The standalone historical preview entrypoint was removed in H6 Round 1A.
+The underlying planner contract remains covered by tests and by the guarded
+real long-motion safety harness.
 
 ## TETO v3.0.13: Minimal Guarded Real Vector Long-Motion Test
 
@@ -338,7 +330,6 @@ geometry remain unchanged.
 
 ```text
 teto_vlm/
-├── teto_V1.py
 ├── README.md
 ├── requirements.txt
 ├── assets/
@@ -360,7 +351,8 @@ teto_vlm/
 │   ├── robot_interface.py
 │   └── logger.py
 ├── scripts/
-│   ├── run_demo.py
+│   ├── start_teto_real_full_stack.sh
+│   ├── start_teto_isaac_gui_operator.sh
 │   └── check_env.py
 └── tests/
     ├── test_image_utils.py
@@ -379,12 +371,6 @@ install or download models; it reuses the local Ollama model name from the
 existing `qwen_vl_demo.py.save` script.
 
 ## Run
-
-Start the launcher:
-
-```bash
-python3 teto_V1.py
-```
 
 Check the environment:
 
@@ -440,9 +426,8 @@ A native capture component must still acquire and verify the RGB/depth pairing,
 alignment, device metadata, calibration, TF snapshot, timestamps, and file
 provenance before the builder is called.
 
-`scripts/run_demo.py` and `scripts/batch_recognize.py` are retained only as
-legacy/debug RGB-only semantic tools. Their `--image` and `--input-dir`
-arguments are not formal pipeline inputs.
+The old RGB-only launcher/demo entrypoints were removed in H6 Round 1A. Current
+formal visual inputs are RealSense snapshot/replay contracts.
 
 ## Prompt Types
 
@@ -476,30 +461,6 @@ Current prompt types:
   Humans, animals, and unsafe or unsuitable objects must be marked with
   `manipulation_assessment.candidate=false`.
 
-Legacy/debug RGB-only SRL test:
-
-```bash
-python3 scripts/run_demo.py --image data/raw/1.jpg --prompt-type spatial_relationship_lite --backend qwen
-```
-
-Legacy/debug RGB-only batch SRL test:
-
-```bash
-python3 scripts/batch_recognize.py --input-dir data/processed/train --prompt-type spatial_relationship_lite --backend qwen
-```
-
-Legacy/debug RGB-only controlled task JSON test:
-
-```bash
-python3 scripts/run_demo.py --image data/raw/1.jpg --prompt-type robot_task_json --prompt "pick the red cup" --backend qwen
-```
-
-Legacy/debug RGB-only batch controlled task JSON test:
-
-```bash
-python3 scripts/batch_recognize.py --input-dir data/processed/train --prompt-type robot_task_json --prompt "pick the red cup" --backend qwen
-```
-
 Inspect the latest saved controlled robot task JSON run without rerunning VLM
 inference:
 
@@ -529,10 +490,8 @@ objects should not be selected as robot manipulation candidates. When such a
 target is detected, `candidate` should be `false`, `difficulty` should be
 `unsafe` when appropriate, and `error.code` should be `E_UNSAFE`.
 
-When `robot_task_json` batch recognition is run from `python3 teto_V1.py`, the
-launcher prints the inspector summary for that exact run directory after the
-batch completes. It then asks whether to show detailed item inspection. Normal
-batch recognition does not trigger the robot task inspector.
+Saved `robot_task_json` runs can still be inspected directly, but the old
+interactive visual launcher was removed in H6 Round 1A.
 
 ## Historical TETO V1.1.4 legacy RGB-only smoke test
 
@@ -545,13 +504,7 @@ single folder containing:
 - a bird / animal image
 - an empty scene or scene with no clear manipulation target
 
-Run the controlled JSON batch:
-
-```bash
-python3 scripts/batch_recognize.py --input-dir data/processed/smoke_robot_task --prompt-type robot_task_json --prompt "pick the safe target" --backend qwen
-```
-
-Then inspect the saved run:
+Inspect a saved run:
 
 ```bash
 python3 scripts/inspect_robot_task_json.py --details
@@ -715,19 +668,12 @@ This remains semantic middleware inspection only. TETO does not execute robot
 behavior, connect to ROS2 / MoveIt / UR5, generate URScript, generate joint
 angles, generate trajectories, or send robot control commands.
 
-## TETO V1.5.0 semantic replay CLI
+## TETO V1.5.0 semantic replay helpers
 
-`scripts/semantic_replay.py` adds a semantic replay sample manager for saved
-`robot_task_json` runs. It reads existing `replay_index.json` and
-`results.jsonl` files to list, filter, inspect, and export replay subsets
-without rerunning the model.
-
-```bash
-python3 scripts/semantic_replay.py outputs/results/robot_task_json/run_YYYYMMDD_HHMMSS --stats
-python3 scripts/semantic_replay.py outputs/results/robot_task_json/run_YYYYMMDD_HHMMSS --list
-python3 scripts/semantic_replay.py outputs/results/robot_task_json/run_YYYYMMDD_HHMMSS --show 0
-python3 scripts/semantic_replay.py outputs/results/robot_task_json/run_YYYYMMDD_HHMMSS --hard-negative --export hard_negatives.jsonl
-```
+The historical standalone semantic replay entrypoint was removed in H6 Round
+1A. The replay helper functions remain test-covered for saved `robot_task_json`
+runs. They read existing `replay_index.json` and `results.jsonl` files to
+list, filter, inspect, and export replay subsets without rerunning the model.
 
 Filters include `--positive`, `--hard-negative`, `--reason`, `--error-code`,
 `--candidate true|false`, and `--grounded true|false`. The statistics view
@@ -747,18 +693,10 @@ robot control commands.
 
 ## TETO V1.5.1 semantic replay real-run polish
 
-The semantic replay CLI now prints run source context in `--stats`, including
+The semantic replay helpers print run source context in stats output, including
 the run directory, replay index path, results JSONL path, and replay `run_id`.
 When filters are active, it also reports `filtered_total` and prints the active
 filter set so real-run reviews are easier to audit.
-
-`--list` accepts `--limit N` to cap display output without changing the
-filtered record set used by stats or export:
-
-```bash
-python3 scripts/semantic_replay.py outputs/results/robot_task_json/run_YYYYMMDD_HHMMSS --list --limit 10
-python3 scripts/semantic_replay.py outputs/results/robot_task_json/run_YYYYMMDD_HHMMSS --hard-negative --reason E_NO_TARGET --list --limit 10
-```
 
 `--show N` now uses stable review sections for replay record fields, matching
 result record status, normalized scene/target/error fields, and raw audit
@@ -810,7 +748,7 @@ control commands.
 
 ## TETO V1.6.1 semantic replay planner eligibility display
 
-`scripts/semantic_replay.py --show N` now includes a planner gateway
+The semantic replay detail view now includes a planner gateway
 eligibility section for the selected replay sample. Reviewers can see whether a
 sample is eligible for a future `planner_gateway`, inspect rejection reasons
 for rejected samples, and confirm that the planner contract remains dry-run
@@ -858,7 +796,7 @@ or send robot control commands.
 
 ## TETO V1.7.1 projector eligibility replay display
 
-`scripts/semantic_replay.py --show N` now displays projector eligibility beside
+The semantic replay detail view now displays projector eligibility beside
 planner eligibility for the selected replay sample. The detail view reports
 projector status, eligibility, projector confidence, runtime inputs still
 missing, errors, warnings, and `allow_robot_motion=false`.
@@ -895,7 +833,7 @@ URScript, or execute a robot.
 
 ## TETO V1.8.1 execution readiness replay display
 
-`scripts/semantic_replay.py --show N` now displays Execution Readiness after
+The semantic replay detail view now displays Execution Readiness after
 Planner Gateway Eligibility and Projector Eligibility. The replay detail view
 shows `dry_run_ready`, `planner_rejected`, or `projector_rejected`, plus ready
 state, planner/projector eligibility flags, blocking reasons, warnings, and
@@ -941,9 +879,8 @@ call Isaac Sim APIs, ROS2, MoveIt, UR5, RTDE, TF, depth projection, robot
 motion, URScript, joint angles, trajectories, `moveit_goal`,
 `execution_command`, or `tcp_pose_world`.
 
-In the `python3 teto_V1.py` launcher, single image recognition and batch image
-recognition also show prompt helper keywords. You can type a built-in prompt
-type, a shortcut keyword, or a free-form prompt. Useful shortcuts include:
+The removed legacy visual launcher exposed prompt helper keywords for single
+image recognition and batch image recognition. Historical shortcuts included:
 
 - `describe`: `describe_image`
 - `objects` or `locate`: `locate_objects`
@@ -2511,7 +2448,6 @@ python3 -m src.cli snapshot-replay \
 
 ## Notes
 
-- `teto_V1.py` is the visual launcher, not a training main program.
 - Real VLM inference logic belongs in `src/vlm_infer.py`.
 - Snapshot RGB preprocessing logic belongs in `src/image_utils.py`.
 - Prompt templates belong in `src/prompt_utils.py`.
