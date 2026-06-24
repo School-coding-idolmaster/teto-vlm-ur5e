@@ -182,8 +182,17 @@ def _interactive_loop(operator: IsaacSimOperator, gateway, simulation_app) -> in
             print(json.dumps(operator.demo_center(), ensure_ascii=False, indent=2), flush=True)
         elif normalized == "reset":
             print(json.dumps(operator.reset(), ensure_ascii=False, indent=2), flush=True)
+        elif normalized in {"help", "?"}:
+            print(
+                json.dumps(
+                    operator.execute_command(command),
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                flush=True,
+            )
         elif normalized:
-            result = operator.execute_text(command)
+            result = operator.execute_command(command)
             for step in result.get("substeps", []):
                 print(
                     f"substep {step['substep_index']}/{step['substep_count']}: "

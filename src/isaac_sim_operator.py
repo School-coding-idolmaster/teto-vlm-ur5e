@@ -15,10 +15,6 @@ from src.adaptive_reobservation_policy import (
     AdaptiveReobservationPolicyRequest,
     evaluate_adaptive_reobservation_policy,
 )
-from src.bounded_relative_motion import (
-    E_RELATIVE_MOTION_RANGE_EXCEEDED,
-    build_bounded_relative_motion_contract,
-)
 from src.memory_guided_execution import (
     ReobservationPolicyRequest,
     build_working_memory,
@@ -26,10 +22,10 @@ from src.memory_guided_execution import (
     make_scene_monitor_result,
     update_working_memory,
 )
-from src.qwen_motion_parser import (
-    QwenMotionParserRequest,
-    evaluate_qwen_motion_parser,
-    evaluate_shared_motion_parser,
+from src.unified_segmented_operator import (
+    OperatorCommandInterface,
+    UnifiedOperatorConfig,
+    iter_segmented_subgoals,
 )
 
 
@@ -191,6 +187,18 @@ class IsaacSimOperator:
         self.scene_monitor_callable = scene_monitor_callable
         self.last_result: dict[str, Any] | None = None
         self.last_evidence_path: str | None = None
+        self.command_interface = OperatorCommandInterface(
+            UnifiedOperatorConfig(
+                max_total_distance_m=self.config.max_total_distance_m,
+                max_substep_distance_m=self.config.max_substep_distance_m,
+                position_tolerance_m=self.config.position_tolerance_m,
+                workspace_bounds=self.config.workspace_bounds,
+                qwen_endpoint=self.config.qwen_endpoint,
+                parser_mode="qwen" if qwen_callable is not None else "shared",
+                output_dir=self.output_dir,
+            ),
+            qwen_callable=qwen_callable,
+        )
         if gateway.gateway_type not in {GATEWAY_SIMULATED_MEASURED, GATEWAY_SYNTHETIC_FAKE}:
             raise IsaacOperatorSafetyError("E_UNKNOWN_GATEWAY_TYPE")
         if not self.headless and gateway.gateway_type != GATEWAY_SIMULATED_MEASURED:
@@ -240,21 +248,7 @@ class IsaacSimOperator:
             return {"status": "BLOCKED", "abort_reason": "E_EMPTY_COMMAND", **_safety_flags()}
         before_status = self.gateway.status()
         current_pose = _pose(before_status.get("current_tcp_pose"))
-        if self.qwen_callable is not None:
-            parser_result = evaluate_qwen_motion_parser(
-                QwenMotionParserRequest(
-                    user_text=text,
-                    max_distance_m=self.config.max_total_distance_m,
-                    hard_safety_limit_m=self.config.max_total_distance_m,
-                    endpoint=self.config.qwen_endpoint,
-                    llm_callable=self.qwen_callable,
-                )
-            )
-        else:
-            parser_result = evaluate_shared_motion_parser(
-                text,
-                max_distance_m=self.config.max_total_distance_m,
-            )
+        parser_result = self.command_interface.parse_motion(text)
         evidence = self._base_evidence(text, parser_result, before_status)
         if parser_result.get("qwen_motion_parser_status") != "PASS":
             evidence["status"] = "BLOCKED"
@@ -333,7 +327,9 @@ class IsaacSimOperator:
         completed = 0
         stable_substep_count = 0
         subgoal_failure_count = 0
-        for index, step_delta in enumerate(step_deltas, start=1):
+        for index, step_delta, substep_count in iter_segmented_subgoals(
+            step_deltas
+        ):
             before = _pose(self.gateway.status().get("current_tcp_pose"))
             if before is None:
                 evidence["abort_reason"] = "E_SIMULATED_TCP_POSE_UNAVAILABLE"
@@ -351,7 +347,7 @@ class IsaacSimOperator:
                 delta_m=step_delta,
                 target_tcp_pose=target,
                 substep_index=index,
-                substep_count=len(step_deltas),
+                substep_count=substep_count,
             )
             after = _pose(result.get("measured_tcp_after"))
             error_m = _distance(after["position_m"], target["position_m"]) if after else None
@@ -376,7 +372,7 @@ class IsaacSimOperator:
                     "task_goal": text,
                     "goal_type": "relative_motion",
                     "substep_index": index,
-                    "substep_count": len(step_deltas),
+                    "substep_count": substep_count,
                     "target_tcp_pose": target,
                     "measured_tcp_before": before,
                     "measured_tcp_after": after,
@@ -432,7 +428,7 @@ class IsaacSimOperator:
             evidence["substeps"].append(
                 {
                     "substep_index": index,
-                    "substep_count": len(step_deltas),
+                    "substep_count": substep_count,
                     "delta_m": step_delta,
                     "target_tcp_pose": target,
                     "simulated_measured_tcp_before": before,
@@ -620,39 +616,81 @@ class IsaacSimOperator:
         result = self.gateway.home()
         return {**result, "operator_command": "demo_center"}
 
+    def execute_command(self, text: str) -> dict[str, Any]:
+        command = self.command_interface.classify(text)
+        if command == "status":
+            return {
+                "status": "PASS",
+                "operator_command": "status",
+                "backend_status": self.status(),
+                "manual_confirmation_required": False,
+                "safety_gate_still_required": True,
+            }
+        if command == "home":
+            return {
+                **self.demo_center(),
+                "operator_command": "home",
+                "manual_confirmation_required": False,
+                "safety_gate_still_required": True,
+            }
+        if command == "reset":
+            return {
+                **self.reset(),
+                "operator_command": "reset",
+                "manual_confirmation_required": False,
+                "safety_gate_still_required": True,
+            }
+        if command == "help":
+            return {
+                "status": "PASS",
+                "operator_command": "help",
+                "commands": [
+                    "status",
+                    "home",
+                    "reset",
+                    "help",
+                    "quit/exit",
+                    "natural-language relative Cartesian motion",
+                ],
+                "manual_confirmation_required": False,
+                "safety_gate_still_required": True,
+            }
+        if command == "quit":
+            return {
+                "status": "PASS",
+                "operator_command": "quit",
+                "quit_requested": True,
+                "manual_confirmation_required": False,
+                "safety_gate_still_required": True,
+            }
+        return self.execute_text(text)
+
     def _decompose(
         self,
         parser_result: dict[str, Any],
         current_pose: dict[str, Any],
         delta: list[float],
     ) -> tuple[list[list[float]], dict[str, Any]]:
-        norm = _norm(delta)
-        final_position = _add(current_pose["position_m"], delta)
-        if norm > self.config.max_total_distance_m + EPS:
-            return [], {
-                "final_plan_status": "BLOCKED",
-                "final_blocking_reason": E_RELATIVE_MOTION_RANGE_EXCEEDED,
-                "workspace_check_status": "NOT_RUN",
-                "planned_subgoals": [],
-            }
-        if not _in_workspace(final_position, self.config.workspace_bounds):
-            return [], {
-                "final_plan_status": "BLOCKED",
-                "final_blocking_reason": "E_OUT_OF_SIM_WORKSPACE",
-                "workspace_check_status": "BLOCKED",
-                "planned_subgoals": [],
-            }
-        contract = build_bounded_relative_motion_contract(
-            delta,
-            max_substep_m=self.config.max_substep_distance_m,
+        contract = self.command_interface.build_motion_contract(
+            delta_m=delta,
+            current_tcp_pose=current_pose,
             execution_backend="isaac_sim",
             backend_policy_id="isaac_measured_gateway_v1",
-            start_pose=current_pose,
         )
+        if contract.get("final_plan_status") != "PASS":
+            reason = contract.get("final_blocking_reason")
+            if reason == "E_OUT_OF_WORKSPACE":
+                reason = "E_OUT_OF_SIM_WORKSPACE"
+            return [], {
+                **contract,
+                "final_blocking_reason": reason,
+                "workspace_check_status": (
+                    "BLOCKED" if reason == "E_OUT_OF_SIM_WORKSPACE" else "NOT_RUN"
+                ),
+            }
         vectors = contract["decomposed_substeps_m"]
         return vectors, {
             **contract,
-            "final_plan_status": "PASS",
             "planned_execution_style": "shared_decomposed_relative_motion",
             "safety_gate_scope": "isaac_sim_decomposed_contract",
             "workspace_check_status": "PASS",
