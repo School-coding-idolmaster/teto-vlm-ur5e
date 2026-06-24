@@ -1,3 +1,12 @@
+"""HISTORICAL/DEBUG simulation execution entrypoint.
+
+This is not the current default real or Isaac operator path. Current real
+default: `scripts/start_teto_real_full_stack.sh` /
+`scripts/teto_operator_console.py`. Current Isaac default:
+`scripts/start_teto_isaac_gui_operator.sh`. Dry-run, plan-only, fake, or Isaac
+evidence from this historical script is not REAL_PATH success evidence.
+"""
+
 import argparse
 import json
 import shlex

@@ -2,7 +2,7 @@
 
 ## Current Baseline
 
-- Current HEAD: `b6cad38`
+- Last pushed post-migration baseline before H1: `84e1443`
 - Branch: `master`
 - Last known full offline pytest: `843 passed`
 - Working tree after migration: clean
@@ -88,6 +88,37 @@ Old / not recommended:
 - removed Just Chat path
 - removed `src/teto_chat.py`
 - old RGB-only paths are legacy/debug only, not formal real execution
+
+## Legacy / Debug Entrypoints
+
+These files are retained for historical, debug, or manual fallback reasons.
+They are not the current default real or Isaac entrypoints, and they must not
+be used as evidence of current formal REAL_PATH success unless explicitly routed
+through the real backend and measured gates.
+
+Legacy manual real path:
+
+- `scripts/text_to_ur5e_real_motion.py`
+- `scripts/run_qwen_manual_acceptance.sh`
+- `--legacy-manual`
+- `--legacy-manual-console`
+
+RGB-only debug tools:
+
+- `teto_V1.py`
+- `scripts/run_demo.py`
+- `scripts/batch_recognize.py`
+- `scripts/semantic_replay.py`
+
+Historical long-motion / simulation preview tools:
+
+- `scripts/run_first_simulation_execution.py`
+- `scripts/run_long_motion_autoregressive_preview.py`
+- `scripts/run_real_long_motion_test.py`
+
+Current real default remains `scripts/start_teto_real_full_stack.sh` /
+`scripts/teto_operator_console.py`. Current Isaac default remains
+`scripts/start_teto_isaac_gui_operator.sh`.
 
 ## Safety Invariants
 

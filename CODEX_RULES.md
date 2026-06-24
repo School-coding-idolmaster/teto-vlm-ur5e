@@ -30,6 +30,13 @@ Classify each requested change as one of:
 
 If a change spans categories, split the commit or stop for audit.
 
+## Legacy / Debug Entrypoint Rules
+
+- Before using any script with a LEGACY / DEBUG / HISTORICAL warning, Codex must ask for explicit user confirmation.
+- Do not treat legacy/debug scripts as the current architecture.
+- Do not delete legacy/debug scripts without a dedicated cleanup audit.
+- Do not infer REAL_PATH behavior from legacy/debug scripts.
+
 ## Hard Prohibitions
 
 - Do not run UR5e hardware unless explicitly requested.

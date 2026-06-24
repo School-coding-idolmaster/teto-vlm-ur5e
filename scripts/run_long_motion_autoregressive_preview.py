@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+# HISTORICAL/DEBUG long-motion preview entrypoint.
+# This is not the current default real path. Current real default:
+# scripts/start_teto_real_full_stack.sh / scripts/teto_operator_console.py.
+# Current Isaac default: scripts/start_teto_isaac_gui_operator.sh.
+# Dry-run, plan-only, fake, or Isaac preview evidence is not REAL_PATH success
+# evidence.
+
 import argparse
 import json
 import os

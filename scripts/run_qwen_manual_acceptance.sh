@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -eo pipefail
 
+# LEGACY MANUAL REAL PATH ONLY.
+# This is not the current default real path. Current real default:
+# scripts/start_teto_real_full_stack.sh / scripts/teto_operator_console.py.
+# Current Isaac default: scripts/start_teto_isaac_gui_operator.sh.
+# Do not use dry-run, plan-only, fake, or Isaac evidence as REAL_PATH success
+# evidence. REAL_PATH success from this legacy path requires explicit real
+# legacy manual routing plus measured real execution evidence.
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 

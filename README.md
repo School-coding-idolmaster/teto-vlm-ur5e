@@ -85,6 +85,17 @@ Isaac remains SIM_ONLY. The Isaac operator records `execution_mode: isaac_sim`
 and simulation evidence, rejects real mode, and does not use Dashboard, RTDE
 write, MoveIt `ExecuteTrajectory`, or a physical UR5e connection.
 
+Current recommended real entry remains
+`bash scripts/start_teto_real_full_stack.sh`, with
+`scripts/teto_operator_console.py` as the real console implementation. Current
+recommended Isaac entry remains
+`bash scripts/start_teto_isaac_gui_operator.sh --gui --console`.
+Legacy/debug/historical tools are marked in their file headers and should not
+be used as default architecture paths. Dry-run, plan-only, fake, synthetic, or
+Isaac evidence from those tools is not REAL_PATH success evidence. The
+`outputs/` tree has not been cleaned; artifact retention or deletion needs a
+separate audit and user decision.
+
 ## TETO v3.0.6: Planner Audit Evidence
 
 TETO v3.0.5 verifies the current TCP pose before relative real motion and

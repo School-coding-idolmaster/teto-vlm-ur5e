@@ -1,3 +1,12 @@
+"""LEGACY/DEBUG RGB-only demo entrypoint.
+
+This is not the current default real or Isaac path. Current real default:
+`scripts/start_teto_real_full_stack.sh` / `scripts/teto_operator_console.py`.
+Current Isaac default: `scripts/start_teto_isaac_gui_operator.sh`.
+Dry-run, plan-only, fake, RGB-only, or Isaac evidence from this script is not
+REAL_PATH success evidence.
+"""
+
 import argparse
 import sys
 from pathlib import Path
