@@ -1,3 +1,5 @@
+import pytest
+
 from src.autoregressive_motion_planner import (
     AutoregressiveMotionPlannerRequest,
     PLANNER_VERSION,
@@ -5,6 +7,9 @@ from src.autoregressive_motion_planner import (
 )
 from src.motion_command_normalizer import normalize_motion_command
 from scripts import run_long_motion_autoregressive_preview as preview_cli
+
+
+pytestmark = [pytest.mark.legacy, pytest.mark.historical]
 
 
 def test_ten_cm_preview_generates_five_sequential_targets():

@@ -129,6 +129,17 @@ Current real default remains `scripts/start_teto_real_full_stack.sh` /
 - Never mix SIM_ONLY changes into REAL_PATH without explicit audit.
 - Always preserve fail-closed behavior.
 
+## Test Classification Notes
+
+- Legacy/debug/historical tests are retained for regression coverage, not as
+  current entrypoint recommendations.
+- No test is currently proven safe for deletion.
+- REAL_PATH safety tests must not be removed casually, especially tests
+  covering measured gates, fake/dry-run rejection, MoveIt execution evidence,
+  bounded motion, and post-motion verification.
+- Future test deletion requires replacement coverage plus a full offline
+  pytest run.
+
 ## Next Recommended Research Phase
 
 The next phase is not more cleanup. It is research and validation for:

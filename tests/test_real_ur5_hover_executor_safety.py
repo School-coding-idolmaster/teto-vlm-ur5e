@@ -1,3 +1,5 @@
+import pytest
+
 from src.real_ur5_hover_executor import (
     E_EMERGENCY_STOP_ACTIVE,
     E_LOW_CONFIDENCE,
@@ -12,6 +14,9 @@ from src.real_ur5_hover_executor import (
     RealUR5HoverExecutionRequest,
     evaluate_real_ur5_hover_execution,
 )
+
+
+pytestmark = [pytest.mark.safety, pytest.mark.real_path]
 
 
 def test_real_motion_disabled_by_default_blocks():

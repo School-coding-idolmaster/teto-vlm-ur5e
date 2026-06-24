@@ -3,6 +3,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from src import robot_task_inspector
 from src.robot_task_inspector import (
     build_replay_index,
@@ -16,6 +18,9 @@ from src.robot_task_inspector import (
     write_smoke_report,
 )
 import teto_V1
+
+
+pytestmark = [pytest.mark.legacy, pytest.mark.debug]
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:

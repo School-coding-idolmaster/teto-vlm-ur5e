@@ -3,7 +3,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from src.robot_task_inspector import write_scene_and_replay_indexes
+
+
+pytestmark = [pytest.mark.legacy, pytest.mark.debug]
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:

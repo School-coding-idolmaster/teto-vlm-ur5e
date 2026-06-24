@@ -1,5 +1,11 @@
-from src import image_utils
 import json
+
+import pytest
+
+from src import image_utils
+
+
+pytestmark = [pytest.mark.legacy, pytest.mark.debug]
 
 
 def test_image_utils_imports():

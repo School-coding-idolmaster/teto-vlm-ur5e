@@ -1,6 +1,8 @@
 import json
 import math
 
+import pytest
+
 from scripts import run_real_long_motion_test as real_cli
 from src.autoregressive_motion_planner import (
     AutoregressiveMotionPlannerRequest,
@@ -13,6 +15,9 @@ from src.guarded_vector_motion_executor import (
 )
 from src.motion_command_normalizer import canonicalize_delta_motion
 from src.qwen_motion_parser import QwenMotionParserRequest, evaluate_qwen_motion_parser
+
+
+pytestmark = [pytest.mark.safety, pytest.mark.real_path]
 
 
 def test_vector_norm_and_straight_line_decomposition():

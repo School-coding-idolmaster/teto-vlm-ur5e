@@ -1,6 +1,11 @@
 from pathlib import Path
 
+import pytest
+
 from src.v3_hover_demo_orchestrator import V3HoverDemoRequest, evaluate_v3_hover_demo
+
+
+pytestmark = [pytest.mark.legacy, pytest.mark.debug, pytest.mark.historical]
 
 
 def test_positive_software_no_robot_mode_passes_and_exports_evidence(tmp_path):

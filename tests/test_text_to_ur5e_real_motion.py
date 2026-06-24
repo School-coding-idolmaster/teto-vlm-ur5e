@@ -6,6 +6,9 @@ from scripts import text_to_ur5e_real_motion as cli
 from scripts.text_to_ur5e_real_motion import MotionParseError, parse_motion_command
 
 
+pytestmark = [pytest.mark.safety, pytest.mark.real_path]
+
+
 @pytest.mark.parametrize(
     ("command", "delta"),
     [

@@ -1,8 +1,12 @@
 import json
 
+import pytest
 from PIL import Image
 
 from src import batch_recognition
+
+
+pytestmark = [pytest.mark.legacy, pytest.mark.debug]
 
 
 class FakeInferencer:
