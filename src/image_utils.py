@@ -248,22 +248,6 @@ def convert_image(input_path, output_path, format="JPEG"):
     return destination
 
 
-def load_image_processing_config(config_path=None, default_max_size=1024, default_quality=85) -> Dict[str, int]:
-    config_file = _normalize_path(config_path) if config_path else PROJECT_ROOT / "config" / "default.yaml"
-    try:
-        import yaml
-
-        with config_file.open("r", encoding="utf-8") as handle:
-            config = yaml.safe_load(handle) or {}
-        image_config = config.get("image") or {}
-        return {
-            "max_size": int(image_config.get("max_size", default_max_size)),
-            "quality": int(image_config.get("quality", default_quality)),
-        }
-    except Exception:
-        return {"max_size": int(default_max_size), "quality": int(default_quality)}
-
-
 def compress_image(input_path, output_path, max_size=1024, quality=85):
     try:
         image = load_image(input_path)

@@ -8,7 +8,7 @@ from pathlib import Path
 from src.batch_recognition import run_batch_recognition
 from src.camera_snapshot import evaluate_formal_snapshot_replay
 from src.display_utils import print_vlm_result
-from src.image_utils import batch_convert_images, convert_image, load_image_processing_config
+from src.image_utils import batch_convert_images, convert_image
 from src.output_paths import (
     IMAGE_CONVERSION_BATCH_ROOT,
     create_image_conversion_single_dir,
@@ -16,7 +16,6 @@ from src.output_paths import (
 from src.prompt_utils import build_prompt, get_prompt, list_prompt_types
 from src.recognition_results import SingleRecognitionRecorder
 from src.robot_task_inspector import format_items, format_summary, inspect_robot_task_run
-from src.teto_chat import TETOChatSession, is_exit_message
 from src.vlm_infer import VLMInferencer
 
 
@@ -25,6 +24,7 @@ RESET = "\033[0m"
 PROJECT_ROOT = Path(__file__).resolve().parent
 DEFAULT_BACKEND = "qwen"
 DEFAULT_PROMPT_TYPE = "describe_image"
+EXIT_WORDS = {"q", "quit", "exit", "back"}
 PROMPT_ALIASES = {
     "describe": "describe_image",
     "objects": "locate_objects",
@@ -87,16 +87,19 @@ def _clean_path(value: str) -> str:
     return value.strip().strip("'").strip('"')
 
 
+def is_exit_message(message: str) -> bool:
+    return message.strip().lower() in EXIT_WORDS
+
+
 def print_menu():
     print("=" * 40)
     print("              TETO V3.0.0")
     print("             Test Launcher")
     print("=" * 40)
     print("1. Validate RealSense snapshot replay")
-    print("2. Just chat with TETO")
-    print("3. Check environment")
-    print("4. Run first simulation execution")
-    print("5. Quit")
+    print("2. Check environment")
+    print("3. Run first simulation execution")
+    print("4. Quit")
     print()
     print("Formal visual input: RealSense D455 snapshot / snapshot replay")
     print("Legacy RGB-only conversion and image demos are not exposed here.")
@@ -197,13 +200,11 @@ def handle_batch_convert_images():
     default_input = PROJECT_ROOT / "data" / "raw"
     input_value = _clean_path(input(f"Input folder [{default_input}]: "))
     input_dir = Path(input_value).expanduser() if input_value else default_input
-    image_config = load_image_processing_config()
-
     result = batch_convert_images(
         input_dir,
         output_root=IMAGE_CONVERSION_BATCH_ROOT,
-        max_size=image_config["max_size"],
-        quality=image_config["quality"],
+        max_size=1024,
+        quality=85,
     )
     if not result.get("ok"):
         print(result.get("message", "Batch conversion failed."))
@@ -321,10 +322,6 @@ def _prompt_with_follow_up_context(prompt: str, history: list[dict[str, str]]) -
 
 
 def read_backend() -> str:
-    return DEFAULT_BACKEND
-
-
-def read_chat_backend() -> str:
     return DEFAULT_BACKEND
 
 
@@ -456,29 +453,6 @@ def handle_run_the_demo():
             print("Invalid option. Please choose 1, 2, or 3.")
 
 
-def handle_just_chat_with_teto():
-    print("==============================")
-    print("Just chat with TETO")
-    print("==============================")
-    backend = read_chat_backend()
-    session = TETOChatSession(backend=backend)
-    print(f"Backend: {backend}")
-    print("Type `back`, `q`, `quit`, or `exit` to return.")
-
-    while True:
-        message = input("You: ").strip()
-        if is_exit_message(message):
-            print("TETO: Back to the main menu.")
-            return
-
-        try:
-            reply = session.reply(message)
-        except Exception as exc:
-            print(f"TETO chat error: {exc}")
-            return
-        print(f"TETO: {reply}")
-
-
 def handle_validate_realsense_snapshot_replay():
     print("==============================")
     print("RealSense Snapshot Replay")
@@ -572,16 +546,14 @@ def main():
         if choice == "1":
             handle_validate_realsense_snapshot_replay()
         elif choice == "2":
-            handle_just_chat_with_teto()
-        elif choice == "3":
             handle_check_environment()
-        elif choice == "4":
+        elif choice == "3":
             handle_first_simulation_execution()
-        elif choice == "5":
+        elif choice == "4":
             print("Bye.")
             break
         else:
-            print("Invalid option. Please choose 1, 2, 3, 4, or 5.")
+            print("Invalid option. Please choose 1, 2, 3, or 4.")
 
 
 if __name__ == "__main__":
