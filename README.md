@@ -24,6 +24,8 @@ This project currently focuses on:
   simulation-only motion precheck contracts
 - Full robot-system shadow bridge evidence that merges ROS2 fake-publish,
   MoveIt plan-only, and UR5 read-only state declarations without motion
+- Unified segmented real UR5e relative-motion operation with measured
+  per-segment safety gates
 - Placeholder robot interface
 
 Historical arbitrary-image conversion and RGB-only demos remain temporarily
@@ -31,9 +33,57 @@ available as legacy/debug tools during Phase 1 cleanup. They are not formal
 visual inputs, do not create RealSense Scene Snapshots, and must not feed robot
 runtime or training datasets intended for the RealSense-native pipeline.
 
-Future work can connect Qwen2.5-VL, LLaVA, InternVL, Isaac Sim execution,
+Future work can broaden Qwen2.5-VL, LLaVA, InternVL, Isaac Sim execution,
 live ROS2 publish, MoveIt2 execution, UR5 controllers, or other local robotics
-and VLM components.
+and VLM components beyond the current gated paths.
+
+## Current Real And Simulation Execution Modes
+
+The default real console is now the unified segmented real operator:
+
+```bash
+bash scripts/start_teto_real_full_stack.sh
+```
+
+The startup wrapper can start real-lab services, including the UR driver,
+`tcp_pose_broadcaster`, Qwen readiness, MoveIt readiness, controller
+activation, and the real operator console. It must be run only with a human
+operator physically present, lab permission, and the real UR5e workcell in the
+expected state. Use status-only mode when you only want inspection:
+
+```bash
+bash scripts/start_teto_real_full_stack.sh --status
+```
+
+The default real mode is autonomous segmented execution with measured
+per-segment gates. Autonomous does not mean ungated, and it is not the old
+single command `y` prompt path. Before each real segment can execute, TETO
+requires Dashboard state, active controller state, joint state availability,
+MoveIt availability, a fresh current TCP pose, D455 snapshot freshness/sync and
+newer-than-previous checks, the shared bounded relative-motion contract, and
+the cartesian safety gateway. After each segment, TETO verifies the measured
+after TCP pose, position error, direction projection, orientation change, and
+post-motion verification result.
+
+The shared bounded relative-motion envelope is `0.50 m`; a `0.51 m` request is
+expected to block. Long accepted requests are decomposed into bounded substeps
+rather than sent as one large motion.
+
+The legacy real-small-motion acceptance path still exists only as an explicit
+legacy manual mode:
+
+```bash
+bash scripts/start_teto_qwen_real_operator.sh --legacy-manual-console
+```
+
+Dry-run, plan-only, Isaac, fake, or synthetic evidence must not be counted as
+REAL_PATH success evidence. Protective-stop recovery, unlock, dashboard
+recovery actions, and other robot recovery operations are human lab actions;
+they must not be performed automatically by an LLM or by TETO.
+
+Isaac remains SIM_ONLY. The Isaac operator records `execution_mode: isaac_sim`
+and simulation evidence, rejects real mode, and does not use Dashboard, RTDE
+write, MoveIt `ExecuteTrajectory`, or a physical UR5e connection.
 
 ## TETO v3.0.6: Planner Audit Evidence
 
@@ -280,8 +330,6 @@ teto_vlm/
 ├── teto_V1.py
 ├── README.md
 ├── requirements.txt
-├── config/
-│   └── default.yaml
 ├── assets/
 │   └── sample_images/
 ├── data/
@@ -2305,17 +2353,10 @@ The formal launcher menu is:
 
 ```text
 1. Validate RealSense snapshot replay
-2. Just chat with TETO
-3. Check environment
-4. Run first simulation execution
-5. Quit
+2. Check environment
+3. Run first simulation execution
+4. Quit
 ```
-
-Choose `Just chat with TETO` for a text-only chat loop. It defaults to the
-existing local Qwen/Ollama backend and uses the same model name as the VLM demo
-unless `TETO_QWEN_MODEL` overrides it. It does not need an image and does not
-write recognition results. Type `back`, `q`, `quit`, or `exit` to return to the
-main menu. Select `mock` only when you want the simple local fallback.
 
 Old workspaces may still contain `outputs/image_conversion/`,
 `outputs/batches/`, or RGB-only recognition runs. Those artifacts are legacy
@@ -2405,9 +2446,10 @@ recognition runs no longer write there.
 
 ## TETO V3.0.0: First Real UR5 Hover Demo
 
-TETO V3.0.0 is the first real text-to-camera-to-VLM-to-TETO-to-UR5 execution
-milestone. The initial task is intentionally narrow: identify one object from a
-limited command such as:
+TETO V3.0.0 is a historical real text-to-camera-to-VLM-to-TETO-to-UR5
+execution milestone. It is not the current default real console path. The
+initial task was intentionally narrow: identify one object from a limited
+command such as:
 
 ```text
 hover over the red mug
@@ -2416,8 +2458,8 @@ hover over the red mug
 The V3 path normalizes the command, takes a one-shot camera snapshot, grounds
 the target with a VLM adapter, runs TETO semantic and geometry gates, projects
 2D evidence to a bounded 3D target, prepares a planner request, checks ROS2 /
-MoveIt / UR5 state evidence, requires manual confirmation, and only then allows
-a low-speed hover above the object.
+MoveIt / UR5 state evidence, uses its legacy acceptance gate, and only then
+allows a low-speed hover above the object.
 
 Run the CI-safe software/no-robot smoke path with:
 
@@ -2438,7 +2480,7 @@ Safety boundaries:
 - no Dashboard motion command
 - no raw joint target generation
 - no LLM-generated `tcp_pose_world` execution
-- manual confirmation required for real motion
+- legacy acceptance gate for this historical hover path
 - low-speed MoveIt execution only
 - bounded workspace checks
 - evidence export required
@@ -2495,5 +2537,6 @@ python3 -m src.cli snapshot-replay \
 - V2.10.1 = ROS2 environment / interface readiness check
 - V2.10.2 = ROS2 message export / fake publish dry-run
 - V2.11.0 = full robot-system shadow bridge with MoveIt plan-only and UR5 read-only state declarations
-- V3.0.0 = first real UR5 hover demo architecture with real motion disabled by default and manual confirmation required
+- V3.0.0 = historical first real UR5 hover demo architecture; current default real console uses unified segmented measured gates
+- B1/B2 migration = unified segmented real backend and real full-stack startup docs; default real console is autonomous segmented execution with measured per-segment gates, while legacy manual mode remains explicit
 - RTDE write / Dashboard command / URScript / raw joint target execution remains outside the implemented safety boundary
