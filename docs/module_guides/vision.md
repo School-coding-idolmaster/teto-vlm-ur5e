@@ -1,8 +1,9 @@
 # Vision Module Guide
 
 This guide records the H11 scene/camera snapshot boundary policy for future
-Codex, GPT, and human audits. H11-A1 is documentation-only: no files are moved,
-no imports are changed, and no new snapshot package is created.
+Codex, GPT, and human audits. H11-A1 was documentation-only. H11-A2 adds only
+a namespace marker; no implementation files are moved and no imports are
+changed.
 
 ## Current Responsibility
 
@@ -55,10 +56,12 @@ The possible future package target is:
 - `src/vision/snapshot/`
 
 Migration to that package is postponed. Do not create `src/vision/snapshot/`
-yet, and do not create alternate package roots such as `src/camera/` or
+implementation modules, do not add import compatibility shims there yet, and
+do not create alternate package roots such as `src/camera/` or
 `src/scene_snapshot/`.
 
-If a future task creates `src/vision/snapshot/`, it should first define a
+The current `src/vision/snapshot/` package is a marker only. It should not be
+used by production code yet. A future migration should first define a
 compatibility plan for existing imports and focused tests, then move code in
 small behavior-preserving steps.
 

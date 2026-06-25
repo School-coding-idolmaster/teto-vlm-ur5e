@@ -34,10 +34,11 @@ These files are shared-safe but real-path/artifact-path sensitive. They are
 used by tests and production code through broad root-level imports, so import
 migration is postponed.
 
-The possible future package target is `src/vision/snapshot/`, but migration is
-not approved yet. Do not create `src/vision/snapshot/`, `src/camera/`, or
-`src/scene_snapshot/` during documentation-only boundary work.
+The future package target is `src/vision/snapshot/`. H11-A2 creates that
+namespace as a marker only; no implementation has been migrated there and no
+compatibility shim exists there. Do not create `src/camera/` or
+`src/scene_snapshot/`.
 
-This package remains a future boundary. H11-A1 does not change runtime
+This package remains a future boundary. H11-A2 does not change runtime
 behavior, startup behavior, real robot behavior, Isaac behavior, import paths,
-file locations, or safety semantics.
+file locations, re-export behavior, or safety semantics.
