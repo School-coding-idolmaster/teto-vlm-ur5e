@@ -25,6 +25,9 @@ Before a Codex or human module task, read:
   plan.
 - `src/grounding/README.md`: local grounding directory guide and file
   responsibilities.
+- `docs/module_guides/projector.md`: projector / 2D-to-3D metric-layer
+  boundary, current shadow-contract fields, import policy, forbidden
+  dependencies, and future packaging plan.
 
 ## Future Guides
 
