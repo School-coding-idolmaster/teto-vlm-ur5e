@@ -79,7 +79,7 @@ from src.ur5_read_only_state_contract import (
     build_ur5_read_only_state_request,
     evaluate_ur5_read_only_state,
 )
-from src.vlm_grounding_adapter import build_vlm_grounding_adapter_request, evaluate_vlm_grounding_adapter
+from src.grounding.vlm_adapter import build_vlm_grounding_adapter_request, evaluate_vlm_grounding_adapter
 
 
 REPORT_VERSION = "teto_simulation_execution.v1"

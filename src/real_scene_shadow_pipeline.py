@@ -8,7 +8,7 @@ from typing import Any, Dict
 import yaml
 
 from src.camera_snapshot import build_camera_snapshot_request, evaluate_camera_snapshot_contract
-from src.grounding_result import (
+from src.grounding.result import (
     build_grounding_result_request,
     evaluate_grounding_result_contract,
 )

@@ -17,7 +17,7 @@ from src.perception_shadow_pipeline import (
 )
 from src.projector_shadow import E_CAMERA_INFO_MISSING, E_INVALID_DEPTH, E_OUT_OF_WORKSPACE
 from src.simulation_runtime import run_first_simulation_execution
-from src.vlm_grounding_adapter import E_LOW_CONFIDENCE, E_NO_TARGET
+from src.grounding.vlm_adapter import E_LOW_CONFIDENCE, E_NO_TARGET
 
 
 VALID_TASK = {

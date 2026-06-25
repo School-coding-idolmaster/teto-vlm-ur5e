@@ -3,7 +3,7 @@ import json
 import yaml
 
 from src.simulation_runtime import run_first_simulation_execution
-from src.vlm_grounding_adapter import (
+from src.grounding.vlm_adapter import (
     E_BBOX_MISSING,
     E_LIVE_VLM_DISABLED,
     E_LOW_CONFIDENCE,

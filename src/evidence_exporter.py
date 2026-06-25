@@ -23,7 +23,7 @@ from src.ros2_message_exporter import format_ros2_message_export_report
 from src.robot_system_shadow_bridge import format_robot_system_shadow_bridge_report
 from src.semantic_simulation_bridge import format_semantic_simulation_bridge_report
 from src.simulated_task_execution import format_simulated_task_execution_report
-from src.vlm_grounding_adapter import format_vlm_grounding_report
+from src.grounding.vlm_adapter import format_vlm_grounding_report
 from src.ur5_read_only_state_contract import format_ur5_read_only_state_report
 
 

@@ -26,7 +26,7 @@ from src.geometry_validity import (
     evaluate_geometry_validity_from_contracts,
     format_geometry_validity_report,
 )
-from src.grounding_result import GroundingResultRequest, evaluate_grounding_result_contract
+from src.grounding.result import GroundingResultRequest, evaluate_grounding_result_contract
 from src.simulation_runtime import run_first_simulation_execution
 
 

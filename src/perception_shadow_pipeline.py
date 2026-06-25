@@ -25,7 +25,7 @@ from src.geometry_validity import (
 )
 from src.projector_shadow import evaluate_projector_shadow_from_contracts, load_projector_shadow_config
 from src.real_scene_shadow_pipeline import evaluate_real_scene_shadow_from_contracts
-from src.vlm_grounding_adapter import (
+from src.grounding.vlm_adapter import (
     VLMGroundingAdapterRequest,
     evaluate_vlm_grounding_adapter,
     load_vlm_grounding_config,

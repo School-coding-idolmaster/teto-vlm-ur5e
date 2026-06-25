@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import yaml
 
 from src.camera_snapshot import CameraSnapshotRequest, evaluate_camera_snapshot_contract
-from src.grounding_result import GroundingResultRequest, evaluate_grounding_result_contract
+from src.grounding.result import GroundingResultRequest, evaluate_grounding_result_contract
 from src.real_scene_shadow_pipeline import (
     E_INVALID_BBOX,
     E_INVALID_PIXEL_CENTER,
