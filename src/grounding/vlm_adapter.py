@@ -8,6 +8,10 @@ from typing import Any, Dict
 import yaml
 
 from src.grounding.command_normalization import normalize_command
+from src.grounding.forbidden_fields import (
+    FORBIDDEN_ROBOT_CONTROL_FIELDS,
+    find_forbidden_robot_control_fields as _forbidden_robot_control_fields,
+)
 from src.grounding.reporting import format_vlm_grounding_report
 
 
@@ -45,29 +49,6 @@ E_PIXEL_CENTER_MISSING = "E_PIXEL_CENTER_MISSING"
 E_SNAPSHOT_MISMATCH = "E_SNAPSHOT_MISMATCH"
 E_SCENE_VERSION_MISMATCH = "E_SCENE_VERSION_MISMATCH"
 E_ROBOT_COMMAND_NOT_ALLOWED = "E_ROBOT_COMMAND_NOT_ALLOWED"
-
-FORBIDDEN_ROBOT_CONTROL_FIELDS = {
-    "robot_command",
-    "real_robot_command",
-    "real_robot_backend",
-    "trajectory",
-    "trajectory_plan",
-    "trajectory_command",
-    "tcp_pose_world",
-    "tcp_pose_world_command",
-    "joint_target",
-    "joint_targets",
-    "joint_command",
-    "urscript",
-    "urscript_program",
-    "dashboard_command",
-    "rtde_control_command",
-    "moveit_plan",
-    "ros2_action_goal",
-    "automatic_retry_motion",
-    "automatic_retry_motion_request",
-    "automatic_retry_motion_command",
-}
 
 MOCK_COMMANDS = {
     "hover over the red mug",
@@ -462,21 +443,6 @@ def _safety_boundary() -> Dict[str, bool]:
         "no_robot_command": True,
         "no_real_execution_request": True,
     }
-
-
-def _forbidden_robot_control_fields(value: Any, prefix: str = "") -> list[str]:
-    found: list[str] = []
-    if isinstance(value, dict):
-        for key, child in value.items():
-            key_name = str(key)
-            path = f"{prefix}.{key_name}" if prefix else key_name
-            if key_name in FORBIDDEN_ROBOT_CONTROL_FIELDS:
-                found.append(path)
-            found.extend(_forbidden_robot_control_fields(child, path))
-    elif isinstance(value, list):
-        for index, item in enumerate(value):
-            found.extend(_forbidden_robot_control_fields(item, f"{prefix}[{index}]"))
-    return _unique(found)
 
 
 def _dict(value: Any) -> Dict[str, Any] | None:

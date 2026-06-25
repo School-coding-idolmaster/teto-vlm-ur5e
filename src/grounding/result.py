@@ -7,32 +7,14 @@ from typing import Any, Dict
 
 import yaml
 
+from src.grounding.forbidden_fields import (
+    FORBIDDEN_ROBOT_CONTROL_FIELDS,
+    find_forbidden_robot_control_fields as _forbidden_robot_control_fields,
+)
+
 
 CONTRACT_VERSION = "teto_grounding_result.v1"
 CURRENT_GROUNDING_VERSION = "TETO V2.9.0"
-
-FORBIDDEN_ROBOT_CONTROL_FIELDS = {
-    "robot_command",
-    "real_robot_command",
-    "real_robot_backend",
-    "trajectory",
-    "trajectory_plan",
-    "trajectory_command",
-    "tcp_pose_world",
-    "tcp_pose_world_command",
-    "joint_target",
-    "joint_targets",
-    "joint_command",
-    "urscript",
-    "urscript_program",
-    "dashboard_command",
-    "rtde_control_command",
-    "moveit_plan",
-    "ros2_action_goal",
-    "automatic_retry_motion",
-    "automatic_retry_motion_request",
-    "automatic_retry_motion_command",
-}
 
 
 @dataclass(frozen=True)
@@ -127,21 +109,6 @@ def _not_requested_result() -> Dict[str, Any]:
     }
 
 
-def _forbidden_robot_control_fields(value: Any, prefix: str = "") -> list[str]:
-    found: list[str] = []
-    if isinstance(value, dict):
-        for key, child in value.items():
-            key_name = str(key)
-            path = f"{prefix}.{key_name}" if prefix else key_name
-            if key_name in FORBIDDEN_ROBOT_CONTROL_FIELDS:
-                found.append(path)
-            found.extend(_forbidden_robot_control_fields(child, path))
-    elif isinstance(value, list):
-        for index, item in enumerate(value):
-            found.extend(_forbidden_robot_control_fields(item, f"{prefix}[{index}]"))
-    return _unique(found)
-
-
 def _string(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
 
@@ -152,13 +119,3 @@ def _optional_float(value: Any) -> float | None:
     if isinstance(value, (int, float)):
         return float(value)
     return None
-
-
-def _unique(values: list[str]) -> list[str]:
-    seen: set[str] = set()
-    result: list[str] = []
-    for value in values:
-        if value not in seen:
-            seen.add(value)
-            result.append(value)
-    return result

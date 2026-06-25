@@ -1,6 +1,10 @@
 from src import grounding_result as legacy_result
 from src import vlm_grounding_adapter as legacy_vlm
 from src.grounding.command_normalization import normalize_command as split_normalize_command
+from src.grounding.forbidden_fields import (
+    FORBIDDEN_ROBOT_CONTROL_FIELDS as split_forbidden_fields,
+    find_forbidden_robot_control_fields,
+)
 from src.grounding.reporting import format_vlm_grounding_report as split_format_vlm_grounding_report
 from src.grounding import result as new_result
 from src.grounding import vlm_adapter as new_vlm
@@ -66,3 +70,13 @@ def test_vlm_grounding_split_helpers_preserve_import_identity():
     assert new_vlm.normalize_command is split_normalize_command
     assert legacy_vlm.format_vlm_grounding_report is new_vlm.format_vlm_grounding_report
     assert new_vlm.format_vlm_grounding_report is split_format_vlm_grounding_report
+
+
+def test_forbidden_fields_helper_preserves_old_imports_and_detection():
+    assert legacy_result.FORBIDDEN_ROBOT_CONTROL_FIELDS is new_result.FORBIDDEN_ROBOT_CONTROL_FIELDS
+    assert legacy_vlm.FORBIDDEN_ROBOT_CONTROL_FIELDS is new_vlm.FORBIDDEN_ROBOT_CONTROL_FIELDS
+    assert new_result.FORBIDDEN_ROBOT_CONTROL_FIELDS is split_forbidden_fields
+    assert new_vlm.FORBIDDEN_ROBOT_CONTROL_FIELDS is split_forbidden_fields
+    assert find_forbidden_robot_control_fields(
+        {"trajectory": {"joint_targets": [0.0]}, "items": [{"tcp_pose_world": [0, 0, 0]}]}
+    ) == ["trajectory", "trajectory.joint_targets", "items[0].tcp_pose_world"]
