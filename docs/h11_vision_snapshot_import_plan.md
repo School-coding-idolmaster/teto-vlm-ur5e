@@ -13,8 +13,8 @@ Future package boundary:
 
 - `src/vision/snapshot/`
 
-The future package is currently a marker only. Production code must not import
-from `src.vision.snapshot` yet.
+H11-A4 adds package-side compatibility adapters under this package. Root modules
+remain the source of truth, and production imports have not migrated yet.
 
 ## Import Inventory
 
@@ -194,6 +194,8 @@ Recommended strategy:
 ## Proposed Staged Migration Plan
 
 ### H11-A4: Package-Side Compatibility Adapters And Tests
+
+Status: complete.
 
 - Add temporary package-side compatibility adapters:
   - `src.vision.snapshot.camera_snapshot`

@@ -1,9 +1,9 @@
 # Vision Module Guide
 
 This guide records the H11 scene/camera snapshot boundary policy for future
-Codex, GPT, and human audits. H11-A1 was documentation-only. H11-A2 adds only
-a namespace marker; no implementation files are moved and no imports are
-changed.
+Codex, GPT, and human audits. H11-A1 was documentation-only. H11-A2 added a
+namespace marker. H11-A4 adds package-side compatibility adapters, but no
+implementation files are moved and production imports are not changed.
 
 ## Current Responsibility
 
@@ -55,15 +55,17 @@ The possible future package target is:
 
 - `src/vision/snapshot/`
 
-Migration to that package is postponed. Do not create `src/vision/snapshot/`
-implementation modules, do not add import compatibility shims there yet, and
-do not create alternate package roots such as `src/camera/` or
-`src/scene_snapshot/`.
+Migration to that package is postponed. Current package-side adapter modules
+exist only to prove import compatibility:
 
-The current `src/vision/snapshot/` package is a marker only. It should not be
-used by production code yet. A future migration should first define a
-compatibility plan for existing imports and focused tests, then move code in
-small behavior-preserving steps.
+- `src.vision.snapshot.camera_snapshot`
+- `src.vision.snapshot.camera_source_adapter`
+- `src.vision.snapshot.realsense_snapshot_builder`
+
+Root modules remain the source of truth, and `src/vision/snapshot/__init__.py`
+does not re-export public APIs. Do not create alternate package roots such as
+`src/camera/` or `src/scene_snapshot/`. A future migration should move code in
+small behavior-preserving steps only after focused compatibility tests pass.
 
 ## Boundary With Neighbor Modules
 
