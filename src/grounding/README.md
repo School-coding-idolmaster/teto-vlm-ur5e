@@ -27,10 +27,13 @@ Grounding is not responsible for:
 - `result.py`: Grounding result request dataclass, result file loading, and
   grounding result contract normalization.
 - `vlm_adapter.py`: Public VLM grounding adapter API, adapter modes, status and
-  error codes, confidence and identity checks, no-motion flags, and local
-  forbidden robot-control field detection.
+  error codes, confidence checks, no-motion flags, and adapter orchestration.
 - `command_normalization.py`: `normalize_command` implementation.
+- `forbidden_fields.py`: forbidden robot-control field constants and recursive
+  detection helper.
 - `reporting.py`: `format_vlm_grounding_report` implementation.
+- `scene_binding.py`: `snapshot_id` and `scene_version` binding mismatch
+  helper.
 
 ## Import Policy
 
@@ -39,16 +42,17 @@ New code should prefer explicit module imports:
 - `from src.grounding.result import ...`
 - `from src.grounding.vlm_adapter import ...`
 - `from src.grounding.command_normalization import normalize_command`
+- `from src.grounding.forbidden_fields import ...`
 - `from src.grounding.reporting import format_vlm_grounding_report`
+- `from src.grounding.scene_binding import ...`
 
-The legacy compatibility shims remain supported:
+The legacy root-level compatibility shims were removed in H9-A8B:
 
 - `src/grounding_result.py`
 - `src/vlm_grounding_adapter.py`
 
-Do not delete those shims casually. Existing tests and runtime code still use
-the old paths, and future migrations must preserve those imports until a
-separate compatibility-removal plan exists.
+Do not restore those shims or add import hacks for the old paths. Use explicit
+`src.grounding.*` submodule imports instead.
 
 `src/grounding/__init__.py` intentionally keeps an empty `__all__`. Use explicit
 submodule imports instead of adding a broad package-level public API.
@@ -73,13 +77,15 @@ allows startup.
 
 ## Future Split Candidates
 
-Later audits may consider small, compatibility-preserving splits for:
+H9 completed these grounding helper splits:
 
 - `forbidden_fields.py`
 - `scene_binding.py`
+
+Later audits may consider small, behavior-preserving splits for:
+
 - `confidence_gate.py`
 - `target_selection.py`
 
-Those are not part of the current phase. Any future split must keep old import
-paths available, preserve status/error constants, and avoid changing runtime,
-startup, or safety behavior.
+Any future split must preserve status/error constants and avoid changing
+runtime, startup, or safety behavior.

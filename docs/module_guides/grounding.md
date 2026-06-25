@@ -1,8 +1,9 @@
 # Grounding Module Guide
 
 This guide records the H9 grounding module policy for future Codex, GPT, and
-human audits. The current grounding code is split into small modules while
-preserving legacy import paths and runtime behavior.
+human audits. The current grounding code is split into small modules under
+`src/grounding/`; the former root-level grounding compatibility shims were
+removed in H9-A8B.
 
 ## Public Import Policy
 
@@ -12,21 +13,23 @@ Prefer explicit imports from the current package:
 - `src.grounding.vlm_adapter`
 - `src.grounding.command_normalization`
 - `src.grounding.reporting`
+- `src.grounding.forbidden_fields`
+- `src.grounding.scene_binding`
 
 The package root intentionally does not collect public symbols. Keep
 `src/grounding/__init__.py` with an empty `__all__` unless a future task
 explicitly approves a package-level API.
 
-## Compatibility Policy
+## Removed Legacy Paths
 
-The legacy shims are part of the compatibility surface:
+The legacy root-level shims have been removed:
 
-- `src.grounding_result`
-- `src.vlm_grounding_adapter`
+- `src/grounding_result.py`
+- `src/vlm_grounding_adapter.py`
 
-They must keep re-exporting the old public API until there is a separate
-compatibility-removal plan. Any split must update compatibility tests so old
-paths, new main paths, and new helper-module paths remain available.
+Do not reintroduce alternate root-level shims or import hacks for those paths.
+Runtime code, tests, and new utilities should import from the current
+`src.grounding.*` modules directly.
 
 Do not rename or remove public classes, functions, constants, modes, status
 values, or error codes without a dedicated migration plan.
@@ -112,12 +115,14 @@ bash -n scripts/start_teto_isaac_gui_operator.sh
 
 ## Future Split Plan
 
-Possible future splits, in increasing risk order:
+Completed H9 splits:
 
 - `forbidden_fields.py`: centralize local forbidden robot-control field names
-  and recursive detection. This touches safety semantics, so update tests
-  carefully.
+  and recursive detection.
 - `scene_binding.py`: isolate `snapshot_id` and `scene_version` matching.
+
+Possible future splits, in increasing risk order:
+
 - `confidence_gate.py`: isolate confidence threshold and low-confidence
   rejection logic.
 - `target_selection.py`: only after the project has real multi-target or

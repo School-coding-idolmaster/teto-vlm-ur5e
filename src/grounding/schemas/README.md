@@ -11,12 +11,14 @@ After H9-A1 and H9-A3, grounding schema-adjacent logic now lives in:
 - `src/grounding/vlm_adapter.py`
 - `src/grounding/command_normalization.py`
 - `src/grounding/reporting.py`
+- `src/grounding/forbidden_fields.py`
+- `src/grounding/scene_binding.py`
 
-The legacy root-level paths remain compatibility shims:
+The legacy root-level grounding shims were removed in H9-A8B:
 
 - `src/grounding_result.py`
 - `src/vlm_grounding_adapter.py`
 
-Do not treat this directory as proof that grounding contracts still live only
-in the old `src` root. Current grounding guidance is in
-`docs/module_guides/grounding.md` and `src/grounding/README.md`.
+Do not treat this directory as proof that grounding contracts live in the old
+`src` root. Current grounding guidance is in `docs/module_guides/grounding.md`
+and `src/grounding/README.md`.
