@@ -8,7 +8,7 @@ Existing files that already carry related responsibilities include:
 
 - `src/camera_snapshot.py`
 - `src/realsense_snapshot_builder.py`
-- `src/projector_shadow.py`
+- `src/projector/shadow.py`
 - `configs/camera_snapshot.example.yaml`
 - `examples/camera_source/sample_extrinsics.json`
 

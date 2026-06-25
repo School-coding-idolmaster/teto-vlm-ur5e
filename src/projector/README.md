@@ -7,13 +7,17 @@ Current public import path:
 
 - `src.projector.shadow`
 
-Temporary compatibility import path:
+Removed compatibility shim file:
 
-- `src.projector_shadow`
+- `src/projector_shadow.py`
 
-The compatibility shim exists only to preserve the historical root-level
-projector shadow import path during H10 package migration. New runtime code and
-ordinary tests should import from `src.projector.shadow`.
+The root-level compatibility shim was removed in H10-A5. New runtime code and
+ordinary tests must import from `src.projector.shadow`. Do not add an import
+hack for the removed root-level module.
+
+Artifact, config, and evidence names such as `projector_shadow_config`,
+`projector_shadow_result.json`, and `projector_shadow_report.md` remain data
+contract names, not Python import paths.
 
 ## Current Files
 

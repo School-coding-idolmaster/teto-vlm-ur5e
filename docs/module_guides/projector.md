@@ -2,8 +2,8 @@
 
 This guide records the H10 projector boundary policy for future Codex, GPT,
 and human audits. The concrete 2D-to-3D metric projector implementation now
-lives in `src/projector/shadow.py`. The root-level `src/projector_shadow.py`
-module is a temporary compatibility shim only.
+lives in `src/projector/shadow.py`. The former root-level
+`src/projector_shadow.py` compatibility shim was removed in H10-A5.
 
 ## Current Responsibility
 
@@ -29,8 +29,6 @@ It is responsible for:
 The current formal implementation is:
 
 - `src/projector/shadow.py`: current V2.9.2 projector shadow implementation.
-- `src/projector_shadow.py`: temporary compatibility shim for the historical
-  root-level projector shadow import path.
 - `src/projector_contract.py`: older semantic dry-run eligibility contract
   used by replay/readiness tooling. It does not compute metric points and is
   not migrated into the projector package yet.
@@ -304,14 +302,17 @@ Current imports should remain explicit:
 The `src.projector` package root intentionally does not collect or re-export
 public API. Import concrete projector symbols from `src.projector.shadow`.
 
-The historical root-level import remains available only through the temporary
-compatibility shim:
+The historical root-level Python shim has been removed:
 
-- `from src.projector_shadow import ...`
+- `src/projector_shadow.py`
 
-New runtime code and ordinary tests should not add new dependencies on the shim.
-Use it only for compatibility coverage or legacy callers during the migration
-window.
+Do not restore the old shim or add an import hack for the removed root-level
+module. Runtime code, tests, and new utilities should import from
+`src.projector.shadow` directly.
+
+Artifact, config, and evidence names such as `projector_shadow_config`,
+`projector_shadow_result.json`, and `projector_shadow_report.md` remain data
+contract names. Do not rename those fields as part of Python import cleanup.
 
 `src/projector_contract.py` remains at the root level for now. It belongs to
 the older semantic dry-run readiness/contract line and must not be migrated
@@ -358,8 +359,6 @@ Low-risk next steps:
 - Add more contract-only documentation for projector fixtures and evidence
   manifests.
 - Audit duplicate forbidden robot-control field handling outside grounding.
-- Retire the temporary `src.projector_shadow` compatibility shim only after a
-  dedicated cleanup audit confirms no runtime or external callers still need it.
 
 Higher-risk future steps:
 

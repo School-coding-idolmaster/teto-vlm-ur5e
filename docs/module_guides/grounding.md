@@ -76,7 +76,7 @@ Do not move these into grounding:
 - `src/geometry_validity.py`
 - `src/real_scene_shadow_pipeline.py`
 - `src/perception_shadow_pipeline.py`
-- `src/projector_shadow.py`
+- `src/projector/shadow.py`
 - Real backend files.
 - Isaac backend files.
 - Execution, planning, and shared safety behavior.
