@@ -26,7 +26,7 @@ from src.planner_gateway_shadow import (
     build_planner_gateway_shadow_request,
     evaluate_planner_gateway_shadow,
 )
-from src.projector_shadow import build_projector_shadow_request, evaluate_projector_shadow
+from src.projector.shadow import build_projector_shadow_request, evaluate_projector_shadow
 from src.real_scene_shadow_pipeline import (
     build_real_scene_shadow_request,
     evaluate_real_scene_shadow_pipeline,

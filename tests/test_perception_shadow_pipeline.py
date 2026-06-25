@@ -15,7 +15,7 @@ from src.perception_shadow_pipeline import (
     evaluate_perception_shadow_pipeline,
     format_perception_shadow_report,
 )
-from src.projector_shadow import E_CAMERA_INFO_MISSING, E_INVALID_DEPTH, E_OUT_OF_WORKSPACE
+from src.projector.shadow import E_CAMERA_INFO_MISSING, E_INVALID_DEPTH, E_OUT_OF_WORKSPACE
 from src.simulation_runtime import run_first_simulation_execution
 from src.grounding.vlm_adapter import E_LOW_CONFIDENCE, E_NO_TARGET
 

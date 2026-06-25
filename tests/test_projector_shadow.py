@@ -5,7 +5,7 @@ import yaml
 from src.camera_snapshot import CameraSnapshotRequest, evaluate_camera_snapshot_contract
 from src.geometry_validity import evaluate_geometry_validity_from_contracts
 from src.grounding.result import GroundingResultRequest, evaluate_grounding_result_contract
-from src.projector_shadow import (
+from src.projector.shadow import (
     E_CAMERA_FRAME_MISSING,
     E_CAMERA_INFO_MISSING,
     E_DEPTH_OUT_OF_RANGE,

@@ -8,7 +8,7 @@ from src.camera_snapshot import format_camera_snapshot_report
 from src.camera_source_adapter import format_camera_source_report
 from src.geometry_validity import format_geometry_validity_report
 from src.moveit_plan_only_contract import format_moveit_plan_only_report
-from src.projector_shadow import format_projector_shadow_report
+from src.projector.shadow import format_projector_shadow_report
 from src.simulation_micro_motion import (
     normalize_motion_evidence_paths,
     summarize_motion_evidence,

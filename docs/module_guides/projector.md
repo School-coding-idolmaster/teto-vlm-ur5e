@@ -1,10 +1,9 @@
 # Projector Module Guide
 
 This guide records the H10 projector boundary policy for future Codex, GPT,
-and human audits. The current projector implementation is still the top-level
-shadow contract in `src/projector_shadow.py`; this guide is documentation and
-contract groundwork only. Do not move files or create a package API during
-projector documentation-only work.
+and human audits. The concrete 2D-to-3D metric projector implementation now
+lives in `src/projector/shadow.py`. The root-level `src/projector_shadow.py`
+module is a temporary compatibility shim only.
 
 ## Current Responsibility
 
@@ -29,9 +28,12 @@ It is responsible for:
 
 The current formal implementation is:
 
-- `src/projector_shadow.py`: current V2.9.2 projector shadow contract.
+- `src/projector/shadow.py`: current V2.9.2 projector shadow implementation.
+- `src/projector_shadow.py`: temporary compatibility shim for the historical
+  root-level projector shadow import path.
 - `src/projector_contract.py`: older semantic dry-run eligibility contract
-  used by replay/readiness tooling. It does not compute metric points.
+  used by replay/readiness tooling. It does not compute metric points and is
+  not migrated into the projector package yet.
 
 ## Inputs
 
@@ -129,7 +131,7 @@ without a dedicated migration plan.
 
 ## Error Codes
 
-Current `src/projector_shadow.py` blocking codes:
+Current `src/projector/shadow.py` blocking codes:
 
 - `E_GEOMETRY_NOT_VALID`
 - `E_PIXEL_CENTER_MISSING`
@@ -296,18 +298,24 @@ Execution and safety own:
 
 Current imports should remain explicit:
 
-- `from src.projector_shadow import ...`
+- `from src.projector.shadow import ...`
 - `from src.projector_contract import ...`
 
-There is no current `src.projector` package API. Do not create
-`src/projector/__init__.py` or move `src/projector_shadow.py` as part of
-documentation-only work.
+The `src.projector` package root intentionally does not collect or re-export
+public API. Import concrete projector symbols from `src.projector.shadow`.
 
-If a future task packages projector code, it should either:
+The historical root-level import remains available only through the temporary
+compatibility shim:
 
-- preserve import compatibility for `src.projector_shadow` and
-  `src.projector_contract`, or
-- update all import sites and tests in one audited migration.
+- `from src.projector_shadow import ...`
+
+New runtime code and ordinary tests should not add new dependencies on the shim.
+Use it only for compatibility coverage or legacy callers during the migration
+window.
+
+`src/projector_contract.py` remains at the root level for now. It belongs to
+the older semantic dry-run readiness/contract line and must not be migrated
+alongside projector shadow without a separate audit.
 
 Known current import consumers include:
 
@@ -326,6 +334,7 @@ boundary work:
 ```bash
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPYCACHEPREFIX=/tmp/teto_codex_pycache .venv_lab/bin/python -m pytest -p no:cacheprovider -q \
   tests/test_projector_shadow.py \
+  tests/test_projector_import_compatibility.py \
   tests/test_projector_contract.py \
   tests/test_geometry_validity.py \
   tests/test_perception_shadow_pipeline.py \
@@ -349,11 +358,13 @@ Low-risk next steps:
 - Add more contract-only documentation for projector fixtures and evidence
   manifests.
 - Audit duplicate forbidden robot-control field handling outside grounding.
-- Add import-compatibility tests before any package move.
+- Retire the temporary `src.projector_shadow` compatibility shim only after a
+  dedicated cleanup audit confirms no runtime or external callers still need it.
 
 Higher-risk future steps:
 
 - Splitting projector math helpers into a package.
+- Migrating `src/projector_contract.py` into a package.
 - Replacing mock/config TF with formal calibrated TF evidence.
 - Integrating formal RealSense depth sampling.
 
