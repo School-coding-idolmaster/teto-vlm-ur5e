@@ -1,5 +1,10 @@
 # TETO v3.0.2
 
+Historical release note: this document preserves historical evidence from the
+v3.0.2 Qwen manual real execution chain. Commands or paths inside may reference
+legacy behavior. For current Real and Isaac entrypoints, use
+`docs/current_entrypoints.md`.
+
 TETO v3.0.2 is the first accepted Qwen manual real execution chain release.
 
 ## Summary

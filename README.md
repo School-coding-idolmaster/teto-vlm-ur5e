@@ -1,5 +1,21 @@
 # TETO VLM-UR5e
 
+## Documentation Map / Where To Read First
+
+- `CODEX_RULES.md`: highest-priority rules for Codex and automated changes.
+- `docs/current_entrypoints.md`: canonical current Real and Isaac startup
+  commands. If historical notes or old script comments conflict with it, use
+  this file and `CODEX_RULES.md`.
+- `docs/module_guides/README.md`: lightweight index of module maintenance
+  guides.
+- `TETO_PROJECT_STATE.md`: current project status summary.
+- `docs/module_guides/<module>.md` and `src/<module>/README.md`: module-specific
+  maintenance rules when they exist.
+
+The later release, demo, and harness sections in this README preserve
+historical context. They may contain legacy paths or old one-off commands and
+are not the current entrypoint source of truth.
+
 The formal visual pipeline is now RealSense D455 native. Runtime and training
 inputs must be a RealSense Scene Snapshot or RealSense Snapshot Replay that
 keeps RGB, aligned depth, camera information, metadata, TF/timestamps, and
@@ -38,6 +54,8 @@ live ROS2 publish, MoveIt2 execution, UR5 controllers, or other local robotics
 and VLM components beyond the current gated paths.
 
 ## Current Real And Simulation Execution Modes
+
+The canonical current startup commands live in `docs/current_entrypoints.md`.
 
 The default real console is now the unified segmented real operator:
 
@@ -85,11 +103,9 @@ Isaac remains SIM_ONLY. The Isaac operator records `execution_mode: isaac_sim`
 and simulation evidence, rejects real mode, and does not use Dashboard, RTDE
 write, MoveIt `ExecuteTrajectory`, or a physical UR5e connection.
 
-Current recommended real entry remains
-`bash scripts/start_teto_real_full_stack.sh`, with
-`scripts/teto_operator_console.py` as the real console implementation. Current
-recommended Isaac entry remains
-`bash scripts/start_teto_isaac_gui_operator.sh --gui --console`.
+Current recommended Real and Isaac entries remain documented in
+`docs/current_entrypoints.md`. The real console implementation is
+`scripts/teto_operator_console.py`.
 Legacy/debug/historical tools are marked in their file headers and should not
 be used as default architecture paths. Dry-run, plan-only, fake, synthetic, or
 Isaac evidence from those tools is not REAL_PATH success evidence. The

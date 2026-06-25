@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -eo pipefail
 
+# LEGACY / COMPATIBILITY DRY-RUN WRAPPER ONLY.
+# This is not the current Real mainline entrypoint.
+# Current Real mainline entrypoint:
+#   bash scripts/start_teto_real_full_stack.sh
+# Do not treat this script as the default current operator entrypoint.
+# Do not change behavior in this docs-only cleanup.
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 

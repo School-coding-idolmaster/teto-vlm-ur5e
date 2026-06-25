@@ -1,5 +1,14 @@
 # TETO Project State
 
+## Documentation Map
+
+- `CODEX_RULES.md`: highest-priority rules for automated changes.
+- `docs/current_entrypoints.md`: canonical current Real and Isaac startup
+  commands.
+- `docs/module_guides/README.md`: module guide index.
+- `docs/module_guides/grounding.md` and `src/grounding/README.md`: current
+  grounding module guidance.
+
 ## Current Baseline
 
 - Last pushed post-migration baseline before H1: `84e1443`
@@ -53,6 +62,10 @@ Real per-segment gates:
 
 ## Entrypoints
 
+Canonical user-facing Real and Isaac startup commands live in
+`docs/current_entrypoints.md`. The list below is a status summary and should
+not drift from that file.
+
 Recommended real entry:
 
 - `bash scripts/start_teto_real_full_stack.sh`
@@ -73,7 +86,8 @@ Legacy manual:
 
 Recommended Isaac entry:
 
-- `bash scripts/start_teto_isaac_gui_operator.sh --gui --console`
+- See the full canonical command in `docs/current_entrypoints.md`.
+- Summary: `bash scripts/start_teto_isaac_gui_operator.sh --gui --console`
 
 Isaac console:
 

@@ -1,5 +1,11 @@
 # H8 Module Boundaries
 
+Historical baseline note: this document records the H8 boundary state at the
+time H8 landed. H9-A1 and H9-A3 later moved the grounding core into
+`src/grounding/` and split grounding command normalization/reporting helpers.
+For current grounding guidance, use `docs/module_guides/grounding.md` and
+`src/grounding/README.md`.
+
 H8 exists to make the next research phases easier to reason about without
 moving any current implementation code. The future work includes Camera-to-Base
 TF calibration, formal D455 evidence, Qwen grounding, projected 3D target
@@ -31,6 +37,11 @@ while preserving every current runtime import path and safety behavior.
 
 H8 keeps current runtime files in their existing locations. Files that logically
 map to the future boundaries but remain in place include:
+
+H9 update: the grounding entries in this section describe the H8-time state.
+After H9-A1/A3, `src/grounding_result.py` and
+`src/vlm_grounding_adapter.py` are compatibility shims, while current
+grounding implementation lives under `src/grounding/`.
 
 - Calibration and vision: `src/camera_snapshot.py`,
   `src/camera_source_adapter.py`, `src/realsense_snapshot_builder.py`,

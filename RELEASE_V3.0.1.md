@@ -1,5 +1,9 @@
 # TETO v3.0.1
 
+Historical release note: this document preserves historical evidence from the
+v3.0.1 snapshot. Commands or paths inside may reference legacy behavior. For
+current Real and Isaac entrypoints, use `docs/current_entrypoints.md`.
+
 This is a working text-motion pipeline snapshot.
 
 ## Verified Real Robot Path
