@@ -28,6 +28,9 @@ Before a Codex or human module task, read:
 - `docs/module_guides/projector.md`: projector / 2D-to-3D metric-layer
   boundary, current shadow-contract fields, import policy, forbidden
   dependencies, and future packaging plan.
+- `docs/module_guides/vision.md`: vision scene/camera snapshot boundary,
+  current snapshot/builder file responsibilities, import migration postponement,
+  and future `src/vision/snapshot/` package target.
 
 ## Future Guides
 
@@ -35,7 +38,6 @@ Other module guides should be added as those modules are audited or migrated.
 Likely future guides include:
 
 - calibration
-- vision
 - contracts
 - planning
 - execution
