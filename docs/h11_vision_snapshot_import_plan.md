@@ -13,8 +13,10 @@ Future package boundary:
 
 - `src/vision/snapshot/`
 
-H11-A4 adds package-side compatibility adapters under this package. Root modules
-remain the source of truth, and production imports have not migrated yet.
+H11-A4 adds package-side compatibility adapters under this package. H11-A5
+moves only the `camera_snapshot` implementation into the package path. Root
+modules remain public compatibility paths, and production imports have not
+migrated yet.
 
 ## Import Inventory
 
@@ -212,11 +214,13 @@ Status: complete.
 
 ### H11-A5: Move Implementation With Root Shims
 
-- Move implementation files into:
+Status: complete for `camera_snapshot` only.
+
+- Move implementation files into, one at a time:
   - `src/vision/snapshot/camera_snapshot.py`
   - `src/vision/snapshot/camera_source_adapter.py`
   - `src/vision/snapshot/realsense_snapshot_builder.py`
-- Replace root files with compatibility shims:
+- Replace moved root files with compatibility shims:
   - `src/camera_snapshot.py`
   - `src/camera_source_adapter.py`
   - `src/realsense_snapshot_builder.py`
@@ -225,6 +229,9 @@ Status: complete.
 - Do not change downstream production imports in this step.
 - Preserve `scripts/build_realsense_snapshot_bundle.py` behavior and import
   path unless explicitly handled in a later import-migration step.
+
+H11-A5 moved only `camera_snapshot`. `src/camera_source_adapter.py` and
+`src/realsense_snapshot_builder.py` remain root implementations.
 
 ### H11-A6: Gradual Import Migration
 

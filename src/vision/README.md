@@ -18,10 +18,12 @@ existing import paths.
 
 ## Scene / Camera Snapshot Boundary
 
-H11-A1 keeps the scene/camera snapshot implementation in its current locations:
+The scene/camera snapshot implementation is being migrated in small stages:
 
-- `src/camera_snapshot.py`: formal visual snapshot contract, validator,
-  replay/formal snapshot compatibility helper, and report formatting.
+- `src/vision/snapshot/camera_snapshot.py`: formal visual snapshot contract,
+  validator, replay/formal snapshot compatibility helper, and report
+  formatting.
+- `src/camera_snapshot.py`: temporary root compatibility shim.
 - `src/camera_source_adapter.py`: source-mode adapter from offline/manual,
   live-disabled, replay, or optional one-shot declarations into a snapshot
   contract.
@@ -34,11 +36,12 @@ These files are shared-safe but real-path/artifact-path sensitive. They are
 used by tests and production code through broad root-level imports, so import
 migration is postponed.
 
-The future package target is `src/vision/snapshot/`. H11-A2 creates that
-namespace as a marker only; no implementation has been migrated there and no
-compatibility shim exists there. Do not create `src/camera/` or
+The future package target is `src/vision/snapshot/`. H11-A5 moves only
+`camera_snapshot` into that package. `camera_source_adapter.py` and
+`realsense_snapshot_builder.py` are not migrated yet, and production imports
+have not been migrated yet. Do not create `src/camera/` or
 `src/scene_snapshot/`.
 
-This package remains a future boundary. H11-A2 does not change runtime
+This package remains a future boundary. H11-A5 does not change runtime
 behavior, startup behavior, real robot behavior, Isaac behavior, import paths,
-file locations, re-export behavior, or safety semantics.
+production callsites, package-root re-export behavior, or safety semantics.

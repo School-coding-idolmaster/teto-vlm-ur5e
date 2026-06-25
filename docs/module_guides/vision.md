@@ -3,7 +3,9 @@
 This guide records the H11 scene/camera snapshot boundary policy for future
 Codex, GPT, and human audits. H11-A1 was documentation-only. H11-A2 added a
 namespace marker. H11-A4 adds package-side compatibility adapters, but no
-implementation files are moved and production imports are not changed.
+implementation files are moved and production imports are not changed. H11-A5
+moves only the `camera_snapshot` implementation into the package path while
+keeping the root import as a compatibility shim.
 
 ## Current Responsibility
 
@@ -11,11 +13,13 @@ The vision boundary covers replayable visual evidence and camera-source
 declarations before grounding, geometry validity, projection, planning, or
 execution consume that evidence.
 
-Current scene/camera snapshot responsibilities are split across these files,
-which stay in their current locations for now:
+Current scene/camera snapshot responsibilities are split across these files:
 
-- `src/camera_snapshot.py`: formal visual snapshot contract, validator,
-  replay/formal snapshot compatibility helper, and report formatting.
+- `src/vision/snapshot/camera_snapshot.py`: formal visual snapshot contract,
+  validator, replay/formal snapshot compatibility helper, and report
+  formatting.
+- `src/camera_snapshot.py`: temporary root compatibility shim for the package
+  implementation.
 - `src/camera_source_adapter.py`: source-mode adapter from offline file,
   manual snapshot, live-disabled, RealSense replay, or optional one-shot
   declarations into a camera snapshot contract.
@@ -32,7 +36,7 @@ unless a future task explicitly authorizes broader behavior.
 ## Import And Packaging Policy
 
 Current root-level import paths remain public and should not be migrated in
-H11-A1:
+H11-A5:
 
 - `src.camera_snapshot`
 - `src.camera_source_adapter`
@@ -55,16 +59,17 @@ The possible future package target is:
 
 - `src/vision/snapshot/`
 
-Migration to that package is postponed. Current package-side adapter modules
-exist only to prove import compatibility:
+Migration to that package is staged. Current package-side modules are:
 
-- `src.vision.snapshot.camera_snapshot`
+- `src.vision.snapshot.camera_snapshot`: current implementation
 - `src.vision.snapshot.camera_source_adapter`
 - `src.vision.snapshot.realsense_snapshot_builder`
 
-Root modules remain the source of truth, and `src/vision/snapshot/__init__.py`
+`src/camera_snapshot.py` is now a temporary compatibility shim. The
+`camera_source_adapter` and `realsense_snapshot_builder` root modules remain
+the source of truth for their implementations. `src/vision/snapshot/__init__.py`
 does not re-export public APIs. Do not create alternate package roots such as
-`src/camera/` or `src/scene_snapshot/`. A future migration should move code in
+`src/camera/` or `src/scene_snapshot/`. Future migration should continue in
 small behavior-preserving steps only after focused compatibility tests pass.
 
 ## Boundary With Neighbor Modules
