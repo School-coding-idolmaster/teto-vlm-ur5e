@@ -6,6 +6,11 @@ from src.grounding.forbidden_fields import (
     find_forbidden_robot_control_fields,
 )
 from src.grounding.reporting import format_vlm_grounding_report as split_format_vlm_grounding_report
+from src.grounding.scene_binding import (
+    SCENE_BINDING_SCENE_VERSION,
+    SCENE_BINDING_SNAPSHOT_ID,
+    find_scene_binding_mismatches,
+)
 from src.grounding import result as new_result
 from src.grounding import vlm_adapter as new_vlm
 
@@ -80,3 +85,21 @@ def test_forbidden_fields_helper_preserves_old_imports_and_detection():
     assert find_forbidden_robot_control_fields(
         {"trajectory": {"joint_targets": [0.0]}, "items": [{"tcp_pose_world": [0, 0, 0]}]}
     ) == ["trajectory", "trajectory.joint_targets", "items[0].tcp_pose_world"]
+
+
+def test_scene_binding_helper_import_path_and_order():
+    result = {"snapshot_id": "snapshot_a", "scene_version": "scene_a"}
+
+    assert find_scene_binding_mismatches(
+        result,
+        expected_snapshot_id="snapshot_b",
+        expected_scene_version="scene_b",
+    ) == [SCENE_BINDING_SNAPSHOT_ID, SCENE_BINDING_SCENE_VERSION]
+    assert (
+        find_scene_binding_mismatches(
+            result,
+            expected_snapshot_id="snapshot_a",
+            expected_scene_version="scene_a",
+        )
+        == []
+    )

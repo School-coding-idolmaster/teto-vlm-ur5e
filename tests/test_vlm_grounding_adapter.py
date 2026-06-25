@@ -176,6 +176,20 @@ def test_scene_version_mismatch_blocks():
     assert E_SCENE_VERSION_MISMATCH in result["blocking_reasons"]
 
 
+def test_snapshot_and_scene_mismatch_preserve_blocking_order():
+    result = _evaluate_vlm_grounding(
+        config_updates={
+            "expected_snapshot_id": "different_snapshot",
+            "expected_scene_version": "different_scene",
+        }
+    )
+
+    assert result["vlm_grounding_status"] == STATUS_BLOCKED
+    assert result["blocking_reasons"] == [E_SNAPSHOT_MISMATCH, E_SCENE_VERSION_MISMATCH]
+    assert result["error_code"] == E_SNAPSHOT_MISMATCH
+    assert result["rejection_reason"] == E_SNAPSHOT_MISMATCH
+
+
 def test_live_vlm_called_blocks_but_result_never_marks_live_call_executed():
     result = _evaluate_vlm_grounding(config_updates={"live_vlm_called": True})
 

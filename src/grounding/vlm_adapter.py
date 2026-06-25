@@ -13,6 +13,11 @@ from src.grounding.forbidden_fields import (
     find_forbidden_robot_control_fields as _forbidden_robot_control_fields,
 )
 from src.grounding.reporting import format_vlm_grounding_report
+from src.grounding.scene_binding import (
+    SCENE_BINDING_SCENE_VERSION,
+    SCENE_BINDING_SNAPSHOT_ID,
+    find_scene_binding_mismatches,
+)
 
 
 CONTRACT_VERSION = "teto_vlm_grounding_adapter.v1"
@@ -193,10 +198,15 @@ def evaluate_vlm_grounding_adapter(request: VLMGroundingAdapterRequest | None = 
 
     expected_snapshot_id = _string(config.get("expected_snapshot_id"))
     expected_scene_version = _string(config.get("expected_scene_version"))
-    if expected_snapshot_id and raw_result.get("snapshot_id") != expected_snapshot_id:
-        blocking_reasons.append(E_SNAPSHOT_MISMATCH)
-    if expected_scene_version and raw_result.get("scene_version") != expected_scene_version:
-        blocking_reasons.append(E_SCENE_VERSION_MISMATCH)
+    for mismatch in find_scene_binding_mismatches(
+        raw_result,
+        expected_snapshot_id=expected_snapshot_id,
+        expected_scene_version=expected_scene_version,
+    ):
+        if mismatch == SCENE_BINDING_SNAPSHOT_ID:
+            blocking_reasons.append(E_SNAPSHOT_MISMATCH)
+        elif mismatch == SCENE_BINDING_SCENE_VERSION:
+            blocking_reasons.append(E_SCENE_VERSION_MISMATCH)
 
     blocking_reasons = _unique([str(reason) for reason in blocking_reasons if reason])
     warnings = _unique([str(warning) for warning in warnings if warning])
