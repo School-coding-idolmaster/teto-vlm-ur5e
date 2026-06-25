@@ -1,5 +1,7 @@
 from src import grounding_result as legacy_result
 from src import vlm_grounding_adapter as legacy_vlm
+from src.grounding.command_normalization import normalize_command as split_normalize_command
+from src.grounding.reporting import format_vlm_grounding_report as split_format_vlm_grounding_report
 from src.grounding import result as new_result
 from src.grounding import vlm_adapter as new_vlm
 
@@ -57,3 +59,10 @@ def test_vlm_grounding_adapter_old_and_new_imports_share_public_api():
 
     for name in names:
         assert getattr(legacy_vlm, name) is getattr(new_vlm, name)
+
+
+def test_vlm_grounding_split_helpers_preserve_import_identity():
+    assert legacy_vlm.normalize_command is new_vlm.normalize_command
+    assert new_vlm.normalize_command is split_normalize_command
+    assert legacy_vlm.format_vlm_grounding_report is new_vlm.format_vlm_grounding_report
+    assert new_vlm.format_vlm_grounding_report is split_format_vlm_grounding_report
