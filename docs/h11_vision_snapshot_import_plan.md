@@ -7,12 +7,13 @@ Current implementation files:
 
 - `src/vision/snapshot/camera_snapshot.py`
 - `src/vision/snapshot/camera_source_adapter.py`
-- `src/realsense_snapshot_builder.py`
+- `src/vision/snapshot/realsense_snapshot_builder.py`
 
 Compatibility shim files:
 
 - `src/camera_snapshot.py`
 - `src/camera_source_adapter.py`
+- `src/realsense_snapshot_builder.py`
 
 Future package boundary:
 
@@ -21,6 +22,8 @@ Future package boundary:
 H11-A4 adds package-side compatibility adapters under this package. H11-A5
 moves only the `camera_snapshot` implementation into the package path. H11-A6
 moves only the `camera_source_adapter` implementation into the package path.
+H11-A7 moves the `realsense_snapshot_builder` implementation into the package
+path.
 Root modules remain public compatibility paths, and production imports have not
 migrated yet.
 
@@ -29,7 +32,7 @@ migrated yet.
 | Consumer | Current import | Consumer class | Risk | Notes |
 | --- | --- | --- | --- | --- |
 | `src/vision/snapshot/camera_source_adapter.py` | `CameraSnapshotRequest`, `evaluate_camera_snapshot_contract` from `src.vision.snapshot.camera_snapshot` | production `src/` | HIGH | Adapter builds and validates nested snapshot contracts. Real-path-sensitive no-live-camera semantics depend on this. Root `src/camera_source_adapter.py` remains a public compatibility shim. |
-| `src/realsense_snapshot_builder.py` | `FORMAL_REALSENSE_SOURCES`, `STATUS_PASS`, `evaluate_formal_snapshot_replay` from `src.camera_snapshot` | production `src/` | HIGH | Builder validates artifact manifests through formal snapshot replay. Artifact-path-sensitive. |
+| `src/vision/snapshot/realsense_snapshot_builder.py` | `FORMAL_REALSENSE_SOURCES`, `STATUS_PASS`, `evaluate_formal_snapshot_replay` from `src.vision.snapshot.camera_snapshot` | production `src/` | HIGH | Builder validates artifact manifests through formal snapshot replay. Artifact-path-sensitive. Root `src/realsense_snapshot_builder.py` remains a public compatibility shim. |
 | `src/geometry_validity.py` | `build_camera_snapshot_request`, `evaluate_camera_snapshot_contract` from `src.camera_snapshot` | production `src/` | HIGH | Shared geometry path joins snapshot and grounding evidence before projector/planner consumers. |
 | `src/real_scene_shadow_pipeline.py` | `build_camera_snapshot_request`, `evaluate_camera_snapshot_contract` from `src.camera_snapshot` | production `src/` | HIGH | Replay/formal snapshot evidence feeds semantic shadow gate. |
 | `src/perception_shadow_pipeline.py` | `CameraSnapshotRequest`, `build_camera_snapshot_request`, `evaluate_camera_snapshot_contract` from `src.camera_snapshot`; `CameraSourceAdapterRequest`, `evaluate_camera_source_adapter`, `load_camera_source_config` from `src.camera_source_adapter` | production `src/` | HIGH | Orchestrates camera source, camera snapshot, grounding, geometry, projector, and replay-ready perception evidence. |
@@ -47,11 +50,13 @@ migrated yet.
 | `TETO_PROJECT_STATE.md` | formal RealSense replay/bundle references | config/docs reference | LOW | Needs update if migration becomes current baseline. |
 | `docs/module_guides/vision.md` | current and future import paths | config/docs reference | LOW | Source of migration policy. |
 | `src/vision/README.md` | current files and marker-only package | config/docs reference | LOW | Local package guide. |
-| `src/vision/snapshot/README.md` | marker-only warning and current root implementation paths | config/docs reference | LOW | Must change only when implementation actually migrates. |
+| `src/vision/snapshot/README.md` | package implementation ownership and root shim policy | config/docs reference | LOW | Must stay aligned with staged migration status. |
 | `src/replay/README.md`, `src/calibration/README.md`, `docs/h8_module_boundaries.md` | current root implementation path mentions | config/docs reference | LOW | Historical or future-boundary docs needing coordinated updates. |
 | `configs/*.yaml`, `examples/camera_snapshot_example.json` | data contract keys such as `camera_snapshot`, `camera_source_adapter`, `camera_snapshot_config` | config/docs reference | LOW | Data contract names, not Python import paths. Preserve during migration. |
 
-No `src.vision.snapshot` production imports were found.
+Package implementation modules now import sibling package modules where
+appropriate. Downstream production consumers have not migrated yet and still use
+root compatibility paths.
 
 ## Public API Stability List
 
@@ -136,8 +141,8 @@ HIGH risk consumers are production shared paths that participate in replay,
 evidence export, geometry/projector handoff, or real-path-sensitive snapshot
 semantics:
 
-- `src/camera_source_adapter.py`
-- `src/realsense_snapshot_builder.py`
+- `src/vision/snapshot/camera_source_adapter.py`
+- `src/vision/snapshot/realsense_snapshot_builder.py`
 - `src/geometry_validity.py`
 - `src/real_scene_shadow_pipeline.py`
 - `src/perception_shadow_pipeline.py`
@@ -220,7 +225,7 @@ Status: complete.
 
 ### H11-A5: Move Implementation With Root Shims
 
-Status: complete for `camera_snapshot` and `camera_source_adapter` only.
+Status: complete for all three snapshot modules.
 
 - Move implementation files into, one at a time:
   - `src/vision/snapshot/camera_snapshot.py`
@@ -237,10 +242,11 @@ Status: complete for `camera_snapshot` and `camera_source_adapter` only.
   path unless explicitly handled in a later import-migration step.
 
 H11-A5 moved only `camera_snapshot`. H11-A6 moved only
-`camera_source_adapter`. `src/realsense_snapshot_builder.py` remains a root
-implementation.
+`camera_source_adapter`. H11-A7 moved `realsense_snapshot_builder`.
 
 ### H11-A7: Move RealSense Snapshot Builder With Extra CLI Care
+
+Status: complete.
 
 - Consider moving only `src/realsense_snapshot_builder.py` into
   `src/vision/snapshot/realsense_snapshot_builder.py`.
@@ -256,11 +262,10 @@ implementation.
 - Migrate low-risk tests first to prove the package imports work.
 - Migrate medium-risk CLI imports only after focused CLI/parser tests pass.
 - Migrate high-risk production consumers in small batches:
-  - batch 1: `src/realsense_snapshot_builder.py` internal dependency, if not
-    already moved
-  - batch 2: `src/geometry_validity.py`, `src/real_scene_shadow_pipeline.py`
-  - batch 3: `src/perception_shadow_pipeline.py`, `src/simulation_runtime.py`
-  - batch 4: `src/evidence_exporter.py`, `src/cli.py`, script imports
+  - batch 1: low-risk tests that still import root compatibility paths.
+  - batch 2: `src/geometry_validity.py`, `src/real_scene_shadow_pipeline.py`.
+  - batch 3: `src/perception_shadow_pipeline.py`, `src/simulation_runtime.py`.
+  - batch 4: `src/evidence_exporter.py`, `src/cli.py`, script imports.
 - Keep root shims until all docs and consumers no longer rely on root imports.
 - Defer root shim removal to a separate cleanup task after a full offline test
   run.

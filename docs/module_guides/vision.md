@@ -7,7 +7,9 @@ implementation files are moved and production imports are not changed. H11-A5
 moves only the `camera_snapshot` implementation into the package path while
 keeping the root import as a compatibility shim. H11-A6 moves only the
 `camera_source_adapter` implementation into the package path while keeping the
-root import as a compatibility shim.
+root import as a compatibility shim. H11-A7 moves the
+`realsense_snapshot_builder` implementation into the package path while
+keeping the root import as a compatibility shim.
 
 ## Current Responsibility
 
@@ -27,9 +29,11 @@ Current scene/camera snapshot responsibilities are split across these files:
   declarations into a camera snapshot contract.
 - `src/camera_source_adapter.py`: temporary root compatibility shim for the
   package implementation.
-- `src/realsense_snapshot_builder.py`: RealSense artifact bundle builder that
-  validates required files, checks RGB/depth image dimensions, and writes
-  formal snapshot manifests.
+- `src/vision/snapshot/realsense_snapshot_builder.py`: RealSense artifact
+  bundle builder that validates required files, checks RGB/depth image
+  dimensions, and writes formal snapshot manifests.
+- `src/realsense_snapshot_builder.py`: temporary root compatibility shim for
+  the package implementation.
 - `scripts/build_realsense_snapshot_bundle.py`: CLI entrypoint for the
   RealSense snapshot bundle builder.
 
@@ -40,7 +44,7 @@ unless a future task explicitly authorizes broader behavior.
 ## Import And Packaging Policy
 
 Current root-level import paths remain public and should not be migrated in
-H11-A6:
+H11-A7:
 
 - `src.camera_snapshot`
 - `src.camera_source_adapter`
@@ -67,14 +71,14 @@ Migration to that package is staged. Current package-side modules are:
 
 - `src.vision.snapshot.camera_snapshot`: current implementation
 - `src.vision.snapshot.camera_source_adapter`: current implementation
-- `src.vision.snapshot.realsense_snapshot_builder`
+- `src.vision.snapshot.realsense_snapshot_builder`: current implementation
 
-`src/camera_snapshot.py` and `src/camera_source_adapter.py` are now temporary
-compatibility shims. The `realsense_snapshot_builder` root module remains the
-source of truth for its implementation. `src/vision/snapshot/__init__.py` does
-not re-export public APIs. Do not create alternate package roots such as
-`src/camera/` or `src/scene_snapshot/`. Future migration should continue in
-small behavior-preserving steps only after focused compatibility tests pass.
+`src/camera_snapshot.py`, `src/camera_source_adapter.py`, and
+`src/realsense_snapshot_builder.py` are now temporary compatibility shims.
+`src/vision/snapshot/__init__.py` does not re-export public APIs. Do not create
+alternate package roots such as `src/camera/` or `src/scene_snapshot/`. Future
+migration should continue in small behavior-preserving steps only after focused
+compatibility tests pass.
 
 ## Boundary With Neighbor Modules
 
@@ -118,7 +122,7 @@ Vision snapshot boundary work must not import or start:
 - Qwen, VLM, LLM, or model runtimes.
 - Real or Isaac execution backends.
 
-`src/realsense_snapshot_builder.py` may read existing artifact files and write
+The RealSense snapshot builder may read existing artifact files and write
 formal manifests. That filesystem behavior is artifact-path sensitive, not
 permission to capture from a camera or start services.
 
