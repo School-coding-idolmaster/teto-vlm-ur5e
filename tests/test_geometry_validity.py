@@ -2,7 +2,7 @@ import json
 
 import yaml
 
-from src.camera_snapshot import CameraSnapshotRequest, evaluate_camera_snapshot_contract
+from src.vision.snapshot.camera_snapshot import CameraSnapshotRequest, evaluate_camera_snapshot_contract
 from src.geometry_validity import (
     E_BBOX_MISSING,
     E_INVALID_BBOX,

@@ -6,8 +6,8 @@ import yaml
 from PIL import Image
 
 from scripts.build_realsense_snapshot_bundle import build_parser
-from src.camera_snapshot import evaluate_formal_snapshot_replay
-from src.realsense_snapshot_builder import (
+from src.vision.snapshot.camera_snapshot import evaluate_formal_snapshot_replay
+from src.vision.snapshot.realsense_snapshot_builder import (
     RealSenseSnapshotBundleRequest,
     SnapshotBundleError,
     build_realsense_snapshot_bundle,

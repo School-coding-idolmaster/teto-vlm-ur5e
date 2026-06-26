@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 import yaml
 
-from src.camera_snapshot import (
+from src.vision.snapshot.camera_snapshot import (
     E_ALIGNED_DEPTH_REQUIRED,
     E_CAMERA_INFO_REF_MISSING,
     E_CAMERA_SNAPSHOT_STALE,

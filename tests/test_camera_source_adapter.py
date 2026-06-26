@@ -2,7 +2,7 @@ import json
 
 import yaml
 
-from src.camera_source_adapter import (
+from src.vision.snapshot.camera_source_adapter import (
     E_CAMERA_FRAME_MISSING,
     E_CAMERA_INFO_MISSING,
     E_CONTINUOUS_CAPTURE_DISABLED,
