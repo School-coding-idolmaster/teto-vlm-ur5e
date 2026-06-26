@@ -51,6 +51,9 @@ Before a Codex or human module task, read:
 - `docs/h16_simulation_import_plan.md`: H16 simulation / Isaac import
   compatibility plan for possible future conservative `src/isaac/` or
   `src/simulation/` migration staging.
+- `docs/module_guides/memory_reobservation.md`: memory / re-observation
+  boundary policy, H17-A classification, current root implementation modules,
+  Isaac SIM_ONLY consumer risk, and future import-plan requirement.
 - `docs/module_guides/vision.md`: vision scene/camera snapshot boundary,
   current snapshot/builder file responsibilities, import migration postponement,
   and future `src/vision/snapshot/` package target.

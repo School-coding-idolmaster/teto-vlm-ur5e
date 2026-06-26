@@ -62,7 +62,8 @@ SHARED_BUT_SAFE real/sim orchestration:
 
 - `src/unified_segmented_operator.py`
 
-Memory and re-observation policy logic:
+Memory and re-observation policy logic consumed by simulation, but not
+simulation-owned:
 
 - `src/adaptive_reobservation_policy.py`
 - `src/memory_guided_execution.py`
@@ -94,6 +95,8 @@ Current import relationships are part of the compatibility surface:
   `src.isaac_sim_operator`.
 - `src.isaac_sim_operator` imports `src.unified_segmented_operator`,
   `src.memory_guided_execution`, and `src.adaptive_reobservation_policy`.
+  The memory and re-observation policy boundary is documented separately in
+  `docs/module_guides/memory_reobservation.md`.
 - `src.simulation_runtime` imports many readiness, shadow, artifact, and
   simulation helper modules.
 - `src.evidence_exporter` consumes simulation micro-motion, semantic bridge,

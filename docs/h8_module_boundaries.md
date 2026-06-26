@@ -85,6 +85,17 @@ simulation-owned. H16-B is documentation-only. Do not create `src/simulation/`
 or `src/isaac/` yet, and use `docs/module_guides/simulation.md` before any
 simulation or Isaac cleanup or migration.
 
+H17 update: memory and re-observation were not named as H8 package roots.
+H17-A found that `src/memory_guided_execution.py` is MEMORY_CORE,
+REOBSERVATION_POLICY, and SHARED_BUT_SAFE, while
+`src/adaptive_reobservation_policy.py` is REOBSERVATION_POLICY,
+EXECUTION_ADJACENT, and SHARED_BUT_SAFE. The main production consumer is
+`src/isaac_sim_operator.py`, which is SIM_ONLY and reached indirectly from the
+canonical Isaac console. H17-B is documentation-only. Do not create
+`src/memory/` or `src/reobservation/` yet, do not move these root
+implementation modules, and use `docs/module_guides/memory_reobservation.md`
+before any memory / re-observation cleanup or migration.
+
 - Calibration and vision: `src/camera_snapshot.py`,
   `src/camera_source_adapter.py`, `src/realsense_snapshot_builder.py`,
   `src/projector_shadow.py`, `src/image_utils.py`, and `src/vlm_infer.py`.
@@ -110,6 +121,8 @@ simulation or Isaac cleanup or migration.
 - Replay: `src/robot_task_inspector.py`, `src/semantic_simulation_bridge.py`,
   `src/evidence_exporter.py`, `src/output_paths.py`, and
   `src/simulation_runtime.py`.
+- Memory and re-observation: `src/memory_guided_execution.py` and
+  `src/adaptive_reobservation_policy.py`.
 - Safety and entrypoints: `src/manual_confirmation_gate.py`,
   `scripts/teto_operator_console.py`, `scripts/teto_isaac_operator_console.py`,
   `scripts/start_teto_real_full_stack.sh`,

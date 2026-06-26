@@ -89,7 +89,9 @@ Current import relationships are part of the compatibility surface:
 - `src/cartesian_motion_gateway.py` imports manual confirmation, the MoveIt
   executor, command-to-task adaptation, and bounded relative motion.
 - `src/isaac_sim_operator.py` imports unified command semantics plus memory and
-  re-observation helpers.
+  re-observation policy. Those policy modules are documented in
+  `docs/module_guides/memory_reobservation.md` and are consumed by execution;
+  they are not execution-owned.
 - `scripts/teto_isaac_operator_console.py` imports the Isaac operator and
   creates the Isaac bridge only inside the Isaac startup path.
 - Tests depend on current root import paths.
