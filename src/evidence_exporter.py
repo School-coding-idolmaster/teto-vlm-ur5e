@@ -4,8 +4,8 @@ import json
 from pathlib import Path
 from typing import Any, Dict
 
-from src.camera_snapshot import format_camera_snapshot_report
-from src.camera_source_adapter import format_camera_source_report
+from src.vision.snapshot.camera_snapshot import format_camera_snapshot_report
+from src.vision.snapshot.camera_source_adapter import format_camera_source_report
 from src.geometry_validity import format_geometry_validity_report
 from src.moveit_plan_only_contract import format_moveit_plan_only_report
 from src.projector.shadow import format_projector_shadow_report

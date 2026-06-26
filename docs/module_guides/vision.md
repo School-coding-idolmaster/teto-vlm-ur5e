@@ -14,8 +14,9 @@ tests to package import paths, and H11-A8-2 migrated the RealSense snapshot
 bundle CLI import to the package path. H11-A8-3 migrated the first production
 `src/` import batch, covering geometry validity and real-scene shadow pipeline.
 H11-A8-4 migrated the second production `src/` import batch, covering
-perception shadow and simulation runtime. Other production `src/` imports are
-not migrated yet.
+perception shadow and simulation runtime. H11-A8-5 migrated the final
+production `src/` import group, covering `src.cli` and evidence export. Root
+compatibility shims remain and must not be deleted without a separate audit.
 
 ## Current Responsibility
 
@@ -57,10 +58,10 @@ Current root-level import paths remain public compatibility paths:
 
 Script, focused test, geometry validity, real-scene shadow, perception shadow,
 and simulation runtime imports have migrated to package paths in H11-A8.
-Remaining production `src/` import migration is still staged because these
-root-level imports are broad and current public APIs are depended on by
-production code. Known remaining production consumers include `src.cli` and
-evidence export.
+H11-A8-5 also migrated `src.cli` and evidence export. No production `src/`
+consumer should import snapshot APIs through root compatibility shims after
+H11-A8-5. Root-level compatibility paths remain public compatibility paths for
+one more audit round.
 
 Do not rename, remove, or reinterpret public dataclasses, builder helpers,
 evaluators, report formatters, constants, modes, status values, or error codes

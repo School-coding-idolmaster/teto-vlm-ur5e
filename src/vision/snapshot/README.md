@@ -10,8 +10,9 @@ tests to package imports, and H11-A8-2 migrated the RealSense snapshot bundle
 CLI import. H11-A8-3 migrated the first production `src/` import batch:
 `src/geometry_validity.py` and `src/real_scene_shadow_pipeline.py`. H11-A8-4
 migrated the second production `src/` import batch:
-`src/perception_shadow_pipeline.py` and `src/simulation_runtime.py`. Remaining
-production `src/` imports have not migrated yet.
+`src/perception_shadow_pipeline.py` and `src/simulation_runtime.py`. H11-A8-5
+migrated the final production `src/` import group: `src/cli.py` and
+`src/evidence_exporter.py`.
 
 Current implementation status:
 
@@ -40,6 +41,6 @@ mutate constants, hide errors, or start services.
 `src/vision/snapshot/__init__.py` remains conservative and does not re-export
 APIs from the package root. Import concrete adapter modules directly.
 
-Future H11-A8 work should continue staging production `src/` import migration
-while keeping root modules as compatibility shims for one more compatibility
+Future H11-A9 should audit root-shim deletion readiness before any shim is
+removed. Keep root modules as compatibility shims for one more compatibility
 round.

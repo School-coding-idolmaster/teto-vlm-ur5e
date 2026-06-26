@@ -39,9 +39,10 @@ These files are shared-safe but real-path/artifact-path sensitive. Focused
 tests and the RealSense snapshot bundle CLI have started using package import
 paths. H11-A8-3 migrated the first production `src/` import batch for geometry
 validity and real-scene shadow. H11-A8-4 migrated the second production batch
-for perception shadow and simulation runtime. Remaining production `src/`
-imports still use broad root-level compatibility paths, so production import
-migration remains staged.
+for perception shadow and simulation runtime. H11-A8-5 migrated the final
+production `src/` import group for `src.cli` and evidence export. Root shims
+remain for compatibility and must not be deleted without a separate readiness
+audit.
 
 The future package target is `src/vision/snapshot/`. H11-A5 moved
 `camera_snapshot` into that package. H11-A6 moved `camera_source_adapter` into
@@ -58,4 +59,5 @@ H11-A8-2 migrated only the script/CLI import for
 migration should stay staged and compatibility-tested. H11-A8-3 migrated only
 `src/geometry_validity.py` and `src/real_scene_shadow_pipeline.py`. H11-A8-4
 migrated only `src/perception_shadow_pipeline.py` and
-`src/simulation_runtime.py`.
+`src/simulation_runtime.py`. H11-A8-5 migrated only `src/cli.py` and
+`src/evidence_exporter.py`.

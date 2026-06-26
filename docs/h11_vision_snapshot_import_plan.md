@@ -31,7 +31,8 @@ migrated script/CLI imports to package import paths while keeping production
 production `src/` import batch: `src/geometry_validity.py` and
 `src/real_scene_shadow_pipeline.py`. H11-A8-4 migrated the second production
 `src/` import batch: `src/perception_shadow_pipeline.py` and
-`src/simulation_runtime.py`.
+`src/simulation_runtime.py`. H11-A8-5 migrated the final production `src/`
+import group: `src/cli.py` and `src/evidence_exporter.py`.
 
 ## Import Inventory
 
@@ -43,8 +44,8 @@ production `src/` import batch: `src/geometry_validity.py` and
 | `src/real_scene_shadow_pipeline.py` | `build_camera_snapshot_request`, `evaluate_camera_snapshot_contract` from `src.vision.snapshot.camera_snapshot` | production `src/` | HIGH | Replay/formal snapshot evidence feeds semantic shadow gate. H11-A8-3 migrated this first production batch import. |
 | `src/perception_shadow_pipeline.py` | `CameraSnapshotRequest`, `build_camera_snapshot_request`, `evaluate_camera_snapshot_contract` from `src.vision.snapshot.camera_snapshot`; `CameraSourceAdapterRequest`, `evaluate_camera_source_adapter`, `load_camera_source_config` from `src.vision.snapshot.camera_source_adapter` | production `src/` | HIGH | Orchestrates camera source, camera snapshot, grounding, geometry, projector, and replay-ready perception evidence. H11-A8-4 migrated this second production batch import. |
 | `src/simulation_runtime.py` | `build_camera_snapshot_request`, `evaluate_camera_snapshot_contract` from `src.vision.snapshot.camera_snapshot`; `build_camera_source_adapter_request`, `evaluate_camera_source_adapter` from `src.vision.snapshot.camera_source_adapter` | production `src/` | HIGH | Shared evidence/runtime path used by many offline checks and reports; import churn can affect replay evidence. H11-A8-4 migrated this second production batch import. |
-| `src/evidence_exporter.py` | `format_camera_snapshot_report`, `format_camera_source_report` | production `src/` | HIGH | Writes camera snapshot/source evidence artifacts and summaries. Output field semantics must stay stable. |
-| `src/cli.py` | `evaluate_formal_snapshot_replay` from `src.camera_snapshot` | script/CLI | MEDIUM | Formal `python3 -m src.cli snapshot-replay` path. Offline, but public user-facing CLI. |
+| `src/evidence_exporter.py` | `format_camera_snapshot_report` from `src.vision.snapshot.camera_snapshot`; `format_camera_source_report` from `src.vision.snapshot.camera_source_adapter` | production `src/` | HIGH | Writes camera snapshot/source evidence artifacts and summaries. H11-A8-5 migrated this final production import group; output field semantics must stay stable. |
+| `src/cli.py` | `evaluate_formal_snapshot_replay` from `src.vision.snapshot.camera_snapshot` | script/CLI | MEDIUM | Formal `python3 -m src.cli snapshot-replay` path. H11-A8-5 migrated this final production import group; CLI behavior must stay stable. |
 | `scripts/build_realsense_snapshot_bundle.py` | `RealSenseSnapshotBundleRequest`, `SnapshotBundleError`, `build_realsense_snapshot_bundle` from `src.vision.snapshot.realsense_snapshot_builder` | script/CLI | MEDIUM | Protected CLI entrypoint for artifact bundle building. H11-A8-2 migrated this import only; command behavior and parser stay stable. |
 | `tests/test_camera_snapshot.py` | camera snapshot constants, request dataclass, builders, evaluators, report formatter | test | LOW | Direct contract behavior coverage. |
 | `tests/test_camera_source_adapter.py` | camera source constants, modes, request dataclass, builders, evaluator, report formatter | test | LOW | Direct source adapter behavior coverage. |
@@ -273,11 +274,11 @@ Status: in progress.
   - `src/geometry_validity.py`, `src/real_scene_shadow_pipeline.py`.
 - H11-A8-4 migrated production batch 2:
   - `src/perception_shadow_pipeline.py`, `src/simulation_runtime.py`.
-- Migrate high-risk production consumers in small batches:
-  - batch 3: `src/evidence_exporter.py`, `src/cli.py`.
-- Keep root shims until all docs and consumers no longer rely on root imports.
-- Defer root shim removal to a separate cleanup task after a full offline test
-  run.
+- H11-A8-5 migrated the final production import group:
+  - `src/evidence_exporter.py`, `src/cli.py`.
+- Keep root shims for one more compatibility audit round.
+- Defer root shim removal to H11-A9 or later, after a deletion readiness audit
+  and full offline test run.
 
 ## Required Tests And Checks
 

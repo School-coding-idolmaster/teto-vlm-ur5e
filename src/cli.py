@@ -1,7 +1,7 @@
 import argparse
 import json
 
-from src.camera_snapshot import evaluate_formal_snapshot_replay
+from src.vision.snapshot.camera_snapshot import evaluate_formal_snapshot_replay
 
 
 def build_parser() -> argparse.ArgumentParser:
