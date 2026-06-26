@@ -2,10 +2,11 @@
 
 This guide records the H15 execution and operator boundary policy for future
 Codex, GPT, and human audits. H15-A completed a read-only execution/operator
-boundary audit. H15-B is documentation-only: no implementation files are
-moved, no imports are changed, no runtime APIs are created, no broad
-`src/execution/` expansion is made, no package-root re-exports are added, and
-no launch behavior is modified.
+boundary audit. H15-B is documentation-only. H15-C adds the compatibility and
+import plan in `docs/h15_execution_import_plan.md`. H15 still does not move
+implementation files, change imports, create runtime APIs, expand
+`src/execution/` broadly, add package-root re-exports, or modify launch
+behavior.
 
 ## Boundary Principles
 
@@ -205,6 +206,9 @@ It is not appropriate as a broad home for:
 Keep `src/execution/__init__.py` conservative. Avoid package-root re-exports
 unless a later audited task explicitly justifies them.
 
+For staged import migration rules, required scans, and shim policy, read
+`docs/h15_execution_import_plan.md`.
+
 Any future migration requires:
 
 - compatibility and import plan
@@ -226,10 +230,10 @@ Lowest-risk future candidates:
 
 Implementation moves are not recommended yet.
 
-## Recommended H15-C
+## Recommended H15-D
 
-The safest H15-C is a documentation-only execution compatibility/import plan
-if migration is still desired.
+The safest H15-D is no-op or documentation-only compatibility refinement if
+migration is still desired.
 
 Do not perform an adapter, helper extraction, import rewrite, or file move yet.
 No-op is acceptable if responsibility remains mixed or risk remains high.

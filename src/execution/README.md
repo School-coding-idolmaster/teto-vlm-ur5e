@@ -2,8 +2,10 @@
 
 For the current H15 boundary policy, read `docs/module_guides/execution.md`.
 H15-A completed a read-only execution/operator audit. H15-B is
-documentation-only and does not migrate files, change imports, create runtime
-APIs, expand this package broadly, or add package-root re-exports.
+documentation-only. H15-C adds the compatibility plan in
+`docs/h15_execution_import_plan.md`. H15 does not migrate files, change
+imports, create runtime APIs, expand this package broadly, or add package-root
+re-exports.
 
 This package is reserved for future execution adapters, backend interfaces,
 MoveIt execution routing, Isaac execution routing, and measured execution

@@ -42,6 +42,8 @@ Before a Codex or human module task, read:
 - `docs/module_guides/execution.md`: execution/operator boundary policy,
   H15-A classification, real/sim/shared execution sensitivity, future narrow
   `src/execution/` policy, and why mixed execution surfaces stay in place.
+- `docs/h15_execution_import_plan.md`: H15 execution import compatibility plan
+  for possible future narrow `src/execution/` migration staging.
 - `docs/module_guides/vision.md`: vision scene/camera snapshot boundary,
   current snapshot/builder file responsibilities, import migration postponement,
   and future `src/vision/snapshot/` package target.
