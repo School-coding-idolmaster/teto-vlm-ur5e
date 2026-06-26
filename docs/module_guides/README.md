@@ -39,6 +39,9 @@ Before a Codex or human module task, read:
 - `docs/module_guides/safety.md`: safety boundary policy, H14-A
   classification, fail-closed invariants, future narrow `src/safety/` policy,
   and why mixed execution gateways stay in place.
+- `docs/module_guides/execution.md`: execution/operator boundary policy,
+  H15-A classification, real/sim/shared execution sensitivity, future narrow
+  `src/execution/` policy, and why mixed execution surfaces stay in place.
 - `docs/module_guides/vision.md`: vision scene/camera snapshot boundary,
   current snapshot/builder file responsibilities, import migration postponement,
   and future `src/vision/snapshot/` package target.
@@ -49,7 +52,6 @@ Other module guides should be added as those modules are audited or migrated.
 Likely future guides include:
 
 - calibration
-- execution
 - replay
 - entrypoints
 

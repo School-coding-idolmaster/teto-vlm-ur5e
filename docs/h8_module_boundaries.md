@@ -68,6 +68,15 @@ and evidence/report semantics. `src/safety/` should remain a narrow future
 namespace until pure safety helpers are identified and tested. Use
 `docs/module_guides/safety.md` before any safety cleanup or migration.
 
+H15 update: the execution entries in this section describe the H8-time state.
+H15-A found that execution/operator authority is split across measured real
+backend state, MoveIt action evidence, shared segmented orchestration, mixed
+Cartesian gateway behavior, execution guards, and SIM_ONLY Isaac code.
+`src/execution/` should remain a narrow future namespace until a compatibility
+plan and focused tests prove any implementation boundary. Use
+`docs/module_guides/execution.md` before any execution/operator cleanup or
+migration.
+
 - Calibration and vision: `src/camera_snapshot.py`,
   `src/camera_source_adapter.py`, `src/realsense_snapshot_builder.py`,
   `src/projector_shadow.py`, `src/image_utils.py`, and `src/vlm_infer.py`.
