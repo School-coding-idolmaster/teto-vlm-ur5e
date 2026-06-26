@@ -95,6 +95,9 @@ canonical Isaac console. H17-B is documentation-only. Do not create
 `src/memory/` or `src/reobservation/` yet, do not move these root
 implementation modules, and use `docs/module_guides/memory_reobservation.md`
 before any memory / re-observation cleanup or migration.
+H17-C added `docs/h17_memory_reobservation_import_plan.md` as a compatibility
+planning step only. It made no code changes, import changes, package creation,
+or shim creation, and recommends keeping the modules in place.
 
 - Calibration and vision: `src/camera_snapshot.py`,
   `src/camera_source_adapter.py`, `src/realsense_snapshot_builder.py`,

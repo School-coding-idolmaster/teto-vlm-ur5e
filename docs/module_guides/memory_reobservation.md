@@ -6,6 +6,11 @@ is documentation-only: no implementation files are moved, no imports are
 changed, no packages are created, no compatibility shims are added, and no
 runtime behavior is changed.
 
+H17-C adds the import compatibility plan in
+`docs/h17_memory_reobservation_import_plan.md`. H17-C is also
+documentation-only and does not approve package creation, shim creation, import
+rewrites, file moves, or runtime API changes.
+
 ## Boundary Principles
 
 The memory / re-observation boundary owns deterministic working-memory and
@@ -71,6 +76,8 @@ targets.
 Any future migration requires a dedicated compatibility/import plan first,
 including import inventory, staged import policy, focused tests, clean scans,
 and explicit protection for canonical Real and Isaac startup behavior.
+For the current plan and no-go conditions, read
+`docs/h17_memory_reobservation_import_plan.md`.
 
 ## Relationship To Neighbor Boundaries
 
