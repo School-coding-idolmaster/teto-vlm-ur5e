@@ -36,6 +36,9 @@ Before a Codex or human module task, read:
 - `docs/module_guides/contracts.md`: contracts/readiness boundary policy,
   H13-A classification, no-motion invariants, future `src/contracts/`
   migration policy, and why `src/readiness/` is premature.
+- `docs/module_guides/safety.md`: safety boundary policy, H14-A
+  classification, fail-closed invariants, future narrow `src/safety/` policy,
+  and why mixed execution gateways stay in place.
 - `docs/module_guides/vision.md`: vision scene/camera snapshot boundary,
   current snapshot/builder file responsibilities, import migration postponement,
   and future `src/vision/snapshot/` package target.
@@ -48,7 +51,6 @@ Likely future guides include:
 - calibration
 - execution
 - replay
-- safety
 - entrypoints
 
 Keep this file as a lightweight index. Put detailed module construction rules

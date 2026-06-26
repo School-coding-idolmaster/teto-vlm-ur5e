@@ -61,6 +61,13 @@ evidence contracts rather than pure schemas. H13-B is documentation-only. Use
 `docs/module_guides/contracts.md` before any contracts/readiness cleanup or
 migration.
 
+H14 update: the safety entries in this section describe the H8-time state.
+H14-A found that safety is spread across shared envelopes, readiness
+contracts, real execution gates, simulation-only guards, parser handoff flags,
+and evidence/report semantics. `src/safety/` should remain a narrow future
+namespace until pure safety helpers are identified and tested. Use
+`docs/module_guides/safety.md` before any safety cleanup or migration.
+
 - Calibration and vision: `src/camera_snapshot.py`,
   `src/camera_source_adapter.py`, `src/realsense_snapshot_builder.py`,
   `src/projector_shadow.py`, `src/image_utils.py`, and `src/vlm_infer.py`.
