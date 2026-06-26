@@ -77,6 +77,14 @@ plan and focused tests prove any implementation boundary. Use
 `docs/module_guides/execution.md` before any execution/operator cleanup or
 migration.
 
+H16 update: the simulation and Isaac entries in this section describe the
+H8-time state. H16-A found that Isaac operator code is SIM_ONLY, the measured
+Isaac bridge is runtime/USD/artifact sensitive, `src/simulation_runtime.py` is
+a broad artifact/runtime hub, and shared real/sim orchestration is not
+simulation-owned. H16-B is documentation-only. Do not create `src/simulation/`
+or `src/isaac/` yet, and use `docs/module_guides/simulation.md` before any
+simulation or Isaac cleanup or migration.
+
 - Calibration and vision: `src/camera_snapshot.py`,
   `src/camera_source_adapter.py`, `src/realsense_snapshot_builder.py`,
   `src/projector_shadow.py`, `src/image_utils.py`, and `src/vlm_infer.py`.
@@ -96,7 +104,8 @@ migration.
 - Execution: `src/unified_segmented_operator.py`,
   `src/real_segmented_operator_backend.py`, `src/cartesian_motion_gateway.py`,
   `src/moveit_pose_executor.py`, `src/isaac_sim_operator.py`,
-  `src/isaac_sim_bridge.py`, `src/simulation_micro_motion.py`, and
+  `src/isaac_sim_bridge.py`, `src/simulation_micro_motion.py`,
+  `src/simulation_motion_precheck.py`, and
   `src/simulated_task_execution.py`.
 - Replay: `src/robot_task_inspector.py`, `src/semantic_simulation_bridge.py`,
   `src/evidence_exporter.py`, `src/output_paths.py`, and

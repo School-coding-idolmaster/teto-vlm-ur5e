@@ -44,6 +44,10 @@ Before a Codex or human module task, read:
   `src/execution/` policy, and why mixed execution surfaces stay in place.
 - `docs/h15_execution_import_plan.md`: H15 execution import compatibility plan
   for possible future narrow `src/execution/` migration staging.
+- `docs/module_guides/simulation.md`: simulation / Isaac boundary policy,
+  H16-A classification, SIM_ONLY versus REAL_PATH isolation, guarded Isaac
+  runtime import policy, artifact/replay sensitivity, and why `src/simulation/`
+  and `src/isaac/` are not created yet.
 - `docs/module_guides/vision.md`: vision scene/camera snapshot boundary,
   current snapshot/builder file responsibilities, import migration postponement,
   and future `src/vision/snapshot/` package target.
