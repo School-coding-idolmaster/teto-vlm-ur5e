@@ -1,9 +1,11 @@
 # Planning Module Guide
 
 This guide records the H12 planning boundary policy for future Codex, GPT, and
-human audits. H12-A completed a read-only boundary audit. H12-B is
+human audits. H12-A completed a read-only boundary audit. H12-B and H12-C are
 documentation-only: no implementation files are moved, no imports are changed,
-no runtime APIs are created, and no launch behavior is modified.
+no runtime APIs are created, and no launch behavior is modified. H12-C adds an
+import compatibility plan in `docs/h12_planning_import_plan.md`; it still does
+not approve migration.
 
 ## Boundary Principles
 
@@ -131,6 +133,9 @@ Lowest-risk next steps:
   identified
 
 Do not perform a direct implementation move yet.
+
+For import migration staging, required scans, and future shim policy, read
+`docs/h12_planning_import_plan.md`.
 
 ## Startup Script Protection
 

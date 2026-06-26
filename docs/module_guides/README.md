@@ -31,6 +31,8 @@ Before a Codex or human module task, read:
 - `docs/module_guides/planning.md`: planning boundary policy for bounded
   relative motion, offline autoregressive planners, parser handoff,
   Cartesian gateway risks, and future `src/planning/` migration staging.
+- `docs/h12_planning_import_plan.md`: H12 planning import compatibility plan
+  for possible future `src/planning/` migration staging.
 - `docs/module_guides/vision.md`: vision scene/camera snapshot boundary,
   current snapshot/builder file responsibilities, import migration postponement,
   and future `src/vision/snapshot/` package target.
