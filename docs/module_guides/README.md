@@ -33,6 +33,9 @@ Before a Codex or human module task, read:
   Cartesian gateway risks, and future `src/planning/` migration staging.
 - `docs/h12_planning_import_plan.md`: H12 planning import compatibility plan
   for possible future `src/planning/` migration staging.
+- `docs/module_guides/contracts.md`: contracts/readiness boundary policy,
+  H13-A classification, no-motion invariants, future `src/contracts/`
+  migration policy, and why `src/readiness/` is premature.
 - `docs/module_guides/vision.md`: vision scene/camera snapshot boundary,
   current snapshot/builder file responsibilities, import migration postponement,
   and future `src/vision/snapshot/` package target.
@@ -43,7 +46,6 @@ Other module guides should be added as those modules are audited or migrated.
 Likely future guides include:
 
 - calibration
-- contracts
 - execution
 - replay
 - safety

@@ -53,6 +53,14 @@ H12-A found that planning-adjacent files are mixed across planning, contracts,
 safety, parser handoff, real operator, and execution gateway boundaries. Use
 `docs/module_guides/planning.md` before any planning cleanup or migration.
 
+H13 update: the contracts entries in this section describe the H8-time state.
+H13-A found that `src/contracts/` is an appropriate future namespace for
+stable no-motion shared evidence contracts, schema contracts, and validation
+helpers, but many current files are readiness gates or safety-sensitive
+evidence contracts rather than pure schemas. H13-B is documentation-only. Use
+`docs/module_guides/contracts.md` before any contracts/readiness cleanup or
+migration.
+
 - Calibration and vision: `src/camera_snapshot.py`,
   `src/camera_source_adapter.py`, `src/realsense_snapshot_builder.py`,
   `src/projector_shadow.py`, `src/image_utils.py`, and `src/vlm_infer.py`.
