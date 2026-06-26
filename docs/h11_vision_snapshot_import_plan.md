@@ -3,26 +3,32 @@
 H11-A3 is an inventory and compatibility-planning pass only. It does not move
 implementation files, change imports, add re-exports, or change behavior.
 
-Current root implementation files:
+Current implementation files:
+
+- `src/vision/snapshot/camera_snapshot.py`
+- `src/vision/snapshot/camera_source_adapter.py`
+- `src/realsense_snapshot_builder.py`
+
+Compatibility shim files:
 
 - `src/camera_snapshot.py`
 - `src/camera_source_adapter.py`
-- `src/realsense_snapshot_builder.py`
 
 Future package boundary:
 
 - `src/vision/snapshot/`
 
 H11-A4 adds package-side compatibility adapters under this package. H11-A5
-moves only the `camera_snapshot` implementation into the package path. Root
-modules remain public compatibility paths, and production imports have not
+moves only the `camera_snapshot` implementation into the package path. H11-A6
+moves only the `camera_source_adapter` implementation into the package path.
+Root modules remain public compatibility paths, and production imports have not
 migrated yet.
 
 ## Import Inventory
 
 | Consumer | Current import | Consumer class | Risk | Notes |
 | --- | --- | --- | --- | --- |
-| `src/camera_source_adapter.py` | `CameraSnapshotRequest`, `evaluate_camera_snapshot_contract` from `src.camera_snapshot` | production `src/` | HIGH | Adapter builds and validates nested snapshot contracts. Real-path-sensitive no-live-camera semantics depend on this. |
+| `src/vision/snapshot/camera_source_adapter.py` | `CameraSnapshotRequest`, `evaluate_camera_snapshot_contract` from `src.vision.snapshot.camera_snapshot` | production `src/` | HIGH | Adapter builds and validates nested snapshot contracts. Real-path-sensitive no-live-camera semantics depend on this. Root `src/camera_source_adapter.py` remains a public compatibility shim. |
 | `src/realsense_snapshot_builder.py` | `FORMAL_REALSENSE_SOURCES`, `STATUS_PASS`, `evaluate_formal_snapshot_replay` from `src.camera_snapshot` | production `src/` | HIGH | Builder validates artifact manifests through formal snapshot replay. Artifact-path-sensitive. |
 | `src/geometry_validity.py` | `build_camera_snapshot_request`, `evaluate_camera_snapshot_contract` from `src.camera_snapshot` | production `src/` | HIGH | Shared geometry path joins snapshot and grounding evidence before projector/planner consumers. |
 | `src/real_scene_shadow_pipeline.py` | `build_camera_snapshot_request`, `evaluate_camera_snapshot_contract` from `src.camera_snapshot` | production `src/` | HIGH | Replay/formal snapshot evidence feeds semantic shadow gate. |
@@ -214,7 +220,7 @@ Status: complete.
 
 ### H11-A5: Move Implementation With Root Shims
 
-Status: complete for `camera_snapshot` only.
+Status: complete for `camera_snapshot` and `camera_source_adapter` only.
 
 - Move implementation files into, one at a time:
   - `src/vision/snapshot/camera_snapshot.py`
@@ -230,10 +236,22 @@ Status: complete for `camera_snapshot` only.
 - Preserve `scripts/build_realsense_snapshot_bundle.py` behavior and import
   path unless explicitly handled in a later import-migration step.
 
-H11-A5 moved only `camera_snapshot`. `src/camera_source_adapter.py` and
-`src/realsense_snapshot_builder.py` remain root implementations.
+H11-A5 moved only `camera_snapshot`. H11-A6 moved only
+`camera_source_adapter`. `src/realsense_snapshot_builder.py` remains a root
+implementation.
 
-### H11-A6: Gradual Import Migration
+### H11-A7: Move RealSense Snapshot Builder With Extra CLI Care
+
+- Consider moving only `src/realsense_snapshot_builder.py` into
+  `src/vision/snapshot/realsense_snapshot_builder.py`.
+- Keep `src/realsense_snapshot_builder.py` as a temporary compatibility shim.
+- Preserve `scripts/build_realsense_snapshot_bundle.py` imports, parser
+  behavior, exit codes, file validation behavior, manifest writing behavior,
+  and artifact path semantics.
+- Run focused builder tests plus CLI syntax/parser coverage before and after
+  the move.
+
+### H11-A8: Gradual Import Migration
 
 - Migrate low-risk tests first to prove the package imports work.
 - Migrate medium-risk CLI imports only after focused CLI/parser tests pass.

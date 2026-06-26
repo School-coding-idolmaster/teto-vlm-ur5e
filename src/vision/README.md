@@ -24,9 +24,10 @@ The scene/camera snapshot implementation is being migrated in small stages:
   validator, replay/formal snapshot compatibility helper, and report
   formatting.
 - `src/camera_snapshot.py`: temporary root compatibility shim.
-- `src/camera_source_adapter.py`: source-mode adapter from offline/manual,
-  live-disabled, replay, or optional one-shot declarations into a snapshot
-  contract.
+- `src/vision/snapshot/camera_source_adapter.py`: source-mode adapter from
+  offline/manual, live-disabled, replay, or optional one-shot declarations into
+  a snapshot contract.
+- `src/camera_source_adapter.py`: temporary root compatibility shim.
 - `src/realsense_snapshot_builder.py`: RealSense artifact bundle builder that
   validates existing files and writes formal snapshot manifests.
 - `scripts/build_realsense_snapshot_bundle.py`: CLI entrypoint for the
@@ -36,12 +37,12 @@ These files are shared-safe but real-path/artifact-path sensitive. They are
 used by tests and production code through broad root-level imports, so import
 migration is postponed.
 
-The future package target is `src/vision/snapshot/`. H11-A5 moves only
-`camera_snapshot` into that package. `camera_source_adapter.py` and
-`realsense_snapshot_builder.py` are not migrated yet, and production imports
-have not been migrated yet. Do not create `src/camera/` or
+The future package target is `src/vision/snapshot/`. H11-A5 moved
+`camera_snapshot` into that package. H11-A6 moved `camera_source_adapter` into
+that package. `realsense_snapshot_builder.py` is not migrated yet, and
+production imports have not been migrated yet. Do not create `src/camera/` or
 `src/scene_snapshot/`.
 
-This package remains a future boundary. H11-A5 does not change runtime
+This package remains a future boundary. H11-A6 does not change runtime
 behavior, startup behavior, real robot behavior, Isaac behavior, import paths,
 production callsites, package-root re-export behavior, or safety semantics.
