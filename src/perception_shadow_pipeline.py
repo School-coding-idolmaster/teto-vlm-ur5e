@@ -7,12 +7,12 @@ from typing import Any, Dict
 
 import yaml
 
-from src.camera_snapshot import (
+from src.vision.snapshot.camera_snapshot import (
     CameraSnapshotRequest,
     build_camera_snapshot_request,
     evaluate_camera_snapshot_contract,
 )
-from src.camera_source_adapter import (
+from src.vision.snapshot.camera_source_adapter import (
     CameraSourceAdapterRequest,
     evaluate_camera_source_adapter,
     load_camera_source_config,

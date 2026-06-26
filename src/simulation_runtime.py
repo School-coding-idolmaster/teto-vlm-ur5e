@@ -9,8 +9,14 @@ from typing import Any, Dict
 
 from src.articulation_readiness_contract import build_articulation_readiness_report
 from src.articulation_state_observer import build_articulation_state_report, observe_articulation_state as observe_articulation_state_in_world
-from src.camera_snapshot import build_camera_snapshot_request, evaluate_camera_snapshot_contract
-from src.camera_source_adapter import build_camera_source_adapter_request, evaluate_camera_source_adapter
+from src.vision.snapshot.camera_snapshot import (
+    build_camera_snapshot_request,
+    evaluate_camera_snapshot_contract,
+)
+from src.vision.snapshot.camera_source_adapter import (
+    build_camera_source_adapter_request,
+    evaluate_camera_source_adapter,
+)
 from src.evidence_exporter import export_simulation_evidence
 from src.geometry_validity import build_geometry_validity_request, evaluate_geometry_validity
 from src.lab_readiness import build_lab_readiness_request, evaluate_lab_readiness

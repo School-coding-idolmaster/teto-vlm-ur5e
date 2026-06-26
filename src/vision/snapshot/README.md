@@ -8,7 +8,9 @@ H11-A4 added package-side compatibility adapter modules. H11-A5 moved only the
 `realsense_snapshot_builder` implementation here. H11-A8-1 migrated focused
 tests to package imports, and H11-A8-2 migrated the RealSense snapshot bundle
 CLI import. H11-A8-3 migrated the first production `src/` import batch:
-`src/geometry_validity.py` and `src/real_scene_shadow_pipeline.py`. Remaining
+`src/geometry_validity.py` and `src/real_scene_shadow_pipeline.py`. H11-A8-4
+migrated the second production `src/` import batch:
+`src/perception_shadow_pipeline.py` and `src/simulation_runtime.py`. Remaining
 production `src/` imports have not migrated yet.
 
 Current implementation status:
