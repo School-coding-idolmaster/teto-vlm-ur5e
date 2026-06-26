@@ -48,6 +48,11 @@ state. After H11-A9, `src/camera_snapshot.py`,
 `src/camera_source_adapter.py`, and `src/realsense_snapshot_builder.py` were
 removed; current snapshot implementation lives under `src/vision/snapshot/`.
 
+H12 update: the planning entries in this section describe the H8-time state.
+H12-A found that planning-adjacent files are mixed across planning, contracts,
+safety, parser handoff, real operator, and execution gateway boundaries. Use
+`docs/module_guides/planning.md` before any planning cleanup or migration.
+
 - Calibration and vision: `src/camera_snapshot.py`,
   `src/camera_source_adapter.py`, `src/realsense_snapshot_builder.py`,
   `src/projector_shadow.py`, `src/image_utils.py`, and `src/vlm_infer.py`.

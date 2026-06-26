@@ -28,6 +28,9 @@ Before a Codex or human module task, read:
 - `docs/module_guides/projector.md`: projector / 2D-to-3D metric-layer
   boundary, current shadow-contract fields, import policy, forbidden
   dependencies, and future packaging plan.
+- `docs/module_guides/planning.md`: planning boundary policy for bounded
+  relative motion, offline autoregressive planners, parser handoff,
+  Cartesian gateway risks, and future `src/planning/` migration staging.
 - `docs/module_guides/vision.md`: vision scene/camera snapshot boundary,
   current snapshot/builder file responsibilities, import migration postponement,
   and future `src/vision/snapshot/` package target.
@@ -39,7 +42,6 @@ Likely future guides include:
 
 - calibration
 - contracts
-- planning
 - execution
 - replay
 - safety
