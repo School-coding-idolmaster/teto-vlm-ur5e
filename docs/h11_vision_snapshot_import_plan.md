@@ -25,7 +25,9 @@ moves only the `camera_source_adapter` implementation into the package path.
 H11-A7 moves the `realsense_snapshot_builder` implementation into the package
 path.
 Root modules remain public compatibility paths, and production imports have not
-migrated yet.
+migrated yet. H11-A8-1 migrated focused tests to package import paths. H11-A8-2
+migrated script/CLI imports to package import paths while keeping production
+`src/` imports on root compatibility shims.
 
 ## Import Inventory
 
@@ -39,7 +41,7 @@ migrated yet.
 | `src/simulation_runtime.py` | `build_camera_snapshot_request`, `evaluate_camera_snapshot_contract`; `build_camera_source_adapter_request`, `evaluate_camera_source_adapter` | production `src/` | HIGH | Shared evidence/runtime path used by many offline checks and reports; import churn can affect replay evidence. |
 | `src/evidence_exporter.py` | `format_camera_snapshot_report`, `format_camera_source_report` | production `src/` | HIGH | Writes camera snapshot/source evidence artifacts and summaries. Output field semantics must stay stable. |
 | `src/cli.py` | `evaluate_formal_snapshot_replay` from `src.camera_snapshot` | script/CLI | MEDIUM | Formal `python3 -m src.cli snapshot-replay` path. Offline, but public user-facing CLI. |
-| `scripts/build_realsense_snapshot_bundle.py` | `RealSenseSnapshotBundleRequest`, `SnapshotBundleError`, `build_realsense_snapshot_bundle` from `src.realsense_snapshot_builder` | script/CLI | MEDIUM | Protected CLI entrypoint for artifact bundle building. Must keep command behavior and parser stable. |
+| `scripts/build_realsense_snapshot_bundle.py` | `RealSenseSnapshotBundleRequest`, `SnapshotBundleError`, `build_realsense_snapshot_bundle` from `src.vision.snapshot.realsense_snapshot_builder` | script/CLI | MEDIUM | Protected CLI entrypoint for artifact bundle building. H11-A8-2 migrated this import only; command behavior and parser stay stable. |
 | `tests/test_camera_snapshot.py` | camera snapshot constants, request dataclass, builders, evaluators, report formatter | test | LOW | Direct contract behavior coverage. |
 | `tests/test_camera_source_adapter.py` | camera source constants, modes, request dataclass, builders, evaluator, report formatter | test | LOW | Direct source adapter behavior coverage. |
 | `tests/test_realsense_snapshot_builder.py` | CLI `build_parser`; `evaluate_formal_snapshot_replay`; builder request/error/function | test | LOW | Direct builder and CLI parser coverage. |
@@ -259,13 +261,14 @@ Status: complete.
 
 ### H11-A8: Gradual Import Migration
 
-- Migrate low-risk tests first to prove the package imports work.
-- Migrate medium-risk CLI imports only after focused CLI/parser tests pass.
+Status: in progress.
+
+- H11-A8-1 migrated low-risk tests first to prove the package imports work.
+- H11-A8-2 migrated medium-risk CLI imports after focused CLI/parser tests pass.
 - Migrate high-risk production consumers in small batches:
-  - batch 1: low-risk tests that still import root compatibility paths.
-  - batch 2: `src/geometry_validity.py`, `src/real_scene_shadow_pipeline.py`.
-  - batch 3: `src/perception_shadow_pipeline.py`, `src/simulation_runtime.py`.
-  - batch 4: `src/evidence_exporter.py`, `src/cli.py`, script imports.
+  - batch 1: `src/geometry_validity.py`, `src/real_scene_shadow_pipeline.py`.
+  - batch 2: `src/perception_shadow_pipeline.py`, `src/simulation_runtime.py`.
+  - batch 3: `src/evidence_exporter.py`, `src/cli.py`.
 - Keep root shims until all docs and consumers no longer rely on root imports.
 - Defer root shim removal to a separate cleanup task after a full offline test
   run.

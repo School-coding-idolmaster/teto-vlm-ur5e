@@ -35,9 +35,10 @@ The scene/camera snapshot implementation is being migrated in small stages:
 - `scripts/build_realsense_snapshot_bundle.py`: CLI entrypoint for the
   RealSense snapshot bundle builder.
 
-These files are shared-safe but real-path/artifact-path sensitive. They are
-used by tests and production code through broad root-level imports, so import
-migration is postponed.
+These files are shared-safe but real-path/artifact-path sensitive. Focused
+tests and the RealSense snapshot bundle CLI have started using package import
+paths. Production `src/` imports still use broad root-level compatibility
+paths, so production import migration remains postponed.
 
 The future package target is `src/vision/snapshot/`. H11-A5 moved
 `camera_snapshot` into that package. H11-A6 moved `camera_source_adapter` into
@@ -49,3 +50,6 @@ or `src/scene_snapshot/`.
 This package remains a future boundary. H11-A7 does not change runtime
 behavior, startup behavior, real robot behavior, Isaac behavior, import paths,
 production callsites, package-root re-export behavior, or safety semantics.
+H11-A8-2 migrated only the script/CLI import for
+`scripts/build_realsense_snapshot_bundle.py`; future production import
+migration should stay staged and compatibility-tested.

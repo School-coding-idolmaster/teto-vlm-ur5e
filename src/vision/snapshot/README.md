@@ -5,8 +5,9 @@ This package is a future home for scene/camera snapshot implementation.
 H11-A4 added package-side compatibility adapter modules. H11-A5 moved only the
 `camera_snapshot` implementation here. H11-A6 moved only the
 `camera_source_adapter` implementation here. H11-A7 moved the
-`realsense_snapshot_builder` implementation here. Production imports have not
-migrated yet.
+`realsense_snapshot_builder` implementation here. H11-A8-1 migrated focused
+tests to package imports, and H11-A8-2 migrated the RealSense snapshot bundle
+CLI import. Production `src/` imports have not migrated yet.
 
 Current implementation status:
 
@@ -35,5 +36,5 @@ mutate constants, hide errors, or start services.
 `src/vision/snapshot/__init__.py` remains conservative and does not re-export
 APIs from the package root. Import concrete adapter modules directly.
 
-Future H11-A8 should plan or stage production import migration while keeping
+Future H11-A8-3 should stage production `src/` import migration while keeping
 root modules as compatibility shims for one more compatibility round.
