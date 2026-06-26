@@ -48,6 +48,9 @@ Before a Codex or human module task, read:
   H16-A classification, SIM_ONLY versus REAL_PATH isolation, guarded Isaac
   runtime import policy, artifact/replay sensitivity, and why `src/simulation/`
   and `src/isaac/` are not created yet.
+- `docs/h16_simulation_import_plan.md`: H16 simulation / Isaac import
+  compatibility plan for possible future conservative `src/isaac/` or
+  `src/simulation/` migration staging.
 - `docs/module_guides/vision.md`: vision scene/camera snapshot boundary,
   current snapshot/builder file responsibilities, import migration postponement,
   and future `src/vision/snapshot/` package target.

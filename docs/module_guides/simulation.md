@@ -2,9 +2,11 @@
 
 This guide records the H16 simulation and Isaac boundary policy for future
 Codex, GPT, and human audits. H16-A completed a read-only simulation / Isaac
-boundary audit. H16-B is documentation-only: no implementation files are moved,
-no imports are changed, no runtime APIs are created, no adapters or helpers are
-created, and no launch behavior is modified.
+boundary audit. H16-B is documentation-only. H16-C adds the compatibility and
+import plan in `docs/h16_simulation_import_plan.md`. H16 still does not move
+implementation files, change imports, create runtime APIs, create adapters or
+helpers, create packages, add package-root re-exports, or modify launch
+behavior.
 
 H16-B also does not create `src/simulation/` or `src/isaac/`. Those namespaces
 may be useful later, but the current root import paths remain the canonical
@@ -98,8 +100,10 @@ Current import relationships are part of the compatibility surface:
   and simulated task execution formatters.
 - Tests and harnesses depend on current root import paths.
 
-Do not rewrite these imports in H16-B. Any future import change needs a
-compatibility/import plan, focused tests, and clean scans.
+Do not rewrite these imports in H16 work. Any future import change needs a
+compatibility/import plan, focused tests, and clean scans. For staged import
+migration rules, required scans, and shim policy, read
+`docs/h16_simulation_import_plan.md`.
 
 ## Sensitivity Classification
 
@@ -221,10 +225,10 @@ Lowest-risk future candidates:
 
 Implementation moves are not recommended yet.
 
-## Recommended H16-C
+## Recommended H16-D
 
-The safest H16-C is a documentation-only simulation / Isaac compatibility and
-import plan if migration is still desired.
+The safest H16-D is no-op or documentation-only compatibility refinement if
+migration is still desired.
 
 Do not perform an adapter, helper extraction, import rewrite, package
 creation, or file move yet. No-op is acceptable if responsibility remains
