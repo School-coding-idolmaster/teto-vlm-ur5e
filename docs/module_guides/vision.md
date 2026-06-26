@@ -15,8 +15,9 @@ bundle CLI import to the package path. H11-A8-3 migrated the first production
 `src/` import batch, covering geometry validity and real-scene shadow pipeline.
 H11-A8-4 migrated the second production `src/` import batch, covering
 perception shadow and simulation runtime. H11-A8-5 migrated the final
-production `src/` import group, covering `src.cli` and evidence export. Root
-compatibility shims remain and must not be deleted without a separate audit.
+production `src/` import group, covering `src.cli` and evidence export.
+H11-A9 removed the root snapshot compatibility shims after readiness scans
+found no real `src/` or `scripts/` consumers.
 
 ## Current Responsibility
 
@@ -29,18 +30,12 @@ Current scene/camera snapshot responsibilities are split across these files:
 - `src/vision/snapshot/camera_snapshot.py`: formal visual snapshot contract,
   validator, replay/formal snapshot compatibility helper, and report
   formatting.
-- `src/camera_snapshot.py`: temporary root compatibility shim for the package
-  implementation.
 - `src/vision/snapshot/camera_source_adapter.py`: source-mode adapter from offline file,
   manual snapshot, live-disabled, RealSense replay, or optional one-shot
   declarations into a camera snapshot contract.
-- `src/camera_source_adapter.py`: temporary root compatibility shim for the
-  package implementation.
 - `src/vision/snapshot/realsense_snapshot_builder.py`: RealSense artifact
   bundle builder that validates required files, checks RGB/depth image
   dimensions, and writes formal snapshot manifests.
-- `src/realsense_snapshot_builder.py`: temporary root compatibility shim for
-  the package implementation.
 - `scripts/build_realsense_snapshot_bundle.py`: CLI entrypoint for the
   RealSense snapshot bundle builder.
 
@@ -50,18 +45,19 @@ unless a future task explicitly authorizes broader behavior.
 
 ## Import And Packaging Policy
 
-Current root-level import paths remain public compatibility paths:
+Canonical imports are now the concrete package modules:
 
-- `src.camera_snapshot`
-- `src.camera_source_adapter`
-- `src.realsense_snapshot_builder`
+- `src.vision.snapshot.camera_snapshot`
+- `src.vision.snapshot.camera_source_adapter`
+- `src.vision.snapshot.realsense_snapshot_builder`
 
 Script, focused test, geometry validity, real-scene shadow, perception shadow,
 and simulation runtime imports have migrated to package paths in H11-A8.
 H11-A8-5 also migrated `src.cli` and evidence export. No production `src/`
 consumer should import snapshot APIs through root compatibility shims after
-H11-A8-5. Root-level compatibility paths remain public compatibility paths for
-one more audit round.
+H11-A8-5. H11-A9 removed the root shim files. `src/vision/snapshot/__init__.py`
+still intentionally has no package-root re-exports, so import concrete modules
+directly.
 
 Do not rename, remove, or reinterpret public dataclasses, builder helpers,
 evaluators, report formatters, constants, modes, status values, or error codes
@@ -79,12 +75,11 @@ Migration to that package is staged. Current package-side modules are:
 - `src.vision.snapshot.camera_source_adapter`: current implementation
 - `src.vision.snapshot.realsense_snapshot_builder`: current implementation
 
-`src/camera_snapshot.py`, `src/camera_source_adapter.py`, and
-`src/realsense_snapshot_builder.py` are now temporary compatibility shims.
-`src/vision/snapshot/__init__.py` does not re-export public APIs. Do not create
-alternate package roots such as `src/camera/` or `src/scene_snapshot/`. Future
-migration should continue in small behavior-preserving steps only after focused
-compatibility tests pass.
+The old root shim files `src/camera_snapshot.py`,
+`src/camera_source_adapter.py`, and `src/realsense_snapshot_builder.py` no
+longer exist. `src/vision/snapshot/__init__.py` does not re-export public APIs.
+Do not create alternate package roots such as `src/camera/` or
+`src/scene_snapshot/`.
 
 ## Boundary With Neighbor Modules
 

@@ -43,6 +43,11 @@ After H9-A1/A3, `src/grounding_result.py` and
 `src/vlm_grounding_adapter.py` are compatibility shims, while current
 grounding implementation lives under `src/grounding/`.
 
+H11 update: the vision snapshot entries in this section describe the H8-time
+state. After H11-A9, `src/camera_snapshot.py`,
+`src/camera_source_adapter.py`, and `src/realsense_snapshot_builder.py` were
+removed; current snapshot implementation lives under `src/vision/snapshot/`.
+
 - Calibration and vision: `src/camera_snapshot.py`,
   `src/camera_source_adapter.py`, `src/realsense_snapshot_builder.py`,
   `src/projector_shadow.py`, `src/image_utils.py`, and `src/vlm_infer.py`.

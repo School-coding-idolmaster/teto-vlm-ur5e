@@ -1,13 +1,11 @@
 import importlib
 
 
-def test_camera_snapshot_adapter_exports_root_symbols_by_identity():
-    root = importlib.import_module("src.camera_snapshot")
-    adapter = importlib.import_module("src.vision.snapshot.camera_snapshot")
+def test_camera_snapshot_package_exports_public_symbols():
+    module = importlib.import_module("src.vision.snapshot.camera_snapshot")
 
-    _assert_same_symbols(
-        root,
-        adapter,
+    _assert_public_symbols(
+        module,
         [
             "CONTRACT_VERSION",
             "CURRENT_CAMERA_SNAPSHOT_VERSION",
@@ -40,13 +38,11 @@ def test_camera_snapshot_adapter_exports_root_symbols_by_identity():
     )
 
 
-def test_camera_source_adapter_exports_root_symbols_by_identity():
-    root = importlib.import_module("src.camera_source_adapter")
-    adapter = importlib.import_module("src.vision.snapshot.camera_source_adapter")
+def test_camera_source_adapter_package_exports_public_symbols():
+    module = importlib.import_module("src.vision.snapshot.camera_source_adapter")
 
-    _assert_same_symbols(
-        root,
-        adapter,
+    _assert_public_symbols(
+        module,
         [
             "CONTRACT_VERSION",
             "CURRENT_CAMERA_SOURCE_VERSION",
@@ -80,13 +76,11 @@ def test_camera_source_adapter_exports_root_symbols_by_identity():
     )
 
 
-def test_realsense_snapshot_builder_adapter_exports_root_symbols_by_identity():
-    root = importlib.import_module("src.realsense_snapshot_builder")
-    adapter = importlib.import_module("src.vision.snapshot.realsense_snapshot_builder")
+def test_realsense_snapshot_builder_package_exports_public_symbols():
+    module = importlib.import_module("src.vision.snapshot.realsense_snapshot_builder")
 
-    _assert_same_symbols(
-        root,
-        adapter,
+    _assert_public_symbols(
+        module,
         [
             "RealSenseSnapshotBundleRequest",
             "SnapshotBundleError",
@@ -109,7 +103,7 @@ def test_vision_snapshot_package_root_remains_conservative():
         assert not hasattr(package_root, symbol)
 
 
-def _assert_same_symbols(root, adapter, names):
-    assert adapter.__all__ == names
+def _assert_public_symbols(module, names):
+    assert module.__all__ == names
     for name in names:
-        assert getattr(adapter, name) is getattr(root, name)
+        assert hasattr(module, name)

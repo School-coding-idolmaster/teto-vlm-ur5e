@@ -9,7 +9,7 @@ Current implementation files:
 - `src/vision/snapshot/camera_source_adapter.py`
 - `src/vision/snapshot/realsense_snapshot_builder.py`
 
-Compatibility shim files:
+Removed root shim files:
 
 - `src/camera_snapshot.py`
 - `src/camera_source_adapter.py`
@@ -24,8 +24,8 @@ moves only the `camera_snapshot` implementation into the package path. H11-A6
 moves only the `camera_source_adapter` implementation into the package path.
 H11-A7 moves the `realsense_snapshot_builder` implementation into the package
 path.
-Root modules remain public compatibility paths, and production imports have not
-migrated yet. H11-A8-1 migrated focused tests to package import paths. H11-A8-2
+Root snapshot shim files were removed in H11-A9 after readiness scans found no
+real `src/` or `scripts/` consumers. H11-A8-1 migrated focused tests to package import paths. H11-A8-2
 migrated script/CLI imports to package import paths while keeping production
 `src/` imports on root compatibility shims. H11-A8-3 migrated the first
 production `src/` import batch: `src/geometry_validity.py` and
@@ -38,8 +38,8 @@ import group: `src/cli.py` and `src/evidence_exporter.py`.
 
 | Consumer | Current import | Consumer class | Risk | Notes |
 | --- | --- | --- | --- | --- |
-| `src/vision/snapshot/camera_source_adapter.py` | `CameraSnapshotRequest`, `evaluate_camera_snapshot_contract` from `src.vision.snapshot.camera_snapshot` | production `src/` | HIGH | Adapter builds and validates nested snapshot contracts. Real-path-sensitive no-live-camera semantics depend on this. Root `src/camera_source_adapter.py` remains a public compatibility shim. |
-| `src/vision/snapshot/realsense_snapshot_builder.py` | `FORMAL_REALSENSE_SOURCES`, `STATUS_PASS`, `evaluate_formal_snapshot_replay` from `src.vision.snapshot.camera_snapshot` | production `src/` | HIGH | Builder validates artifact manifests through formal snapshot replay. Artifact-path-sensitive. Root `src/realsense_snapshot_builder.py` remains a public compatibility shim. |
+| `src/vision/snapshot/camera_source_adapter.py` | `CameraSnapshotRequest`, `evaluate_camera_snapshot_contract` from `src.vision.snapshot.camera_snapshot` | production `src/` | HIGH | Adapter builds and validates nested snapshot contracts. Real-path-sensitive no-live-camera semantics depend on this. |
+| `src/vision/snapshot/realsense_snapshot_builder.py` | `FORMAL_REALSENSE_SOURCES`, `STATUS_PASS`, `evaluate_formal_snapshot_replay` from `src.vision.snapshot.camera_snapshot` | production `src/` | HIGH | Builder validates artifact manifests through formal snapshot replay. Artifact-path-sensitive. |
 | `src/geometry_validity.py` | `build_camera_snapshot_request`, `evaluate_camera_snapshot_contract` from `src.vision.snapshot.camera_snapshot` | production `src/` | HIGH | Shared geometry path joins snapshot and grounding evidence before projector/planner consumers. H11-A8-3 migrated this first production batch import. |
 | `src/real_scene_shadow_pipeline.py` | `build_camera_snapshot_request`, `evaluate_camera_snapshot_contract` from `src.vision.snapshot.camera_snapshot` | production `src/` | HIGH | Replay/formal snapshot evidence feeds semantic shadow gate. H11-A8-3 migrated this first production batch import. |
 | `src/perception_shadow_pipeline.py` | `CameraSnapshotRequest`, `build_camera_snapshot_request`, `evaluate_camera_snapshot_contract` from `src.vision.snapshot.camera_snapshot`; `CameraSourceAdapterRequest`, `evaluate_camera_source_adapter`, `load_camera_source_config` from `src.vision.snapshot.camera_source_adapter` | production `src/` | HIGH | Orchestrates camera source, camera snapshot, grounding, geometry, projector, and replay-ready perception evidence. H11-A8-4 migrated this second production batch import. |
@@ -62,14 +62,14 @@ import group: `src/cli.py` and `src/evidence_exporter.py`.
 | `configs/*.yaml`, `examples/camera_snapshot_example.json` | data contract keys such as `camera_snapshot`, `camera_source_adapter`, `camera_snapshot_config` | config/docs reference | LOW | Data contract names, not Python import paths. Preserve during migration. |
 
 Package implementation modules now import sibling package modules where
-appropriate. Downstream production consumers have not migrated yet and still use
-root compatibility paths.
+appropriate. Production, script, and focused test consumers now import concrete
+package modules. The old root shim files no longer exist.
 
 ## Public API Stability List
 
 These symbols and names must remain stable through any future migration.
 
-### `src.camera_snapshot`
+### `src.vision.snapshot.camera_snapshot`
 
 - `CONTRACT_VERSION`
 - `CURRENT_CAMERA_SNAPSHOT_VERSION`
@@ -99,7 +99,7 @@ These symbols and names must remain stable through any future migration.
 - `evaluate_camera_snapshot_contract`
 - `format_camera_snapshot_report`
 
-### `src.camera_source_adapter`
+### `src.vision.snapshot.camera_source_adapter`
 
 - `CONTRACT_VERSION`
 - `CURRENT_CAMERA_SOURCE_VERSION`
@@ -130,7 +130,7 @@ These symbols and names must remain stable through any future migration.
 - `evaluate_camera_source_adapter`
 - `format_camera_source_report`
 
-### `src.realsense_snapshot_builder`
+### `src.vision.snapshot.realsense_snapshot_builder`
 
 - `RealSenseSnapshotBundleRequest`
 - `SnapshotBundleError`
@@ -187,29 +187,17 @@ and must be protected.
 
 ## Recommended Compatibility Strategy
 
-Use a dual-path compatibility period with temporary root compatibility shims.
+H11 used a dual-path compatibility period with temporary root compatibility
+shims, then removed the root shims in H11-A9 after readiness scans passed.
 
-Do not use mechanical import rewrite only as the first migration step. The root
-modules are broad public APIs with production shared consumers, direct test
-imports, CLI usage, and docs that identify them as current behavior. A
-mechanical rewrite would create avoidable churn and makes rollback harder.
+Final strategy:
 
-Do not do no-migration forever. The marker namespace now exists, and a staged
-move can be safe if root imports remain supported until consumers are migrated
-and tested.
-
-Recommended strategy:
-
-1. Add package-side compatibility adapters in `src/vision/snapshot/` that
-   re-export the current root APIs, with tests proving symbol identity.
-2. Move implementation into `src/vision/snapshot/` modules.
-3. Keep root modules as temporary compatibility shims that re-export the same
-   public symbols from the new package modules.
-4. Keep import compatibility tests that verify root symbols are identical to the
-   new package symbols during the dual-path period.
-5. Migrate production imports in small groups after behavior tests pass.
-6. Remove root shims only after docs and all consumers are updated in a later
-   cleanup task.
+1. Add package-side modules in `src/vision/snapshot/`.
+2. Move implementation into the package modules.
+3. Keep root modules temporarily while consumers migrate.
+4. Migrate tests, scripts, and production imports in small batches.
+5. Remove root shims only after readiness scans show no real consumers.
+6. Keep `src/vision/snapshot/__init__.py` conservative with no re-exports.
 
 ## Proposed Staged Migration Plan
 
@@ -276,9 +264,8 @@ Status: in progress.
   - `src/perception_shadow_pipeline.py`, `src/simulation_runtime.py`.
 - H11-A8-5 migrated the final production import group:
   - `src/evidence_exporter.py`, `src/cli.py`.
-- Keep root shims for one more compatibility audit round.
-- Defer root shim removal to H11-A9 or later, after a deletion readiness audit
-  and full offline test run.
+- H11-A9 removed the root snapshot shim files after readiness scans found no
+  real `src/` or `scripts/` consumers.
 
 ## Required Tests And Checks
 
