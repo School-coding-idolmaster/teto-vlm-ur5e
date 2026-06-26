@@ -27,7 +27,9 @@ path.
 Root modules remain public compatibility paths, and production imports have not
 migrated yet. H11-A8-1 migrated focused tests to package import paths. H11-A8-2
 migrated script/CLI imports to package import paths while keeping production
-`src/` imports on root compatibility shims.
+`src/` imports on root compatibility shims. H11-A8-3 migrated the first
+production `src/` import batch: `src/geometry_validity.py` and
+`src/real_scene_shadow_pipeline.py`.
 
 ## Import Inventory
 
@@ -35,8 +37,8 @@ migrated script/CLI imports to package import paths while keeping production
 | --- | --- | --- | --- | --- |
 | `src/vision/snapshot/camera_source_adapter.py` | `CameraSnapshotRequest`, `evaluate_camera_snapshot_contract` from `src.vision.snapshot.camera_snapshot` | production `src/` | HIGH | Adapter builds and validates nested snapshot contracts. Real-path-sensitive no-live-camera semantics depend on this. Root `src/camera_source_adapter.py` remains a public compatibility shim. |
 | `src/vision/snapshot/realsense_snapshot_builder.py` | `FORMAL_REALSENSE_SOURCES`, `STATUS_PASS`, `evaluate_formal_snapshot_replay` from `src.vision.snapshot.camera_snapshot` | production `src/` | HIGH | Builder validates artifact manifests through formal snapshot replay. Artifact-path-sensitive. Root `src/realsense_snapshot_builder.py` remains a public compatibility shim. |
-| `src/geometry_validity.py` | `build_camera_snapshot_request`, `evaluate_camera_snapshot_contract` from `src.camera_snapshot` | production `src/` | HIGH | Shared geometry path joins snapshot and grounding evidence before projector/planner consumers. |
-| `src/real_scene_shadow_pipeline.py` | `build_camera_snapshot_request`, `evaluate_camera_snapshot_contract` from `src.camera_snapshot` | production `src/` | HIGH | Replay/formal snapshot evidence feeds semantic shadow gate. |
+| `src/geometry_validity.py` | `build_camera_snapshot_request`, `evaluate_camera_snapshot_contract` from `src.vision.snapshot.camera_snapshot` | production `src/` | HIGH | Shared geometry path joins snapshot and grounding evidence before projector/planner consumers. H11-A8-3 migrated this first production batch import. |
+| `src/real_scene_shadow_pipeline.py` | `build_camera_snapshot_request`, `evaluate_camera_snapshot_contract` from `src.vision.snapshot.camera_snapshot` | production `src/` | HIGH | Replay/formal snapshot evidence feeds semantic shadow gate. H11-A8-3 migrated this first production batch import. |
 | `src/perception_shadow_pipeline.py` | `CameraSnapshotRequest`, `build_camera_snapshot_request`, `evaluate_camera_snapshot_contract` from `src.camera_snapshot`; `CameraSourceAdapterRequest`, `evaluate_camera_source_adapter`, `load_camera_source_config` from `src.camera_source_adapter` | production `src/` | HIGH | Orchestrates camera source, camera snapshot, grounding, geometry, projector, and replay-ready perception evidence. |
 | `src/simulation_runtime.py` | `build_camera_snapshot_request`, `evaluate_camera_snapshot_contract`; `build_camera_source_adapter_request`, `evaluate_camera_source_adapter` | production `src/` | HIGH | Shared evidence/runtime path used by many offline checks and reports; import churn can affect replay evidence. |
 | `src/evidence_exporter.py` | `format_camera_snapshot_report`, `format_camera_source_report` | production `src/` | HIGH | Writes camera snapshot/source evidence artifacts and summaries. Output field semantics must stay stable. |
@@ -265,8 +267,9 @@ Status: in progress.
 
 - H11-A8-1 migrated low-risk tests first to prove the package imports work.
 - H11-A8-2 migrated medium-risk CLI imports after focused CLI/parser tests pass.
+- H11-A8-3 migrated production batch 1:
+  - `src/geometry_validity.py`, `src/real_scene_shadow_pipeline.py`.
 - Migrate high-risk production consumers in small batches:
-  - batch 1: `src/geometry_validity.py`, `src/real_scene_shadow_pipeline.py`.
   - batch 2: `src/perception_shadow_pipeline.py`, `src/simulation_runtime.py`.
   - batch 3: `src/evidence_exporter.py`, `src/cli.py`.
 - Keep root shims until all docs and consumers no longer rely on root imports.

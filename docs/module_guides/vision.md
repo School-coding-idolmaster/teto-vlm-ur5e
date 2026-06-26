@@ -11,8 +11,9 @@ root import as a compatibility shim. H11-A7 moves the
 `realsense_snapshot_builder` implementation into the package path while
 keeping the root import as a compatibility shim. H11-A8-1 migrated focused
 tests to package import paths, and H11-A8-2 migrated the RealSense snapshot
-bundle CLI import to the package path. Production `src/` imports are not
-migrated yet.
+bundle CLI import to the package path. H11-A8-3 migrated the first production
+`src/` import batch, covering geometry validity and real-scene shadow pipeline.
+Other production `src/` imports are not migrated yet.
 
 ## Current Responsibility
 
@@ -52,12 +53,12 @@ Current root-level import paths remain public compatibility paths:
 - `src.camera_source_adapter`
 - `src.realsense_snapshot_builder`
 
-Script and focused test imports are migrating to package paths in H11-A8.
-Production `src/` import migration is still postponed because these root-level
-imports are broad and current public APIs are depended on by production code.
-Known production consumers include geometry validity, projector shadow,
-real-scene shadow, perception shadow, simulation runtime, `src.cli`, and
-evidence export.
+Script, focused test, geometry validity, and real-scene shadow imports have
+migrated to package paths in H11-A8. Remaining production `src/` import
+migration is still staged because these root-level imports are broad and
+current public APIs are depended on by production code. Known remaining
+production consumers include perception shadow, simulation runtime, `src.cli`,
+and evidence export.
 
 Do not rename, remove, or reinterpret public dataclasses, builder helpers,
 evaluators, report formatters, constants, modes, status values, or error codes

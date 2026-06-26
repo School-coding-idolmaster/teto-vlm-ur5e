@@ -7,7 +7,9 @@ H11-A4 added package-side compatibility adapter modules. H11-A5 moved only the
 `camera_source_adapter` implementation here. H11-A7 moved the
 `realsense_snapshot_builder` implementation here. H11-A8-1 migrated focused
 tests to package imports, and H11-A8-2 migrated the RealSense snapshot bundle
-CLI import. Production `src/` imports have not migrated yet.
+CLI import. H11-A8-3 migrated the first production `src/` import batch:
+`src/geometry_validity.py` and `src/real_scene_shadow_pipeline.py`. Remaining
+production `src/` imports have not migrated yet.
 
 Current implementation status:
 
@@ -36,5 +38,6 @@ mutate constants, hide errors, or start services.
 `src/vision/snapshot/__init__.py` remains conservative and does not re-export
 APIs from the package root. Import concrete adapter modules directly.
 
-Future H11-A8-3 should stage production `src/` import migration while keeping
-root modules as compatibility shims for one more compatibility round.
+Future H11-A8 work should continue staging production `src/` import migration
+while keeping root modules as compatibility shims for one more compatibility
+round.
